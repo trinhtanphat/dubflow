@@ -2,9 +2,6 @@ name: Deploy Cloudflare
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/production-qualification-20260905
 
 permissions:
   contents: read
