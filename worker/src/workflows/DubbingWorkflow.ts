@@ -5,7 +5,7 @@ import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { ContainerMediaProcessor } from '../services/media/container';
-import { WorkersAIAsrProvider } from '../services/asr/workers-ai';
+import { createAsrProvider } from '../services/asr/router';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
 import { runDubbingPipeline, type DubbingWorkflowParams } from './pipeline';
 
@@ -18,7 +18,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         jobs: new JobRepository(this.env.DB),
         media: new ContainerMediaProcessor(this.env.FFMPEG_CONTAINER),
         bucket: this.env.MEDIA,
-        asr: new WorkersAIAsrProvider(this.env.AI),
+        asr: createAsrProvider(this.env.AI, this.env.DEEPGRAM_API_KEY),
         segments: new SegmentRepository(this.env.DB),
         translation: new WorkersAITranslationProvider(this.env.AI),
       },

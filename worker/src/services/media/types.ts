@@ -4,8 +4,15 @@ export type AudioChunk = {
   durationMs: number;
 };
 
+export type ExportClip = {
+  segmentId: string;
+  startMs: number;
+  endMs: number;
+  objectKey: string;
+};
+
 export interface MediaProcessor {
   probe(objectKey: string): Promise<{ durationMs: number }>;
   extractAudioChunks(projectId: string, objectKey: string): Promise<AudioChunk[]>;
-  renderExport(projectId: string): Promise<{ exportObjectKey: string }>;
+  renderExport(projectId: string, objectKey: string, clips: ExportClip[]): Promise<{ exportObjectKey: string }>;
 }

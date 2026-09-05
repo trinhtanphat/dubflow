@@ -2,15 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
 describe('dubbing workflow pipeline', () => {
-  it('runs media -> bounded chunk ASR -> persist -> translate in order', async () => {
+  it('runs media -> diarized bounded chunk ASR -> persist -> translate in order', async () => {
     const calls: string[] = [];
     const project = {
       id: 'project-1', userId: 'dev-user', title: 'Episode', sourceLanguage: 'zh' as const,
       targetLanguage: 'vi' as const, status: 'ready' as const, sourceObjectKey: 'projects/project-1/source/movie.mp4',
     };
     const persisted = [
-      { id: 'seg-a', projectId: 'project-1', speakerId: null, startMs: 0, endMs: 1000, sourceText: '你好', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
-      { id: 'seg-b', projectId: 'project-1', speakerId: null, startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
+      { id: 'seg-a', projectId: 'project-1', speakerId: 'spk-a', startMs: 0, endMs: 1000, sourceText: '你好', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
+      { id: 'seg-b', projectId: 'project-1', speakerId: 'spk-b', startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
     ];
     const jobs = {
       async setProgress(_id: string, _progress: number, step: string) { calls.push(`job:${step}`); },
@@ -41,12 +41,18 @@ describe('dubbing workflow pipeline', () => {
     const asr = {
       async transcribe() {
         calls.push(`asr:${asrIndex}`);
-        const text = asrIndex++ === 0 ? '你好' : '再见';
-        return { text, segments: [{ startMs: 0, endMs: 1000, text }] };
+        const current = asrIndex++;
+        const text = current === 0 ? '你好' : '再见';
+        return { text, segments: [{ startMs: 0, endMs: 1000, text, speakerIndex: current }] };
       },
     };
+    let persistedAsrInput: Array<{ id: string; speakerId?: string | null; startMs: number; endMs: number; sourceText: string }> = [];
     const segments = {
-      async replaceFromAsr() { calls.push('segments:replace'); return persisted; },
+      async replaceFromAsr(_projectId: string, _userId: string, input: typeof persistedAsrInput) {
+        calls.push('segments:replace');
+        persistedAsrInput = input;
+        return persisted;
+      },
       async setTranslationResult(_p: string, id: string) { calls.push(`segments:translate:${id}`); return null; },
     };
     const translation = {
@@ -68,6 +74,10 @@ describe('dubbing workflow pipeline', () => {
     expect(calls.indexOf('asr:0')).toBeLessThan(calls.indexOf('r2:1'));
     expect(calls.indexOf('r2:1')).toBeLessThan(calls.indexOf('asr:1'));
     expect(calls.indexOf('segments:replace')).toBeLessThan(calls.indexOf('translation:batch'));
+    expect(persistedAsrInput).toHaveLength(2);
+    expect(persistedAsrInput[0].speakerId).toMatch(/^spk_[0-9a-f]{8}$/);
+    expect(persistedAsrInput[1].speakerId).toMatch(/^spk_[0-9a-f]{8}$/);
+    expect(persistedAsrInput[0].speakerId).not.toBe(persistedAsrInput[1].speakerId);
     expect(calls).toContain('project:needs_review');
     expect(calls).toContain('job:needs_review');
   });

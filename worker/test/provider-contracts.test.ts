@@ -54,8 +54,14 @@ const dubbingWorkflow = {
   },
 } satisfies Env['DUBBING_WORKFLOW'];
 
+const exportWorkflow = {
+  async create(_input: { id?: string; params?: unknown }) {
+    return { id: 'export-workflow-1' };
+  },
+} satisfies Env['EXPORT_WORKFLOW'];
+
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI, R2, Container and Workflow bindings plus the Google secret', () => {
+  it('accepts portable AI, R2, Container and both Workflow bindings plus provider secrets', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
@@ -63,13 +69,17 @@ describe('Cloudflare provider contracts', () => {
       ASSETS: { fetch: async () => new Response('asset') },
       FFMPEG_CONTAINER: ffmpegContainer,
       DUBBING_WORKFLOW: dubbingWorkflow,
+      EXPORT_WORKFLOW: exportWorkflow,
       GOOGLE_CLOUD_TRANSLATE_API_KEY: 'secret',
+      ELEVENLABS_API_KEY: 'voice-secret',
+      ELEVENLABS_DEFAULT_VOICE_ID: 'voice-id',
     } satisfies Env;
 
     expect(env.MEDIA).toBe(bucket);
     expect(env.AI).toBe(ai);
     expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
+    expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
     expect(env.GOOGLE_CLOUD_TRANSLATE_API_KEY).toBe('secret');
   });
 });
