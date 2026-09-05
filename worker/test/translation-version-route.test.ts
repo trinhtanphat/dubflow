@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
+import type { UsageStore } from '../src/db/usage';
 import { createTranslationRoutes } from '../src/routes/translation';
 
 type SegmentRow = {
@@ -59,11 +60,30 @@ class FakeDb implements D1DatabaseLike {
   prepare(sql: string) { return new Statement(this, sql); }
 }
 
+const noOpUsage = (): Pick<UsageStore, 'record'> => ({
+  async record(input) {
+    return {
+      inserted: true,
+      event: {
+        id: 'fixture-usage',
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        kind: input.kind,
+        units: input.units,
+        provider: input.provider,
+        creditRate: 0,
+        credits: 0,
+        idempotencyKey: input.idempotencyKey ?? null,
+        createdAt: '2026-09-05T17:47:00Z',
+      },
+    };
+  },
+});
+
 function makeApp() {
   const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/projects', createTranslationRoutes(() => ({
-    async record(input: unknown) { return { inserted: true, event: input }; },
-  })));
+  app.route('/api/projects', createTranslationRoutes(noOpUsage));
   return app;
 }
 
