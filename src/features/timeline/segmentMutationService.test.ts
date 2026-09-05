@@ -17,6 +17,7 @@ const before: Segment = {
   endMs: 3_000,
   sourceText: 'hello beautiful world',
   translatedText: 'xin chao the gioi',
+  version: 2,
 };
 
 function cloud(segment: Segment, overrides: Partial<CloudSegment> = {}): CloudSegment {
@@ -31,7 +32,7 @@ function cloud(segment: Segment, overrides: Partial<CloudSegment> = {}): CloudSe
     translationEngine: 'workers-ai',
     translationStatus: 'completed',
     voiceStatus: 'pending',
-    version: 2,
+    version: segment.version,
     splitParentId: null,
     ...overrides,
   };
@@ -41,15 +42,15 @@ function makeDeps() {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   let splitChildId = 'worker-child-1';
   const deps: SegmentMutationDeps = {
-    async patchSegment(projectId: string, segmentId: string, patch: SegmentPatch) {
-      calls.push({ method: 'patchSegment', args: [projectId, segmentId, patch] });
-      return cloud({ ...before, ...patch, speakerId: before.speakerId } as Segment, { version: 3 });
+    async patchSegment(projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) {
+      calls.push({ method: 'patchSegment', args: [projectId, segmentId, expectedVersion, patch] });
+      return cloud({ ...before, ...patch, speakerId: before.speakerId } as Segment, { version: expectedVersion + 1 });
     },
     async splitSegment(projectId: string, segmentId: string, playheadMs: number) {
       calls.push({ method: 'splitSegment', args: [projectId, segmentId, playheadMs] });
-      const left = cloud({ ...before, endMs: playheadMs, sourceText: 'hello beautiful', translatedText: 'xin chao' });
+      const left = cloud({ ...before, endMs: playheadMs, sourceText: 'hello beautiful', translatedText: 'xin chao' }, { version: 3 });
       const right = cloud(
-        { ...before, id: splitChildId, startMs: playheadMs, sourceText: 'world', translatedText: 'the gioi' },
+        { ...before, id: splitChildId, startMs: playheadMs, sourceText: 'world', translatedText: 'the gioi', version: 1 },
         { splitParentId: segmentId, version: 1 },
       );
       return { left, right };
@@ -68,6 +69,7 @@ function makeDeps() {
         endMs: original.endMs,
         sourceText: original.sourceText,
         translatedText: original.translatedText,
+        version: 4,
       }, { version: 4 });
     },
   };
@@ -79,18 +81,18 @@ function makeDeps() {
 }
 
 describe('segment mutation service', () => {
-  it('persists timing first and returns a canonical history mutation', async () => {
+  it('persists timing first with the canonical expected revision and returns the persisted revision', async () => {
     const { deps, calls } = makeDeps();
     const mutation = await commitSegmentTiming('project-1', before, { startMs: 1_200, endMs: 3_200 }, deps);
 
     expect(calls).toEqual([
-      { method: 'patchSegment', args: ['project-1', 's1', { startMs: 1_200, endMs: 3_200 }] },
+      { method: 'patchSegment', args: ['project-1', 's1', 2, { startMs: 1_200, endMs: 3_200 }] },
     ]);
     expect(mutation).toEqual({
       kind: 'timing',
       segmentId: 's1',
       before,
-      after: { ...before, startMs: 1_200, endMs: 3_200 },
+      after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
     });
   });
 
@@ -100,14 +102,14 @@ describe('segment mutation service', () => {
 
     expect(mutation.kind).toBe('split');
     expect(mutation.originalBefore).toEqual(before);
-    expect(mutation.leftAfter).toMatchObject({ id: 's1', endMs: 2_000, speakerId: 'unassigned' });
-    expect(mutation.rightAfter).toMatchObject({ id: 'worker-child-1', startMs: 2_000, speakerId: 'unassigned' });
+    expect(mutation.leftAfter).toMatchObject({ id: 's1', endMs: 2_000, speakerId: 'unassigned', version: 3 });
+    expect(mutation.rightAfter).toMatchObject({ id: 'worker-child-1', startMs: 2_000, speakerId: 'unassigned', version: 1 });
   });
 
-  it('persists inverse timing and split operations for undo', async () => {
+  it('uses the last canonical timing revision for inverse persistence', async () => {
     const { deps, calls } = makeDeps();
     const timing: TimingMutation = {
-      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200 },
+      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
     };
     const split: SplitMutation = await commitSegmentSplit('project-1', before, 2_000, deps);
     calls.length = 0;
@@ -117,7 +119,7 @@ describe('segment mutation service', () => {
 
     expect(calls[0]).toEqual({
       method: 'patchSegment',
-      args: ['project-1', 's1', { startMs: 1_000, endMs: 3_000 }],
+      args: ['project-1', 's1', 3, { startMs: 1_000, endMs: 3_000 }],
     });
     expect(calls[1]).toEqual({
       method: 'restoreSplit',
@@ -146,16 +148,16 @@ describe('segment mutation service', () => {
     expect(replayed.originalBefore).toEqual(before);
   });
 
-  it('returns the unchanged mutation shape for durable timing redo', async () => {
+  it('uses the stored pre-edit revision for the current timing redo contract', async () => {
     const fixture = makeDeps();
     const mutation: EditorMutation = {
-      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200 },
+      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
     };
 
     const replayed = await persistRedo('project-1', mutation, fixture.deps);
 
     expect(fixture.calls).toEqual([
-      { method: 'patchSegment', args: ['project-1', 's1', { startMs: 1_200, endMs: 3_200 }] },
+      { method: 'patchSegment', args: ['project-1', 's1', 2, { startMs: 1_200, endMs: 3_200 }] },
     ]);
     expect(replayed).toEqual(mutation);
   });
