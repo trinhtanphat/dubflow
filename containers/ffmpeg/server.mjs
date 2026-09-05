@@ -124,10 +124,12 @@ async function renderExport(input) {
     if (outside) throw new Error(`Dubbed clip ${outside.segmentId} exceeds source duration.`);
 
     const clipPaths = [];
+    const clipDurationsMs = [];
     for (let index = 0; index < input.clips.length; index += 1) {
       const path = join(root, `dub-${String(index).padStart(5, '0')}.audio`);
       await downloadObject(input.clips[index].objectKey, path);
       clipPaths.push(path);
+      clipDurationsMs.push(await durationMs(path));
     }
 
     const output = join(root, 'dubbed.mp4');
@@ -137,6 +139,7 @@ async function renderExport(input) {
       durationMs: sourceDurationMs,
       clips: input.clips,
       clipPaths,
+      clipDurationsMs,
     });
     await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
 
