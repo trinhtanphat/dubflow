@@ -12,6 +12,7 @@ class MemoryProjectStore implements ProjectStore {
     return this.project?.id === id && this.project.userId === userId ? this.project : null;
   }
   async setSourceObject() {}
+  async setStatus() {}
 }
 
 class MemoryBucket {
