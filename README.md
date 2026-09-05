@@ -1,79 +1,88 @@
 # YupVox (DubFlow repo)
 
-YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dubflow`; the production custom domain is configured as **`yupvox.qs3d.site`** (DNS hostnames are case-insensitive).
+YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dubflow`; the production custom domain is **`yupvox.qs3d.site`**.
 
 ## Implemented source
 
 - React + TypeScript dubbing workstation UI with dual-language script editor, speaker rows and multi-track timeline.
 - Source languages: auto / Chinese / English / Japanese / Korean; initial target: Vietnamese.
 - 5 GB source-file limit and 3-hour product duration limit.
-- Cloudflare Worker API with D1 project storage and R2 multipart upload (25 MiB recommended parts; the Worker never buffers a 5 GB source body).
+- Cloudflare Worker API with D1 project storage and R2 multipart upload; the Worker never buffers a 5 GB source body.
 - Persisted segment repository/edit API.
 - Workers AI translation provider using `@cf/meta/m2m100-1.2b`.
-- Official Google Cloud Translation v2 provider and `workers-ai` / `google` / `compare` routing.
-- Workers AI ASR adapter using `@cf/openai/whisper-large-v3-turbo` in `transcribe` mode with VAD.
-- Voice provider boundary that **does not claim Vietnamese TTS or voice cloning** until a live capability check explicitly verifies it.
+- Official Google Cloud Translation provider and `workers-ai` / `google` / `compare` routing.
+- Workers AI ASR adapter using `@cf/openai/whisper-large-v3-turbo`.
+- Voice provider boundary that **does not** claim Vietnamese TTS or voice cloning until a live capability check explicitly verifies it.
 - Media-processing boundary that reports `MEDIA_PROCESSOR_UNAVAILABLE` until an FFmpeg Cloudflare Container is actually configured; export is never faked.
-- No GitHub Actions. `.github/workflows` is forbidden by a repository guard.
+- `GET /api/ready` checks that the production D1 `projects` schema exists before the deployment is considered ready.
+- GitHub Actions CI/CD is enabled for this public repository.
 
 ## Cloudflare target
 
-Account ID is configured in `wrangler.jsonc`:
+Account ID:
 
 ```text
 6c5207813df3d5b83b9508125e0e9e12
 ```
 
-Worker custom domain:
+Production custom domain:
 
 ```text
 yupvox.qs3d.site
 ```
 
-`wrangler.jsonc` uses Workers Static Assets with `/api/*` running Worker-first, plus bindings for D1 (`DB`), R2 (`MEDIA`) and Workers AI (`AI`).
+`wrangler.jsonc` uses Workers Static Assets with `/api/*` running Worker-first, D1 binding `DB`, R2 binding `MEDIA`, and Workers AI binding `AI`.
 
-## One-time Cloudflare resource setup
+## Automatic resource provisioning
 
-Authenticate Wrangler from a machine/session that can access Cloudflare:
+Wrangler 4.45+ supports automatic provisioning for draft D1/R2 bindings. This repository deliberately does not commit an account-specific D1 UUID or fake placeholder. On first authenticated deploy Wrangler creates the missing resources and links them to the Worker.
+
+## GitHub Actions
+
+`.github/workflows/ci.yml` runs on pushes and pull requests and performs a real dependency install, test suite, TypeScript/Vite production build, and Wrangler dry-run.
+
+`.github/workflows/deploy-cloudflare.yml` runs on `main` and manual dispatch. It requires this GitHub Actions secret:
+
+```text
+CLOUDFLARE_API_TOKEN
+```
+
+The Cloudflare account ID is already pinned in `wrangler.jsonc` and in the deploy workflow, so it is not treated as a secret.
+
+Cloudflare recommends an API token scoped to the target account/zone with the permissions required to edit Workers and the bound resources. Never commit the token itself.
+
+Optional Google translation support can use this GitHub Actions secret:
+
+```text
+GOOGLE_CLOUD_TRANSLATE_API_KEY
+```
+
+When present, the deploy workflow syncs it into the Worker secret named `GOOGLE_CLOUD_TRANSLATE_API_KEY`. If absent, YupVox still retains the Workers AI translation path and the Google provider remains unavailable until configured.
+
+## Local deployment
+
+Authenticate once:
 
 ```bash
 npx wrangler login
 ```
 
-Create resources:
-
-```bash
-npx wrangler d1 create dubflow-db
-npx wrangler r2 bucket create dubflow-media
-```
-
-Copy the D1 UUID returned by `wrangler d1 create` into `wrangler.jsonc`, replacing:
-
-```text
-REPLACE_WITH_D1_DATABASE_ID
-```
-
-Apply the schema:
-
-```bash
-npx wrangler d1 migrations apply dubflow-db --remote
-```
-
-Google translation uses the **official** Cloud Translation API. Store the credential only as a Cloudflare secret:
-
-```bash
-npx wrangler secret put GOOGLE_CLOUD_TRANSLATE_API_KEY
-```
-
-Then verify and deploy:
+Then:
 
 ```bash
 npm install
-npm run verify
-npx wrangler deploy
+npm run deploy
 ```
 
-The custom-domain declaration makes Cloudflare attach the Worker to `yupvox.qs3d.site` and manage the DNS/certificate when the hostname is eligible.
+The fail-closed deploy sequence is:
+
+1. `npm run verify`
+2. `wrangler deploy --dry-run`
+3. `wrangler deploy`
+4. `wrangler d1 migrations apply DB --remote`
+5. readiness polling at `https://yupvox.qs3d.site/api/ready`
+
+A deployment is not reported ready until the custom domain responds successfully **and** the D1 `projects` table exists.
 
 ## Safety / truthfulness boundaries
 

@@ -1,16 +1,17 @@
 {
   "name": "dubflow",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "test": "vitest run",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
-    "verify:no-actions": "node scripts/verify-no-github-actions.mjs",
-    "verify": "npm run verify:no-actions && npm run test && npm run build",
-    "deploy": "wrangler deploy"
+    "verify:deploy-config": "node --test tests/deploy-config.test.mjs tests/deploy-plan.test.mjs tests/verify-deployment.test.mjs tests/deployment-status.test.mjs",
+    "verify": "npm run verify:deploy-config && npm run test && npm run build",
+    "deploy": "node scripts/cloudflare-deploy.mjs",
+    "deploy:raw": "wrangler deploy"
   },
   "dependencies": {
     "hono": "^4.9.0",
@@ -24,6 +25,6 @@
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
     "vitest": "^3.2.4",
-    "wrangler": "^4.30.0"
+    "wrangler": "^4.45.0"
   }
 }
