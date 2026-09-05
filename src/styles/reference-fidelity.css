@@ -235,4 +235,31 @@
 
   .studio-pro-shell.reference-fidelity .ruler-content.timeline-content-row { min-height: 29px; }
   .studio-pro-shell.reference-fidelity .reference-playhead { color: var(--yv-accent); }
+
+  .studio-pro-shell.reference-fidelity .reference-feature-strip {
+    min-height: var(--yv-ref-footer-height);
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: center;
+    padding: 0 24px;
+    gap: 14px;
+    background: #09090d;
+    border-top: 1px solid #1e1c25;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-feature-strip > span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    color: #d0cad8;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-feature-strip small {
+    color: #8a8292;
+    font-size: 9px;
+  }
 }
