@@ -224,7 +224,7 @@ describe('SegmentRepository durable revision-aware mutations', () => {
     });
     const repository = new SegmentRepository(db);
 
-    const restored = await repository.restoreSplit('project-1', 's1', 3, 'child-1', 2, 'dev-user', {
+    const restored = await repository.restoreSplit('project-1', 's1', 'dev-user', 3, 'child-1', 2, {
       startMs: 1_000,
       endMs: 3_000,
       sourceText: 'hello beautiful world',
@@ -250,9 +250,9 @@ describe('SegmentRepository durable revision-aware mutations', () => {
       startMs: 1_000, endMs: 3_000, sourceText: 'x', translatedText: 'y', speakerId: 'speaker-1',
     };
 
-    await expect(repository.restoreSplit('project-1', 's1', 2, 'child-1', 2, 'dev-user', original))
+    await expect(repository.restoreSplit('project-1', 's1', 'dev-user', 2, 'child-1', 2, original))
       .rejects.toMatchObject({ code: 'SEGMENT_VERSION_CONFLICT' });
-    await expect(repository.restoreSplit('project-1', 's1', 3, 'child-1', 1, 'dev-user', original))
+    await expect(repository.restoreSplit('project-1', 's1', 'dev-user', 3, 'child-1', 1, original))
       .rejects.toMatchObject({ code: 'SEGMENT_VERSION_CONFLICT' });
     expect(db.batches).toHaveLength(0);
   });
@@ -277,7 +277,7 @@ describe('SegmentRepository durable revision-aware mutations', () => {
     });
     const repository = new SegmentRepository(db);
 
-    await expect(repository.restoreSplit('project-1', 's1', 3, 'child-other', 2, 'dev-user', {
+    await expect(repository.restoreSplit('project-1', 's1', 'dev-user', 3, 'child-other', 2, {
       startMs: 1_000, endMs: 3_000, sourceText: 'x', translatedText: 'y', speakerId: 'speaker-1',
     })).rejects.toMatchObject({ code: 'SPLIT_LINEAGE_MISMATCH' });
 
