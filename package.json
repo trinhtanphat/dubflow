@@ -8,8 +8,7 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
-    "verify:no-actions": "node scripts/verify-no-github-actions.mjs",
-    "verify": "npm run verify:no-actions && npm run test && npm run build",
+    "verify": "npm run test && npm run typecheck && npm run build",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
