@@ -1,6 +1,15 @@
 import type { Segment, StudioProject } from '../features/timeline/types';
+import type { SegmentField } from './autosaveDraft';
 
 export const HISTORY_LIMIT = 100;
+
+export type FieldMutation = {
+  kind: 'fields';
+  segmentId: string;
+  fields: SegmentField[];
+  before: Segment;
+  after: Segment;
+};
 
 export type TimingMutation = {
   kind: 'timing';
@@ -16,7 +25,7 @@ export type SplitMutation = {
   rightAfter: Segment;
 };
 
-export type EditorMutation = TimingMutation | SplitMutation;
+export type EditorMutation = FieldMutation | TimingMutation | SplitMutation;
 export type EditorHistory = { past: EditorMutation[]; future: EditorMutation[] };
 export type HistoryStep = { history: EditorHistory; mutation: EditorMutation | null };
 
@@ -62,6 +71,23 @@ export function applyMutation(
   mutation: EditorMutation,
   direction: 'forward' | 'backward',
 ): StudioProject {
+  if (mutation.kind === 'fields') {
+    const source = direction === 'forward' ? mutation.after : mutation.before;
+    return {
+      ...project,
+      segments: project.segments.map((segment) => {
+        if (segment.id !== mutation.segmentId) return segment;
+        const next = { ...segment };
+        for (const field of mutation.fields) {
+          if (field === 'sourceText') next.sourceText = source.sourceText;
+          else if (field === 'translatedText') next.translatedText = source.translatedText;
+          else next.speakerId = source.speakerId;
+        }
+        return next;
+      }),
+    };
+  }
+
   if (mutation.kind === 'timing') {
     const replacement = direction === 'forward' ? mutation.after : mutation.before;
     return {
