@@ -1,6 +1,6 @@
 # DubFlow
 
-DubFlow is a Cloudflare-first AI dubbing studio with a high-density workstation UI, editable bilingual script, speaker tracks, media preview and a multi-track timeline. The interface is intentionally matched closely to the supplied visual reference while retaining DubFlow branding.
+DubFlow is a Cloudflare-first AI dubbing studio with a high-density workstation UI, editable bilingual script, speaker tracks, media preview and a multi-track timeline. The interface is intentionally matched closely to the supplied visual reference.
 
 ## Phase 1 included
 
@@ -13,7 +13,7 @@ DubFlow is a Cloudflare-first AI dubbing studio with a high-density workstation 
 - Dual-language player subtitles.
 - Editable source + Vietnamese script inspector.
 - Deterministic speaker waveform tracks and selectable timeline segments.
-- Wrangler-only delivery policy; no GitHub Actions workflow.
+- GitHub Actions CI for tests, typecheck and production build.
 
 Phase 2 will add the real multipart R2 upload, FFmpeg container pipeline, Workers AI ASR/TTS, Workers AI + official Google Cloud Translation routing, persisted editable segments and export.
 
@@ -24,6 +24,21 @@ npm install
 npm run verify
 npm run dev
 ```
+
+## GitHub Actions CI
+
+`.github/workflows/ci.yml` runs on pull requests, pushes to the active development branches and `main`, and manual `workflow_dispatch` runs.
+
+The CI gate runs:
+
+```bash
+npm install --no-audit --no-fund
+npm run test
+npm run typecheck
+npm run build
+```
+
+CI is verification-only. Cloudflare deployment is not triggered automatically and no Cloudflare secrets are required by the CI workflow.
 
 ## Cloudflare setup
 
@@ -56,7 +71,7 @@ npx wrangler deploy
 
 ## Delivery rule
 
-DubFlow does **not** use GitHub Actions. `npm run verify:no-actions` fails if `.github/workflows` appears in the repository.
+Pull requests should be merged only after the GitHub Actions `CI / Test, typecheck, build` gate is green. Cloudflare deployment remains an explicit separate action.
 
 ## Architecture documents
 
