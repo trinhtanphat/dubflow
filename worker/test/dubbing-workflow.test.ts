@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
+import type { UsageStore } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
+
+const noOpUsage: Pick<UsageStore, 'record'> = {
+  async record(input) {
+    return {
+      inserted: true,
+      event: {
+        id: `usage-${input.kind}`,
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        kind: input.kind,
+        units: input.units,
+        provider: input.provider,
+        creditRate: 0,
+        credits: 0,
+        idempotencyKey: input.idempotencyKey ?? null,
+        createdAt: '2026-09-05T17:27:00Z',
+      },
+    };
+  },
+};
 
 describe('dubbing workflow pipeline', () => {
   it('runs media -> diarized bounded chunk ASR -> persist -> translate in order', async () => {
@@ -66,7 +88,7 @@ describe('dubbing workflow pipeline', () => {
 
     await runDubbingPipeline(
       { projectId: 'project-1', userId: 'dev-user', jobId: 'job-1' },
-      { projects, jobs, media, bucket, asr, segments, translation },
+      { projects, jobs, media, bucket, asr, asrProvider: 'deepgram-nova-3', segments, translation, usage: noOpUsage },
       step,
     );
 
@@ -105,8 +127,10 @@ describe('dubbing workflow pipeline', () => {
         async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; },
       },
       asr: { async transcribe() { throw new Error('provider down'); } },
+      asrProvider: 'deepgram-nova-3',
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noOpUsage,
     };
 
     await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step)).rejects.toThrow('provider down');
@@ -140,8 +164,10 @@ describe('dubbing workflow pipeline', () => {
       },
       bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
+      asrProvider: 'deepgram-nova-3',
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noOpUsage,
     };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 
