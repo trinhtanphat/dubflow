@@ -1,0 +1,127 @@
+.timeline-title {
+  min-height: 36px;
+}
+
+.timeline-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-toolbar button {
+  min-width: 28px;
+  height: 24px;
+  border: 1px solid #2b2d37;
+  border-radius: 6px;
+  color: #aeb1be;
+  background: #15161d;
+  font-size: 9px;
+}
+
+.timeline-toolbar button:hover {
+  border-color: #5d3a83;
+  color: #eee8f8;
+  background: #1b1721;
+}
+
+.timeline-workspace {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  min-height: 0;
+  max-height: 330px;
+  border-top: 1px solid #1c1e25;
+}
+
+.timeline-labels {
+  position: relative;
+  z-index: 10;
+  overflow: hidden;
+  background: #101117;
+  border-right: 1px solid #242630;
+}
+
+.timeline-label-spacer {
+  height: 26px;
+  border-bottom: 1px solid #242630;
+}
+
+.timeline-labels .track-label {
+  width: 100%;
+  height: 43px;
+  border-right: 0;
+  border-bottom: 1px solid #1c1e25;
+}
+
+.timeline-labels .track-label:nth-child(2) {
+  height: 55px;
+}
+
+.timeline-scroll-viewport {
+  position: relative;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: #3a3c48 #101117;
+}
+
+.timeline-canvas {
+  position: relative;
+  min-width: 100%;
+  min-height: 1px;
+  user-select: none;
+  background: #0d0e13;
+}
+
+.timeline-content-row {
+  position: relative;
+  width: 100%;
+  border-bottom: 1px solid #1c1e25;
+  background: linear-gradient(90deg, rgba(255,255,255,.012), transparent);
+}
+
+.timeline-canvas > .ruler-content {
+  height: 26px;
+  background: repeating-linear-gradient(90deg, transparent 0 71px, rgba(255,255,255,.032) 71px 72px);
+}
+
+.timeline-canvas > .video-thumbnails {
+  height: 55px;
+}
+
+.timeline-canvas > .segment-lane {
+  height: 43px;
+}
+
+.timeline-canvas > .waveform-row {
+  height: 42px;
+}
+
+.timeline-canvas .video-thumbnails {
+  grid-template-columns: repeat(12, minmax(54px, 1fr));
+}
+
+.timeline-canvas .waveform-content {
+  width: 100%;
+  height: 100%;
+}
+
+.timeline-canvas .timeline-playhead {
+  top: 0;
+  bottom: 0;
+}
+
+.timeline-canvas .timeline-playhead i {
+  width: 10px;
+  height: 10px;
+  box-shadow: 0 0 0 3px rgba(139,54,244,.18);
+}
+
+@media (max-width: 640px) {
+  .timeline-workspace {
+    grid-template-columns: 104px minmax(0, 1fr);
+  }
+
+  .timeline-canvas .timeline-playhead {
+    display: block;
+  }
+}
