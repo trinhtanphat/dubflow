@@ -47,7 +47,7 @@ test('uses a compact-height reference layout instead of clipping the timeline at
   assert.match(referenceCss, /@media\s*\(min-width:\s*1280px\)\s*and\s*\(max-height:\s*820px\)/);
   assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.center-stage\s*\{[^}]*grid-template-rows:/s);
   assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.reference-feature-strip\s*\{[^}]*min-height:/s);
-  assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.reference-drop-zone\s*\{[^}]*height:\s*96px/s);
+  assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.reference-drop-zone\s*\{[^}]*\n\s*height:\s*96px/s);
 });
 
 test('gives Chinese source text an explicit CJK fallback contract', () => {
