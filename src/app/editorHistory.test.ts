@@ -16,6 +16,7 @@ const base: Segment = {
   endMs: 2000,
   sourceText: 'hello world',
   translatedText: 'xin chao',
+  version: 1,
 };
 
 const project: StudioProject = {
