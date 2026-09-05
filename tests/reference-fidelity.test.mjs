@@ -8,6 +8,8 @@ const main = read('src/main.tsx');
 const referenceCss = read('src/styles/reference-fidelity.css');
 const uploadPanel = read('src/features/upload/UploadPanel.tsx');
 const studioShell = read('src/app/StudioShell.tsx');
+const videoStage = read('src/features/player/VideoStage.tsx');
+const ci = read('.github/workflows/ci.yml');
 
 test('defines canonical 1448x1086 reference geometry tokens', () => {
   assert.match(tokens, /--yv-ref-topbar-height:\s*76px/);
@@ -27,6 +29,23 @@ test('keeps reference fidelity active on common 1364px desktop screens', () => {
   assert.ok(desktopBreakpoints.some((value) => value <= 1280), 'reference layer must activate at or below 1280px so 1364px desktop does not fall back to the legacy shell');
   assert.match(referenceCss, /var\(--yv-ref-rail-width\)/);
   assert.match(referenceCss, /var\(--yv-ref-footer-height\)/);
+});
+
+test('qualifies the exact 1364x767 desktop viewport in CI', () => {
+  assert.match(ci, /--window-size=1364,767/);
+  assert.match(ci, /yupvox-1364x767-reference\.png/);
+  assert.match(ci, /path:\s*\|[\s\S]*yupvox-v2-2-reference\.png[\s\S]*yupvox-1364x767-reference\.png/);
+});
+
+test('uses a compact-height reference layout instead of clipping the timeline at 1364x767', () => {
+  assert.match(referenceCss, /@media\s*\(min-width:\s*1280px\)\s*and\s*\(max-height:\s*820px\)/);
+  assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.center-stage\s*\{[^}]*grid-template-rows:/s);
+  assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.reference-feature-strip\s*\{[^}]*min-height:/s);
+});
+
+test('gives Chinese source text an explicit CJK fallback contract', () => {
+  assert.match(videoStage, /className="subtitle-source"\s+lang="zh-CN"/);
+  assert.match(referenceCss, /Noto Sans CJK SC|Noto Sans SC/);
 });
 
 test('orders the live left rail as upload, speakers, languages, then dubbing action', () => {
