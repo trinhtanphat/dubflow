@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-
-const source = readFileSync(new URL('./StudioShell.tsx', import.meta.url), 'utf8');
+import source from './StudioShell.tsx?raw';
 
 describe('StudioShell command surface wiring', () => {
   it('does not leave the command palette trigger as a no-op', () => {
