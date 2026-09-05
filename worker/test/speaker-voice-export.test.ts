@@ -12,7 +12,7 @@ describe('speaker-specific voice export', () => {
     }));
     const deps = {
       projects: {
-        getByIdForUser: vi.fn(async () => ({ id: 'p1', sourceObjectKey: 'projects/p1/source/video.mp4' })),
+        getByIdForUser: vi.fn(async () => ({ id: 'p1', sourceObjectKey: 'projects/p1/source/video.mp4', durationMs: 1000 })),
         setStatus: vi.fn(async () => {}),
         setExportObject: vi.fn(async () => {}),
       },
@@ -38,6 +38,7 @@ describe('speaker-specific voice export', () => {
       bucket: { put: vi.fn(async () => ({})) },
       voice: { generate: voiceGenerate },
       media: { renderExport: vi.fn(async () => ({ exportObjectKey: 'projects/p1/export/dubbed.mp4' })) },
+      usage: { record: vi.fn(async (input: unknown) => ({ inserted: true, event: input })) },
     };
 
     await runExportPipeline({ projectId: 'p1', userId: 'dev-user', jobId: 'j1' }, deps as any, step() as any);
