@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer, type StudioAction } from './studioState';
-import { createStudioEditorActions } from './StudioShell';
+import { createStudioEditorActions, StudioShell } from './StudioShell';
 import { createVoicePreviewAction } from './voicePreviewAction';
 import type { SplitMutation, TimingMutation } from './editorHistory';
 
@@ -63,6 +63,31 @@ describe('StudioShell live voice preview wiring', () => {
     const preview = createVoicePreviewAction({ setBusy: vi.fn(), setError: vi.fn(), services });
     await preview('   ');
     expect(services.fetchVoicePreview).not.toHaveBeenCalled();
+  });
+});
+
+describe('StudioShell autosave integration', () => {
+  it('renders the selected local draft and reports dirty state without mutating canonical text', () => {
+    let state = createInitialStudioState({ ...mockProject, id: 'cloud-p1' });
+    const canonical = state.project.segments[0]!;
+    state = studioReducer(state, {
+      type: 'editDraft',
+      segmentId: canonical.id,
+      patch: { translatedText: 'Bản nháp local chưa lưu' },
+    });
+
+    const html = renderToStaticMarkup(
+      <StudioShell
+        state={state}
+        dispatch={() => {}}
+        selectedSegment={state.project.segments[0]}
+        selectedSpeaker={state.project.speakers.find((speaker) => speaker.id === canonical.speakerId)}
+      />,
+    );
+
+    expect(state.project.segments[0]?.translatedText).toBe(canonical.translatedText);
+    expect(html).toContain('Bản nháp local chưa lưu');
+    expect(html).toContain('Chưa lưu');
   });
 });
 
