@@ -48,6 +48,16 @@ The exact-head CI screenshot is reviewed as a presentation qualification, not as
 
 Studio Pro V2 source acceptance covers the real media player, direct timeline manipulation and split behavior, revision-aware undo/redo, autosave conflict recovery, Workers AI / Google / Compare translation modes, the command palette and centralized keyboard commands, four inspector tabs, fail-closed visual lip-sync capability, and reduced-motion behavior. These are source/CI qualifications only; production runtime remains **UNQUALIFIED** until the documented Container credential and real-media fixture gates pass.
 
+## Phase 3B usage ledger source qualification
+
+Phase 3B source support records durable, replay-idempotent usage events for ASR, translation, generated TTS audio, and final render. Canonical storage/API units are **seconds** for ASR/TTS/render and Unicode source-character counts for translation. Provider-qualified operation keys include the durable job retry generation, and summaries count only completed usage phases so a started-only or replayed operation cannot inflate totals.
+
+Generated TTS completion is measured from the persisted dubbed-audio artifact through the media probe contract. If a current retry generation already has a durable voice artifact plus a started usage event but no completed event, recovery probes that artifact and completes metering instead of regenerating voice solely for accounting. Final render usage is measured from the canonical project duration in seconds.
+
+Authorized usage summaries are exposed for the current server-derived user and owned projects. Dashboard usage loading/errors are isolated from durable project/job state. `users.credit_balance` remains **informational and read-only** in Phase 3B: there is no credit decrement, reservation, quota gate, payment flow, upgrade CTA, provider pricing table, or cost enforcement, and usage `cost_basis` remains zero.
+
+The Phase 3B source acceptance gate is part of `npm run verify` and rejects stale minute-based canonical contracts, TTS-character accounting, missing idempotency/authorization invariants, and Phase 3B credit-write/billing paths. This qualifies repository source/configuration only. Pricing or credit enforcement, rate limits, observability policy, public sharing/download permission policy, and production-runtime qualification are explicitly deferred.
+
 ## Qualification status
 
 A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
