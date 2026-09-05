@@ -1,0 +1,3 @@
+.upload-progress { height: 7px; border-radius: 99px; background: rgba(255,255,255,.07); overflow: hidden; margin-top: 10px; }
+.upload-progress > i { display: block; height: 100%; background: linear-gradient(90deg,#8254ff,#b18cff); transition: width .2s ease; }
+.error-banner { margin: 8px 0 0; padding: 9px 10px; border: 1px solid rgba(255,92,123,.36); background: rgba(255,92,123,.09); border-radius: 8px; color: #ff9eb1; font-size: 12px; }
