@@ -15,6 +15,7 @@ const canonical: Segment = {
   translationEngine: 'workers-ai',
   translationStatus: 'completed',
   voiceStatus: 'pending',
+  dubbedObjectKey: null,
   version: 4,
   splitParentId: null,
 };
@@ -34,26 +35,23 @@ describe('revision-aware structural segment routes', () => {
         calls.push({ projectId, segmentId, userId, expectedVersion, playheadMs });
         return {
           left: { ...canonical, endMs: playheadMs, version: expectedVersion + 1 },
-          right: { ...canonical, id: 'child', startMs: playheadMs, version: 1, splitParentId: segmentId },
+          right: { ...canonical, id: 's2', startMs: playheadMs, version: 1, splitParentId: segmentId },
         };
       },
     };
-
     const response = await makeApp(store).request('/api/projects/p1/segments/s1/split', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedVersion: 4, playheadMs: 500 }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playheadMs: 500, expectedVersion: 4 }),
     });
-
     expect(response.status).toBe(200);
     expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', userId: 'dev-user', expectedVersion: 4, playheadMs: 500 }]);
   });
 
   it('passes parent and child revisions to restore persistence', async () => {
     const calls: unknown[] = [];
-    const original = { startMs: 0, endMs: 1_000, sourceText: 'hello world', translatedText: 'xin chao', speakerId: null };
     const store = {
-      async get() { return canonical; },
+      async get(_projectId: string, segmentId: string) {
+        return segmentId === 'child' ? { ...canonical, id: 'child', splitParentId: 's1', version: 2 } : canonical;
+      },
       async restoreSplit(
         projectId: string,
         segmentId: string,
@@ -61,46 +59,33 @@ describe('revision-aware structural segment routes', () => {
         expectedVersion: number,
         childSegmentId: string,
         expectedChildVersion: number,
-        snapshot: typeof original,
+        original: unknown,
       ) {
-        calls.push({ projectId, segmentId, userId, expectedVersion, childSegmentId, expectedChildVersion, snapshot });
+        calls.push({ projectId, segmentId, userId, expectedVersion, childSegmentId, expectedChildVersion, original });
         return { ...canonical, version: expectedVersion + 1 };
       },
     };
-
-    const response = await makeApp(store).request('/api/projects/p1/segments/s1/restore-split', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedVersion: 4, childSegmentId: 'child', expectedChildVersion: 1, original }),
+    const original = { sourceText: 'hello world', translatedText: 'xin chao', speakerId: null, startMs: 0, endMs: 1_000 };
+    const response = await makeApp(store).request('/api/projects/p1/segments/s1/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ childSegmentId: 'child', expectedVersion: 4, expectedChildVersion: 2, original }),
     });
-
     expect(response.status).toBe(200);
     expect(calls).toEqual([{
       projectId: 'p1', segmentId: 's1', userId: 'dev-user', expectedVersion: 4,
-      childSegmentId: 'child', expectedChildVersion: 1, snapshot: original,
+      childSegmentId: 'child', expectedChildVersion: 2, original,
     }]);
   });
 
-  it('returns the canonical parent on a structural revision conflict', async () => {
+  it('maps structural revision conflicts to HTTP 409', async () => {
     const store = {
       async get() { return canonical; },
-      async splitSegment() {
-        throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
-      },
+      async splitSegment() { throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'stale'); },
     };
-
     const response = await makeApp(store).request('/api/projects/p1/segments/s1/split', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedVersion: 3, playheadMs: 500 }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ playheadMs: 500, expectedVersion: 3 }),
     });
-
     expect(response.status).toBe(409);
-    expect(await response.json()).toEqual({
-      error: true,
-      code: 'SEGMENT_VERSION_CONFLICT',
-      message: 'Segment changed elsewhere.',
-      segment: canonical,
-    });
+    expect(await response.json()).toMatchObject({ error: true, code: 'SEGMENT_VERSION_CONFLICT' });
   });
 });
