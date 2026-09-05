@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { Env } from './env';
+import { requestTelemetryMiddleware, type WorkerHonoEnv } from './observability/requestTelemetry';
 import { healthPayload } from './routes/health';
 import { checkReadiness } from './routes/readiness';
 import { createProjectsRoutes } from './routes/projects';
@@ -14,8 +14,9 @@ import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<WorkerHonoEnv>();
 
+app.use('/api/*', requestTelemetryMiddleware());
 app.get('/api/health', (c) => c.json(healthPayload()));
 app.get('/api/ready', async (c) => {
   const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY);
