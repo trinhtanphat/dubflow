@@ -169,6 +169,7 @@ export function ScriptInspector({
             <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
             <textarea
               aria-label="Lời thoại gốc"
+              lang="zh-CN"
               value={visibleSegment.sourceText}
               onChange={(event) => editField(
                 { sourceText: event.target.value },
