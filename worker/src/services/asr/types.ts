@@ -1,6 +1,11 @@
 import type { SourceLanguage } from '../../domain/project';
 
-export type AsrSegment = { startMs: number; endMs: number; text: string };
+export type AsrSegment = {
+  startMs: number;
+  endMs: number;
+  text: string;
+  speakerIndex?: number;
+};
 export type AsrChunkResult = { text: string; segments: AsrSegment[] };
 export type AsrContext = { sourceLanguage: SourceLanguage };
 
