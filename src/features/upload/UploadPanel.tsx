@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import { Panel } from '../../components/ui/Panel';
 import { validateMediaFile } from './mediaValidation';
-import { createProject, type CloudProject } from '../projects/projectApi';
-import { uploadMediaMultipart } from './multipartApi';
+import type { CloudProject } from '../projects/projectApi';
+import { runCloudUploadFlow, type CloudUploadFlowResult } from './cloudUploadFlow';
 import './upload.css';
 
-export function UploadPanel() {
+export type UploadPanelProps = {
+  onProcessStarted?: (result: CloudUploadFlowResult) => void;
+};
+
+export function UploadPanel({ onProcessStarted }: UploadPanelProps) {
   const [file, setFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState<CloudProject['sourceLanguage']>('zh');
   const [error, setError] = useState('');
@@ -27,14 +31,13 @@ export function UploadPanel() {
     if (!file || busy) return;
     setBusy(true); setError(''); setProgress(0);
     try {
-      setStatus('Đang tạo project trên D1…');
-      const project = await createProject(file.name.replace(/\.[^.]+$/, '') || 'YupVox project', sourceLanguage);
-      setStatus('Đang upload multipart trực tiếp vào R2…');
-      const completed = await uploadMediaMultipart(project.id, file, fetch, setProgress);
-      setStatus(`Đã upload R2: ${completed.objectKey}. Media processor/ASR sẽ chạy khi container được cấu hình.`);
+      setStatus('Đang tạo project D1 và upload multipart vào R2…');
+      const result = await runCloudUploadFlow(file, sourceLanguage, undefined, setProgress);
+      setStatus(`Đã upload R2 · Workflow ${result.job.workflowId} đang xử lý AI.`);
+      onProcessStarted?.(result);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Upload thất bại.');
-      setStatus('Upload chưa hoàn tất.');
+      setError(cause instanceof Error ? cause.message : 'Upload hoặc khởi động AI thất bại.');
+      setStatus('Cloud pipeline chưa khởi động hoàn tất.');
     } finally {
       setBusy(false);
     }
@@ -69,9 +72,9 @@ export function UploadPanel() {
           <option value="vi">🇻🇳 Tiếng Việt</option>
         </select>
         <button type="button" className="primary-button" disabled={!file || busy} onClick={upload}>
-          {busy ? `Đang tải ${Math.round(progress * 100)}%` : 'Tạo project & tải lên Cloudflare R2'}
+          {busy ? `Đang tải ${Math.round(progress * 100)}%` : 'Bắt đầu Dubbing AI'}
         </button>
-        <p className="phase-note">Workers AI + Google Translate đã có provider source; FFmpeg/TTS chỉ bật khi live capability pass.</p>
+        <p className="phase-note">FFmpeg → Whisper → dịch chạy bằng Cloudflare Workflow. Editor tự tải transcript khi AI hoàn tất.</p>
       </Panel>
     </>
   );

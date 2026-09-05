@@ -10,9 +10,18 @@ import { parseByteRange } from '../services/media';
 export type MediaStoreFactory = (env: Env) => ProjectStore;
 export type MediaBucketFactory = (env: Env) => R2ReadableBucketLike;
 
+function readableMediaBucket(env: Env): R2ReadableBucketLike {
+  return {
+    async get(key, options) {
+      if (!env.MEDIA.get) return null;
+      return env.MEDIA.get(key, options);
+    },
+  };
+}
+
 export function createMediaRoutes(
   makeStore: MediaStoreFactory = (env) => new ProjectRepository(env.DB),
-  makeBucket: MediaBucketFactory = (env) => env.MEDIA,
+  makeBucket: MediaBucketFactory = readableMediaBucket,
 ) {
   const routes = new Hono<{ Bindings: Env }>();
 

@@ -13,14 +13,14 @@ export type R2ObjectLike = {
 export type R2Range = { offset: number; length: number };
 export type R2GetOptions = { range?: R2Range };
 
-export type R2ObjectBodyLike = {
-  key: string;
-  size: number;
-  body: ReadableStream;
+export type R2ObjectBodyLike = R2ObjectLike & {
+  body: ReadableStream<Uint8Array>;
   httpEtag?: string;
   httpMetadata?: { contentType?: string };
   range?: R2Range;
 };
+
+export type R2GetObjectLike = R2ObjectBodyLike;
 
 export interface R2MultipartUploadLike {
   readonly key: string;
@@ -33,6 +33,8 @@ export interface R2MultipartUploadLike {
 export interface R2BucketLike {
   createMultipartUpload(key: string): Promise<R2MultipartUploadLike>;
   resumeMultipartUpload(key: string, uploadId: string): R2MultipartUploadLike;
+  get?(key: string, options?: R2GetOptions): Promise<R2ObjectBodyLike | null>;
+  put?(key: string, value: R2UploadValue): Promise<R2ObjectLike>;
 }
 
 export interface R2ReadableBucketLike {

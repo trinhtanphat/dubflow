@@ -9,6 +9,8 @@ type StudioTopbarProps = {
   projectTitle: string;
   saveState: SaveState;
   cloudState: CloudState;
+  cloudProgress?: number;
+  cloudDetail?: string;
   canUndo: boolean;
   canRedo: boolean;
   onUndo(): void;
@@ -36,6 +38,8 @@ export function StudioTopbar({
   projectTitle,
   saveState,
   cloudState,
+  cloudProgress,
+  cloudDetail,
   canUndo,
   canRedo,
   onUndo,
@@ -46,6 +50,12 @@ export function StudioTopbar({
 }: StudioTopbarProps) {
   const save = saveCopy[saveState];
   const cloud = cloudCopy[cloudState];
+  const progress = typeof cloudProgress === 'number' && Number.isFinite(cloudProgress)
+    ? Math.round(Math.max(0, Math.min(1, cloudProgress)) * 100)
+    : null;
+  const cloudStatusDetail = cloudState === 'processing'
+    ? `${cloudDetail?.trim() || cloud.detail}${progress === null ? '' : ` · ${progress}%`}`
+    : cloudDetail?.trim() || cloud.detail;
 
   return (
     <header className="topbar studio-topbar">
@@ -67,7 +77,7 @@ export function StudioTopbar({
         </div>
         <div className="studio-statuses">
           <StatusBadge label={save.label} detail={save.detail} tone={save.tone} />
-          <StatusBadge label={cloud.label} detail={cloud.detail} tone={cloud.tone} />
+          <StatusBadge label={cloud.label} detail={cloudStatusDetail} tone={cloud.tone} />
         </div>
         <div className="studio-history-actions" aria-label="Lịch sử chỉnh sửa">
           <Tooltip text={canUndo ? 'Hoàn tác' : 'Chưa có thay đổi để hoàn tác'}>

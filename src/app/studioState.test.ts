@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from '../features/timeline/math';
+import type { StudioProject } from '../features/timeline/types';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer } from './studioState';
 
@@ -28,36 +29,57 @@ describe('studioReducer', () => {
   it('keeps playback controls transient and clamps volume', () => {
     const initial = createInitialStudioState(mockProject);
     expect(initial.playback).toEqual({ playing: false, rate: 1, volume: 1, muted: false });
-
     const playing = studioReducer(initial, { type: 'setPlaying', playing: true });
     expect(playing.playback.playing).toBe(true);
     expect(playing.project).toBe(initial.project);
-
-    const rated = studioReducer(initial, { type: 'setPlaybackRate', rate: 1.5 });
-    expect(rated.playback.rate).toBe(1.5);
-
-    const tooLoud = studioReducer(initial, { type: 'setVolume', volume: 2 });
-    expect(tooLoud.playback.volume).toBe(1);
-    const tooQuiet = studioReducer(initial, { type: 'setVolume', volume: -1 });
-    expect(tooQuiet.playback.volume).toBe(0);
-
-    const muted = studioReducer(initial, { type: 'toggleMuted' });
-    expect(muted.playback.muted).toBe(true);
+    expect(studioReducer(initial, { type: 'setPlaybackRate', rate: 1.5 }).playback.rate).toBe(1.5);
+    expect(studioReducer(initial, { type: 'setVolume', volume: 2 }).playback.volume).toBe(1);
+    expect(studioReducer(initial, { type: 'setVolume', volume: -1 }).playback.volume).toBe(0);
+    expect(studioReducer(initial, { type: 'toggleMuted' }).playback.muted).toBe(true);
   });
 
   it('keeps timeline viewport state transient and bounded', () => {
     const initial = createInitialStudioState(mockProject);
     expect(initial.timelineView).toEqual({ pixelsPerSecond: 1, scrollLeft: 0, viewportWidth: 0 });
-
-    const zoomedOut = studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 0 });
-    expect(zoomedOut.timelineView.pixelsPerSecond).toBe(MIN_PIXELS_PER_SECOND);
-    const zoomedIn = studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 1000 });
-    expect(zoomedIn.timelineView.pixelsPerSecond).toBe(MAX_PIXELS_PER_SECOND);
-
-    const scrolled = studioReducer(initial, { type: 'setTimelineScroll', scrollLeft: -50 });
-    expect(scrolled.timelineView.scrollLeft).toBe(0);
+    expect(studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 0 }).timelineView.pixelsPerSecond).toBe(MIN_PIXELS_PER_SECOND);
+    expect(studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 1000 }).timelineView.pixelsPerSecond).toBe(MAX_PIXELS_PER_SECOND);
+    expect(studioReducer(initial, { type: 'setTimelineScroll', scrollLeft: -50 }).timelineView.scrollLeft).toBe(0);
     const resized = studioReducer(initial, { type: 'setTimelineViewport', viewportWidth: -100 });
     expect(resized.timelineView.viewportWidth).toBe(0);
     expect(resized.project).toBe(initial.project);
+  });
+
+  it('hydrates a persisted cloud project while retaining a matching selection and stopping playback', () => {
+    let state = createInitialStudioState(mockProject);
+    state = studioReducer(state, { type: 'selectSegment', segmentId: 's2' });
+    state = studioReducer(state, { type: 'setPlaying', playing: true });
+    const cloudProject: StudioProject = {
+      ...mockProject,
+      id: 'cloud-p1',
+      title: 'Cloud project',
+      durationMs: 5000,
+      segments: [
+        { ...mockProject.segments[1]!, startMs: 1200, endMs: 2200 },
+        { ...mockProject.segments[2]!, startMs: 2500, endMs: 3500 },
+      ],
+    };
+    const next = studioReducer(state, { type: 'hydrateProject', project: cloudProject });
+    expect(next.project.id).toBe('cloud-p1');
+    expect(next.selectedSegmentId).toBe('s2');
+    expect(next.playheadMs).toBe(1200);
+    expect(next.playback.playing).toBe(false);
+  });
+
+  it('selects the first persisted segment when the previous selection disappeared', () => {
+    const initial = createInitialStudioState(mockProject);
+    const cloudProject: StudioProject = {
+      ...mockProject,
+      id: 'cloud-p2',
+      durationMs: 1000,
+      segments: [{ id: 'cloud-s1', speakerId: 'lin', startMs: 100, endMs: 500, sourceText: '新', translatedText: 'mới' }],
+    };
+    const next = studioReducer(initial, { type: 'hydrateProject', project: cloudProject });
+    expect(next.selectedSegmentId).toBe('cloud-s1');
+    expect(next.playheadMs).toBe(100);
   });
 });

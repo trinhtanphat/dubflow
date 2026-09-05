@@ -21,4 +21,24 @@ describe('StudioTopbar', () => {
     expect(html).toContain('aria-label="Mở bảng lệnh"');
     expect(html).toContain('Tập 01');
   });
+
+  it('shows bounded live cloud progress without losing the processing state', () => {
+    const html = renderToStaticMarkup(
+      <StudioTopbar
+        projectTitle="Cloud episode"
+        saveState="offline"
+        cloudState="processing"
+        cloudProgress={0.47}
+        cloudDetail="transcribing"
+        canUndo={false}
+        canRedo={false}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onOpenCommands={() => {}}
+      />,
+    );
+    expect(html).toContain('Processing');
+    expect(html).toContain('47%');
+    expect(html).toContain('transcribing');
+  });
 });
