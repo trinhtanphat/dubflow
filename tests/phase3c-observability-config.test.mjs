@@ -23,3 +23,22 @@ test('Phase 3C config enables full invocation logs, query redaction and five-per
     head_sampling_rate: 0.05,
   });
 });
+
+test('Phase 3C config reserves five distinct one-minute rate limiter namespaces', () => {
+  const byName = Object.fromEntries((config.ratelimits ?? []).map((entry) => [entry.name, entry]));
+  assert.equal(byName.RATE_LIMIT_PROCESS?.simple?.limit, 4);
+  assert.equal(byName.RATE_LIMIT_EXPORT?.simple?.limit, 4);
+  assert.equal(byName.RATE_LIMIT_TRANSLATE?.simple?.limit, 30);
+  assert.equal(byName.RATE_LIMIT_VOICE?.simple?.limit, 30);
+  assert.equal(byName.RATE_LIMIT_UPLOAD?.simple?.limit, 20);
+
+  const entries = [
+    byName.RATE_LIMIT_PROCESS,
+    byName.RATE_LIMIT_EXPORT,
+    byName.RATE_LIMIT_TRANSLATE,
+    byName.RATE_LIMIT_VOICE,
+    byName.RATE_LIMIT_UPLOAD,
+  ];
+  assert.ok(entries.every((entry) => entry?.simple?.period === 60));
+  assert.equal(new Set(entries.map((entry) => entry?.namespace_id)).size, 5);
+});
