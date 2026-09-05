@@ -29,7 +29,7 @@ function deps() {
       setExportObject: vi.fn(async () => {}),
     },
     jobs: {
-      getForProject: vi.fn(async () => ({ status: 'running' as const })),
+      getForProject: vi.fn(async (): Promise<{ status: 'running' | 'cancelled' }> => ({ status: 'running' })),
       setProgress: vi.fn(async () => {}),
       fail: vi.fn(async () => {}),
       complete: vi.fn(async () => {}),
@@ -90,7 +90,7 @@ describe('final dubbing export pipeline', () => {
     let checks = 0;
     d.jobs.getForProject.mockImplementation(async () => {
       checks += 1;
-      return { status: checks >= 2 ? 'cancelled' as const : 'running' as const };
+      return { status: checks >= 2 ? 'cancelled' : 'running' };
     });
 
     await expect(runExportPipeline({ projectId: 'p1', userId: 'dev-user', jobId: 'j1' }, d as any, step() as any))
