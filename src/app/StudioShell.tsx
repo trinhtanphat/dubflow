@@ -23,12 +23,12 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       />
 
       <main className="studio-grid" aria-label="DubFlow dubbing workspace">
-        <aside className="left-rail">
+        <aside className="left-rail" aria-label="Nguồn media và nhân vật">
           <UploadPanel />
           <SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />
         </aside>
 
-        <section className="center-stage">
+        <section className="center-stage" aria-label="Không gian chỉnh sửa">
           <VideoStage segment={selectedSegment} playheadMs={state.playheadMs} durationMs={state.project.durationMs} />
           <Timeline project={state.project} playheadMs={state.playheadMs} selectedSegmentId={state.selectedSegmentId} dispatch={dispatch} />
         </section>
