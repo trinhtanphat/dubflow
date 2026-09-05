@@ -31,7 +31,34 @@ class Statement implements D1StatementLike {
 
   async run() {
     this.db.runs.push(this);
-    return {};
+    if (this.sql.includes('UPDATE segments') && this.sql.includes('SET source_text = ?')) {
+      const [
+        sourceText,
+        translatedText,
+        speakerId,
+        startMs,
+        endMs,
+        voiceStatus,
+        segmentId,
+        projectId,
+        userId,
+        expectedVersion,
+      ] = this.values as [string, string, string | null, number, number, string, string, string, string, number | undefined];
+      const project = this.db.projects.find((item) => item.id === projectId && item.user_id === userId);
+      const row = project ? this.db.rows.find((item) => item.id === segmentId && item.project_id === projectId) : undefined;
+      if (!row || (expectedVersion !== undefined && row.version !== expectedVersion)) {
+        return { meta: { changes: 0 } };
+      }
+      row.source_text = sourceText;
+      row.translated_text = translatedText;
+      row.speaker_id = speakerId;
+      row.start_ms = startMs;
+      row.end_ms = endMs;
+      row.voice_status = voiceStatus;
+      row.version += 1;
+      return { meta: { changes: 1 } };
+    }
+    return { meta: { changes: 1 } };
   }
 
   async all<T>() {
@@ -92,24 +119,38 @@ class RecordingDb implements D1DatabaseLike {
 }
 
 describe('SegmentRepository durable timing mutations', () => {
-  it('accepts a legal timing edit and invalidates voice state', async () => {
+  it('uses SQL compare-and-swap for a legal timing edit and returns the canonical revision', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    const updated = await (repository as any).updateSegment('project-1', 's1', 'dev-user', {
+    const updated = await (repository as any).updateSegment('project-1', 's1', 'dev-user', 3, {
       startMs: 1_200,
       endMs: 3_200,
     });
 
     expect(updated).toMatchObject({ id: 's1', startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', version: 4 });
     expect(db.runs).toHaveLength(1);
+    expect(db.runs[0]?.sql).toMatch(/version\s*=\s*\?/i);
+    expect(db.runs[0]?.values.at(-1)).toBe(3);
+  });
+
+  it('rejects a stale revision without changing the canonical row', async () => {
+    const db = new RecordingDb();
+    const repository = new SegmentRepository(db);
+
+    await expect((repository as any).updateSegment('project-1', 's1', 'dev-user', 2, {
+      translatedText: 'stale local text',
+    })).rejects.toMatchObject({ code: 'SEGMENT_VERSION_CONFLICT' });
+
+    expect(db.rows[0]?.translated_text).toBe('xin chao the gioi');
+    expect(db.rows[0]?.version).toBe(3);
   });
 
   it('rejects overlap against current project state without writing', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    await expect((repository as any).updateSegment('project-1', 's1', 'dev-user', {
+    await expect((repository as any).updateSegment('project-1', 's1', 'dev-user', 3, {
       startMs: 2_500,
       endMs: 4_500,
     })).rejects.toMatchObject({ code: 'SEGMENT_OVERLAP' });
