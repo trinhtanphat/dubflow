@@ -158,4 +158,40 @@
   .studio-pro-shell.reference-fidelity .speaker-card { min-height: 58px; border-radius: 7px; }
   .studio-pro-shell.reference-fidelity .left-rail select { min-height: 39px; }
   .studio-pro-shell.reference-fidelity .reference-dub-button { min-height: 42px; margin-top: 14px; }
+
+  .studio-pro-shell.reference-fidelity .script-inspector {
+    width: var(--yv-ref-rail-width);
+    padding: 17px 14px;
+    overflow: auto;
+    background: linear-gradient(180deg, #0f0f14, #0d0d12);
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-inspector-header { margin-bottom: 15px; }
+
+  .studio-pro-shell.reference-fidelity .reference-script-card {
+    border-radius: 8px;
+    padding: 12px 11px 10px;
+    background: #111016;
+    border: 1px solid #211f28;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-script-card textarea {
+    min-height: 46px;
+    font-size: 10px;
+    line-height: 1.5;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-translation-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-voice-assignment {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #1f1d25;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-voice-assignment select { min-height: 44px; }
 }
