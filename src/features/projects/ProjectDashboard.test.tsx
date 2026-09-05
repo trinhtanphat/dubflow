@@ -3,13 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CloudJob } from './jobApi';
 import type { CloudProject } from './projectApi';
 import { ProjectDashboard } from './ProjectDashboard';
+import type { UsageSummary } from './usageApi';
 
 const project: CloudProject = {
   id: 'p1', userId: 'dev-user', title: 'Episode 01', sourceLanguage: 'zh', targetLanguage: 'vi',
   status: 'needs_review', updatedAt: '2026-09-05T12:05:00Z',
 };
 
-const usageSummary = {
+const usageSummary: UsageSummary = {
   allocatedCredits: 50_000,
   usedCredits: 37,
   remainingCredits: 49_963,
