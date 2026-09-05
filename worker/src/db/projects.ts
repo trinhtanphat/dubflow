@@ -1,13 +1,24 @@
 import type { CreateProjectInput } from '../domain/project';
 
+export type ProjectStatus =
+  | 'draft'
+  | 'uploading'
+  | 'ready'
+  | 'processing'
+  | 'needs_review'
+  | 'failed'
+  | 'completed'
+  | 'cancelled';
+
 export type Project = {
   id: string;
   userId: string;
   title: string;
   sourceLanguage: CreateProjectInput['sourceLanguage'];
   targetLanguage: 'vi';
-  status: string;
+  status: ProjectStatus;
   sourceObjectKey?: string | null;
+  durationMs?: number | null;
   sizeBytes?: number | null;
 };
 
@@ -16,6 +27,7 @@ export interface ProjectStore {
   listByUser(userId: string): Promise<Project[]>;
   getByIdForUser(id: string, userId: string): Promise<Project | null>;
   setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
+  setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 }
 
 export interface D1StatementLike {
@@ -35,8 +47,9 @@ type ProjectRow = {
   title: string;
   source_language: CreateProjectInput['sourceLanguage'];
   target_language: 'vi';
-  status: string;
+  status: ProjectStatus;
   source_object_key?: string | null;
+  duration_ms?: number | null;
   size_bytes?: number | null;
 };
 
@@ -49,6 +62,7 @@ function fromRow(row: ProjectRow): Project {
     targetLanguage: row.target_language,
     status: row.status,
     sourceObjectKey: row.source_object_key,
+    durationMs: row.duration_ms,
     sizeBytes: row.size_bytes,
   };
 }
@@ -82,7 +96,7 @@ export class ProjectRepository implements ProjectStore {
 
   async listByUser(userId: string): Promise<Project[]> {
     const result = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, size_bytes
+      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, duration_ms, size_bytes
        FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
     ).bind(userId).all<ProjectRow>();
     return (result.results ?? []).map(fromRow);
@@ -90,7 +104,7 @@ export class ProjectRepository implements ProjectStore {
 
   async getByIdForUser(id: string, userId: string): Promise<Project | null> {
     const row = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, size_bytes
+      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, duration_ms, size_bytes
        FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
     ).bind(id, userId).first<ProjectRow>();
     return row ? fromRow(row) : null;
@@ -102,5 +116,20 @@ export class ProjectRepository implements ProjectStore {
        SET source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
     ).bind(objectKey, sizeBytes, id, userId).run();
+  }
+
+  async setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void> {
+    if (durationMs === undefined) {
+      await this.db.prepare(
+        `UPDATE projects SET status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+      ).bind(status, id, userId).run();
+      return;
+    }
+    if (!Number.isFinite(durationMs) || durationMs < 0) {
+      throw new Error('Project duration must be a non-negative finite number.');
+    }
+    await this.db.prepare(
+      `UPDATE projects SET status = ?, duration_ms = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+    ).bind(status, Math.round(durationMs), id, userId).run();
   }
 }

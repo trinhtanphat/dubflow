@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { R2BucketLike, R2MultipartUploadLike, R2UploadedPartLike } from '../src/cloudflare/r2';
-import type { Project, ProjectStore } from '../src/db/projects';
+import type { Project, ProjectStatus, ProjectStore } from '../src/db/projects';
 import { normalizeUploadInput, UploadInputError } from '../src/domain/upload';
 import { UploadService } from '../src/services/uploads';
 
@@ -16,6 +16,13 @@ class MemoryProjectStore implements ProjectStore {
   }
   async setSourceObject(_id: string, _userId: string, objectKey: string, sizeBytes: number) {
     this.saved = { key: objectKey, size: sizeBytes };
+    this.project.sourceObjectKey = objectKey;
+    this.project.sizeBytes = sizeBytes;
+    this.project.status = 'ready';
+  }
+  async setStatus(_id: string, _userId: string, status: ProjectStatus, durationMs?: number) {
+    this.project.status = status;
+    if (durationMs !== undefined) this.project.durationMs = durationMs;
   }
 }
 

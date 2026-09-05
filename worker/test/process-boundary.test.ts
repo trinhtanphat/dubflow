@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Project, ProjectStore } from '../src/db/projects';
+import type { Project, ProjectStatus, ProjectStore } from '../src/db/projects';
 import { ProcessService } from '../src/services/jobs';
 
 class Store implements ProjectStore {
@@ -8,6 +8,10 @@ class Store implements ProjectStore {
   async listByUser(): Promise<Project[]> { return [this.project]; }
   async getByIdForUser(id: string, userId: string) { return id === this.project.id && userId === this.project.userId ? this.project : null; }
   async setSourceObject() {}
+  async setStatus(_id: string, _userId: string, status: ProjectStatus, durationMs?: number) {
+    this.project.status = status;
+    if (durationMs !== undefined) this.project.durationMs = durationMs;
+  }
 }
 
 describe('media processing boundary', () => {
