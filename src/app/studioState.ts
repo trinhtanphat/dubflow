@@ -13,6 +13,7 @@ export type StudioAction =
   | { type: 'editSource'; segmentId: string; text: string }
   | { type: 'editTranslation'; segmentId: string; text: string }
   | { type: 'assignSpeaker'; segmentId: string; speakerId: string }
+  | { type: 'hydrateProject'; project: StudioProject }
   | { type: 'toggleLipSync' };
 
 export function createInitialStudioState(project: StudioProject): StudioState {
@@ -40,6 +41,18 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case 'assignSpeaker':
       if (!state.project.speakers.some((speaker) => speaker.id === action.speakerId)) return state;
       return updateSegment(state, action.segmentId, (segment) => ({ ...segment, speakerId: action.speakerId }));
+    case 'hydrateProject': {
+      const retained = action.project.segments.find((segment) => segment.id === state.selectedSegmentId);
+      const selected = retained ?? action.project.segments[0];
+      return {
+        ...state,
+        project: action.project,
+        selectedSegmentId: selected?.id ?? '',
+        playheadMs: retained
+          ? Math.max(0, Math.min(action.project.durationMs, state.playheadMs))
+          : selected?.startMs ?? 0,
+      };
+    }
     case 'toggleLipSync':
       return { ...state, lipSyncEnabled: !state.lipSyncEnabled };
     default:
