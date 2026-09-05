@@ -27,13 +27,23 @@ type ScriptInspectorProps = {
   voiceProviderLabel?: string;
   voiceBusy?: boolean;
   voiceError?: string;
-  onPreviewVoice?: (text: string) => void;
+  onPreviewVoice?: (text: string, voice?: string) => void;
 };
 
 function providerLabel(capabilities: VoiceCapabilities | null): string {
   if (capabilities?.provider === 'elevenlabs') return 'ElevenLabs';
   if (capabilities?.provider) return capabilities.provider;
   return 'Chưa cấu hình';
+}
+
+export function resolveSegmentSpeakerVoice(
+  segment: Pick<Segment, 'speakerId'>,
+  speakers: Speaker[],
+): string | undefined {
+  const speaker = speakers.find((candidate) => candidate.id === segment.speakerId);
+  if (speaker?.voiceProvider !== 'elevenlabs') return undefined;
+  const voiceId = speaker.voiceId?.trim();
+  return voiceId || undefined;
 }
 
 export function ScriptInspector({
@@ -94,11 +104,12 @@ export function ScriptInspector({
   };
   const previewEnabled = effectiveVoiceConfigured && !effectiveVoiceBusy && Boolean(segment.translatedText.trim());
   const selectedSpeaker = speakers.find((speaker) => speaker.id === segment.speakerId) ?? speakers[0];
+  const selectedVoice = resolveSegmentSpeakerVoice(segment, speakers);
   const previewVoice = () => {
     if (!previewEnabled) return;
     const text = segment.translatedText.trim();
-    if (onPreviewVoice) onPreviewVoice(text);
-    else void internalPreview(text);
+    if (onPreviewVoice) onPreviewVoice(text, selectedVoice);
+    else void internalPreview(text, selectedVoice);
   };
 
   return (
@@ -211,7 +222,7 @@ export function ScriptInspector({
           className="secondary-button"
           type="button"
           disabled={!previewEnabled}
-          title={effectiveVoiceConfigured ? `Tạo preview bằng ${effectiveVoiceProvider}` : 'Provider giọng chưa được cấu hình'}
+          title={effectiveVoiceConfigured ? `Tạo preview bằng ${effectiveVoiceProvider}${selectedVoice ? ' · giọng nhân vật đã gán' : ' · giọng mặc định'}` : 'Provider giọng chưa được cấu hình'}
           onClick={previewVoice}
         >{effectiveVoiceBusy ? 'Đang tạo giọng…' : `▷ Nghe thử giọng · ${effectiveVoiceConfigured ? effectiveVoiceProvider : 'Chưa cấu hình'}`}</button>
         <button
