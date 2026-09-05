@@ -30,9 +30,14 @@ export interface ProjectStore {
   setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 }
 
+export type D1RunResultLike = {
+  meta?: { changes?: number };
+  changes?: number;
+};
+
 export interface D1StatementLike {
   bind(...values: unknown[]): D1StatementLike;
-  run(): Promise<unknown>;
+  run(): Promise<D1RunResultLike>;
   all<T>(): Promise<{ results?: T[] }>;
   first<T>(): Promise<T | null>;
 }
