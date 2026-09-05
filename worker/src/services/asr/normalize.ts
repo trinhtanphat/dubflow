@@ -27,6 +27,9 @@ export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): Normaliz
       if (!Number.isFinite(segment.startMs) || !Number.isFinite(segment.endMs) || segment.endMs <= segment.startMs) {
         throw new AsrError('ASR_RANGE_INVALID', 'ASR segment end must be after start.');
       }
+      if (segment.speakerIndex !== undefined && (!Number.isInteger(segment.speakerIndex) || segment.speakerIndex < 0)) {
+        throw new AsrError('ASR_SPEAKER_INVALID', 'ASR speaker index must be a non-negative integer.');
+      }
       const startMs = segment.startMs + chunk.offsetMs;
       const endMs = segment.endMs + chunk.offsetMs;
       const identity = `${chunk.projectId}:${chunk.chunkId}:${index}:${startMs}:${endMs}`;
@@ -37,6 +40,7 @@ export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): Normaliz
         startMs,
         endMs,
         text: segment.text,
+        ...(segment.speakerIndex === undefined ? {} : { speakerIndex: segment.speakerIndex }),
       });
     });
   }
