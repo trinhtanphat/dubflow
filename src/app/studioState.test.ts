@@ -97,6 +97,47 @@ describe('studioReducer', () => {
     expect(state.history.future).toHaveLength(0);
   });
 
+  it('reconciles a redone split to the fresh Worker child id without adding history', () => {
+    const initial = createInitialStudioState(mockProject);
+    const original = initial.project.segments[0]!;
+    const midpoint = original.startMs + Math.floor((original.endMs - original.startMs) / 2);
+    const leftOld = { ...original, endMs: midpoint, sourceText: 'left old', translatedText: 'trai cu' };
+    const rightOld = { ...original, id: 'child-old', startMs: midpoint, sourceText: 'right old', translatedText: 'phai cu' };
+    const leftNew = { ...leftOld, sourceText: 'left canonical', translatedText: 'trai canonical' };
+    const rightNew = { ...rightOld, id: 'child-new', sourceText: 'right canonical', translatedText: 'phai canonical' };
+
+    let state = studioReducer(initial, {
+      type: 'commitSplitMutation',
+      originalBefore: original,
+      leftAfter: leftOld,
+      rightAfter: rightOld,
+    });
+    state = studioReducer(state, { type: 'selectSegment', segmentId: rightOld.id });
+    state = studioReducer(state, { type: 'applyUndoLocal' });
+    state = studioReducer(state, { type: 'applyRedoLocal' });
+    expect(state.selectedSegmentId).toBe(rightOld.id);
+    expect(state.history.past).toHaveLength(1);
+
+    state = studioReducer(state, {
+      type: 'reconcileLatestSplitMutation',
+      previousRightId: rightOld.id,
+      mutation: {
+        kind: 'split',
+        originalBefore: original,
+        leftAfter: leftNew,
+        rightAfter: rightNew,
+      },
+    } as any);
+
+    expect(state.project.segments.some((segment) => segment.id === rightOld.id)).toBe(false);
+    expect(state.project.segments.find((segment) => segment.id === rightNew.id)).toEqual(rightNew);
+    expect(state.project.segments.find((segment) => segment.id === original.id)).toEqual(leftNew);
+    expect(state.selectedSegmentId).toBe(rightNew.id);
+    expect(state.history.past).toHaveLength(1);
+    expect(state.history.future).toHaveLength(0);
+    expect((state.history.past[0] as any).rightAfter.id).toBe(rightNew.id);
+  });
+
   it('hydrates a persisted cloud project while retaining a matching selection and stopping playback', () => {
     let state = createInitialStudioState(mockProject);
     state = studioReducer(state, { type: 'selectSegment', segmentId: 's2' });
