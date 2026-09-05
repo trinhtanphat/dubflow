@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import { describe, expect, it } from 'vitest';
-import appCss from './app.css?raw';
+import appCss from './app.css?inline';
 
 const mediaDeclaration = '@media (prefers-reduced-motion: reduce)';
 const reducedMotionStart = appCss.indexOf(mediaDeclaration);
