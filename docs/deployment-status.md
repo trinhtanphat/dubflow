@@ -12,32 +12,40 @@ The first live Container deploy attempt on the reconciled source proved the exis
 
 ## Reconciled live dubbing source path
 
-The current reconciliation source implements:
+The current source implements:
 
 ```text
 R2 multipart media upload
 -> durable Cloudflare Workflow job
 -> FFmpeg Cloudflare Container probe + bounded 5-minute audio chunks
--> Workers AI Whisper ASR
--> deterministic/atomic D1 transcript persistence
+-> Deepgram Nova-3 diarized ASR when DEEPGRAM_API_KEY is configured
+   OR Workers AI Whisper fallback when it is absent
+-> deterministic/atomic D1 speaker + transcript persistence
 -> Workers AI translation by default
 -> project/job terminal state
--> Studio Pro poll + transcript/timeline hydration
+-> Studio poll + transcript/timeline hydration
 -> server-backed transcript editing and retranslation
+-> ElevenLabs segment TTS for export
+-> FFmpeg dubbed-audio timeline assembly/mux
+-> final R2 export artifact
 ```
 
-Google Translation remains an optional configured provider. Compare mode does not persist a winner until the user explicitly applies it.
+Deepgram speaker identities are currently **chunk-scoped**. A speaker index returned in one 5-minute request is not assumed to be the same person as the same index in another chunk. Cross-chunk identity stitching therefore remains unqualified and is not represented as implemented.
 
-TTS preview, voice regeneration/cloning, visual lip-sync rendering, and final dubbed export remain capability-gated and are not represented as production-ready by this source integration.
+Google Translation remains an optional configured provider. Compare mode does not persist a winner until the user explicitly applies it. Deepgram is also optional: without `DEEPGRAM_API_KEY`, the source falls back to Workers AI Whisper and `/api/ready` reports speaker diarization as unavailable while the base service can remain ready.
 
-## Studio V2.2 reference qualification
+The deploy workflow supports optional `GOOGLE_CLOUD_TRANSLATE_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_DEFAULT_VOICE_ID` GitHub secrets and syncs configured values into Worker secrets without committing them.
 
-Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference. The production shell activates the isolated `reference-fidelity` presentation layer and pins the approved desktop geometry contract: 76px topbar, 66px footer, 304px left/right rails, and a 16px player gutter that places the center media bounds at approximately x=320…1128.
+Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow. This is still distinct from production-runtime qualification: the repository must not claim a deployed export PASS until a real fixture produces and returns the final artifact. Voice cloning and visual lip-sync rendering remain capability-gated and unqualified.
 
-The exact-head CI screenshot is reviewed as a presentation qualification, not as a claim of literal pixel identity. The supplied reference contains a real wuxia video frame and uploaded-media metadata; the default repository demo intentionally has no source media and therefore renders the truthful empty-player state instead of fabricating footage or an uploaded file. This media-state difference is expected and does not qualify as a production runtime fixture.
+## Studio reference qualification
+
+Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
+
+The exact-head CI screenshot is reviewed as a presentation qualification, not as a claim of literal pixel identity. The supplied reference contains a real wuxia video frame and uploaded-media metadata; an empty source-media state must remain truthful rather than fabricating footage or an uploaded file. This media-state difference does not qualify as a production runtime fixture.
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow and return persisted translated segments visible in Studio Pro. If that live fixture has not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS.
+A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path.
 
-Cloudflare and Google API secret values are never committed to the repository.
+If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, and ElevenLabs secret values are never committed to the repository.
