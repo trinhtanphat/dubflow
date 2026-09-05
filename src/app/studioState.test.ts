@@ -112,9 +112,9 @@ describe('studioReducer', () => {
       leftAfter: leftOld,
       rightAfter: rightOld,
     });
-    state = studioReducer(state, { type: 'selectSegment', segmentId: rightOld.id });
     state = studioReducer(state, { type: 'applyUndoLocal' });
     state = studioReducer(state, { type: 'applyRedoLocal' });
+    state = studioReducer(state, { type: 'selectSegment', segmentId: rightOld.id });
     expect(state.selectedSegmentId).toBe(rightOld.id);
     expect(state.history.past).toHaveLength(1);
 
