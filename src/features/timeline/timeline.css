@@ -144,6 +144,57 @@
   outline-offset: 3px;
 }
 
+.timeline-canvas .segment-block {
+  padding: 0;
+  overflow: visible;
+  touch-action: none;
+}
+
+.segment-block__body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: inherit;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: inherit;
+  cursor: grab;
+  touch-action: none;
+}
+
+.segment-block__body:active {
+  cursor: grabbing;
+}
+
+.segment-block.is-previewing {
+  opacity: .9;
+  box-shadow: 0 0 0 1px rgba(180,92,255,.42), 0 6px 18px rgba(0,0,0,.2);
+}
+
+.segment-resize-handle {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(196, 137, 255, .9);
+  opacity: .86;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.segment-resize-handle--left { left: -4px; }
+.segment-resize-handle--right { right: -4px; }
+.segment-resize-handle:hover,
+.segment-resize-handle:focus-visible { opacity: 1; }
+
 @media (max-width: 640px) {
   .timeline-workspace {
     grid-template-columns: 104px minmax(0, 1fr);

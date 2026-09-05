@@ -9,8 +9,8 @@ describe('dubbing workflow pipeline', () => {
       targetLanguage: 'vi' as const, status: 'ready' as const, sourceObjectKey: 'projects/project-1/source/movie.mp4',
     };
     const persisted = [
-      { id: 'seg-a', projectId: 'project-1', speakerId: null, startMs: 0, endMs: 1000, sourceText: '你好', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', version: 1 },
-      { id: 'seg-b', projectId: 'project-1', speakerId: null, startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', version: 1 },
+      { id: 'seg-a', projectId: 'project-1', speakerId: null, startMs: 0, endMs: 1000, sourceText: '你好', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', version: 1, splitParentId: null },
+      { id: 'seg-b', projectId: 'project-1', speakerId: null, startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', version: 1, splitParentId: null },
     ];
     const jobs = {
       async setProgress(_id: string, _progress: number, step: string) { calls.push(`job:${step}`); },

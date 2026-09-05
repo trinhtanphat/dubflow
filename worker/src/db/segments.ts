@@ -1,9 +1,13 @@
 import type { D1DatabaseLike } from './projects';
 import {
+  MIN_SEGMENT_MS,
   normalizeAsrSegments,
   normalizeSegmentPatch,
+  normalizeSegmentRestoreInput,
+  splitTextAtRatio,
   type PersistedAsrSegment,
   type SegmentPatch,
+  type SegmentRestoreInput,
 } from '../domain/segment';
 
 export type Segment = {
@@ -18,12 +22,13 @@ export type Segment = {
   translationStatus: string;
   voiceStatus: string;
   version: number;
+  splitParentId: string | null;
 };
 
 type SegmentRow = {
   id: string; project_id: string; speaker_id: string | null; start_ms: number; end_ms: number;
   source_text: string; translated_text: string; translation_engine: string; translation_status: string;
-  voice_status: string; version: number;
+  voice_status: string; version: number; split_parent_id?: string | null;
 };
 
 function fromRow(row: SegmentRow): Segment {
@@ -31,6 +36,7 @@ function fromRow(row: SegmentRow): Segment {
     id: row.id, projectId: row.project_id, speakerId: row.speaker_id, startMs: row.start_ms, endMs: row.end_ms,
     sourceText: row.source_text, translatedText: row.translated_text, translationEngine: row.translation_engine,
     translationStatus: row.translation_status, voiceStatus: row.voice_status, version: row.version,
+    splitParentId: row.split_parent_id ?? null,
   };
 }
 
@@ -38,6 +44,9 @@ export interface SegmentStore {
   list(projectId: string, userId: string): Promise<Segment[]>;
   get(projectId: string, segmentId: string, userId: string): Promise<Segment | null>;
   updateText(projectId: string, segmentId: string, userId: string, patch: SegmentPatch): Promise<Segment | null>;
+  updateSegment(projectId: string, segmentId: string, userId: string, patch: SegmentPatch): Promise<Segment | null>;
+  splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }>;
+  restoreSplit(projectId: string, segmentId: string, childSegmentId: string, userId: string, original: SegmentRestoreInput): Promise<Segment>;
   setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null>;
   replaceFromAsr(projectId: string, userId: string, segments: PersistedAsrSegment[]): Promise<Segment[]>;
 }
@@ -50,8 +59,10 @@ export class SegmentPersistenceError extends Error {
 }
 
 const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s.source_text, s.translated_text,
- s.translation_engine, s.translation_status, s.voice_status, s.version
+ s.translation_engine, s.translation_status, s.voice_status, s.version, s.split_parent_id
  FROM segments s JOIN projects p ON p.id = s.project_id`;
+
+type AuthorizedProject = { id: string; duration_ms: number | null };
 
 export class SegmentRepository implements SegmentStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -68,7 +79,40 @@ export class SegmentRepository implements SegmentStore {
     return row ? fromRow(row) : null;
   }
 
-  async updateText(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
+  private async getAuthorizedProject(projectId: string, userId: string): Promise<AuthorizedProject | null> {
+    return this.db.prepare(`SELECT id, duration_ms FROM projects WHERE id = ? AND user_id = ? LIMIT 1`)
+      .bind(projectId, userId).first<AuthorizedProject>();
+  }
+
+  private async assertLegalTiming(
+    projectId: string,
+    userId: string,
+    startMs: number,
+    endMs: number,
+    excludedSegmentIds: string[],
+  ): Promise<void> {
+    if (endMs - startMs < MIN_SEGMENT_MS) {
+      throw new SegmentPersistenceError('SEGMENT_TOO_SHORT', `Segment duration must be at least ${MIN_SEGMENT_MS} ms.`);
+    }
+
+    const project = await this.getAuthorizedProject(projectId, userId);
+    if (!project) throw new SegmentPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
+    if (!Number.isInteger(project.duration_ms) || (project.duration_ms as number) < 0) {
+      throw new SegmentPersistenceError('PROJECT_DURATION_UNAVAILABLE', 'Project duration is required for timing edits.');
+    }
+    if (startMs < 0 || endMs > (project.duration_ms as number)) {
+      throw new SegmentPersistenceError('SEGMENT_OUT_OF_BOUNDS', 'Segment timing must stay inside project duration.');
+    }
+
+    const excluded = new Set(excludedSegmentIds);
+    const rows = await this.list(projectId, userId);
+    const overlapping = rows.find((row) => !excluded.has(row.id) && startMs < row.endMs && endMs > row.startMs);
+    if (overlapping) {
+      throw new SegmentPersistenceError('SEGMENT_OVERLAP', `Segment overlaps ${overlapping.id}.`);
+    }
+  }
+
+  async updateSegment(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
     const patch = normalizeSegmentPatch(rawPatch, current);
@@ -79,10 +123,133 @@ export class SegmentRepository implements SegmentStore {
       startMs: patch.startMs ?? current.startMs,
       endMs: patch.endMs ?? current.endMs,
     };
-    await this.db.prepare(`UPDATE segments SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, version = version + 1
+    const timingChanged = next.startMs !== current.startMs || next.endMs !== current.endMs;
+    if (timingChanged) {
+      await this.assertLegalTiming(projectId, userId, next.startMs, next.endMs, [segmentId]);
+    }
+    const voiceStatus = timingChanged ? 'pending' : current.voiceStatus;
+    await this.db.prepare(`UPDATE segments
+      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-      .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, segmentId, projectId, userId).run();
-    return this.get(projectId, segmentId, userId);
+      .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, voiceStatus, segmentId, projectId, userId).run();
+    return {
+      ...current,
+      ...next,
+      voiceStatus,
+      version: current.version + 1,
+    };
+  }
+
+  async updateText(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
+    return this.updateSegment(projectId, segmentId, userId, rawPatch);
+  }
+
+  async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }> {
+    const current = await this.get(projectId, segmentId, userId);
+    if (!current) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    if (!Number.isInteger(playheadMs)
+      || playheadMs - current.startMs < MIN_SEGMENT_MS
+      || current.endMs - playheadMs < MIN_SEGMENT_MS) {
+      throw new SegmentPersistenceError('INVALID_SPLIT_POINT', `Split point must leave at least ${MIN_SEGMENT_MS} ms on both sides.`);
+    }
+    if (!this.db.batch) {
+      throw new SegmentPersistenceError('D1_BATCH_UNAVAILABLE', 'Atomic D1 batch support is required for segment split.');
+    }
+
+    const ratio = (playheadMs - current.startMs) / (current.endMs - current.startMs);
+    const source = splitTextAtRatio(current.sourceText, ratio);
+    const translated = splitTextAtRatio(current.translatedText, ratio);
+    const rightId = crypto.randomUUID();
+    const left: Segment = {
+      ...current,
+      endMs: playheadMs,
+      sourceText: source.left,
+      translatedText: translated.left,
+      voiceStatus: 'pending',
+      version: current.version + 1,
+    };
+    const right: Segment = {
+      ...current,
+      id: rightId,
+      startMs: playheadMs,
+      sourceText: source.right,
+      translatedText: translated.right,
+      voiceStatus: 'pending',
+      version: 1,
+      splitParentId: current.id,
+    };
+
+    await this.db.batch([
+      this.db.prepare(`UPDATE segments
+        SET end_ms = ?, source_text = ?, translated_text = ?, voice_status = 'pending', version = version + 1
+        WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+        .bind(left.endMs, left.sourceText, left.translatedText, segmentId, projectId, userId),
+      this.db.prepare(`INSERT INTO segments (
+        id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
+        translation_engine, translation_status, voice_status, version, split_parent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?)`)
+        .bind(
+          right.id,
+          right.projectId,
+          right.speakerId,
+          right.startMs,
+          right.endMs,
+          right.sourceText,
+          right.translatedText,
+          right.translationEngine,
+          right.translationStatus,
+          current.id,
+        ),
+    ]);
+    return { left, right };
+  }
+
+  async restoreSplit(
+    projectId: string,
+    segmentId: string,
+    childSegmentId: string,
+    userId: string,
+    rawOriginal: SegmentRestoreInput,
+  ): Promise<Segment> {
+    const current = await this.get(projectId, segmentId, userId);
+    const child = await this.get(projectId, childSegmentId, userId);
+    if (!current || !child) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    if (child.splitParentId !== segmentId) {
+      throw new SegmentPersistenceError('SPLIT_LINEAGE_MISMATCH', 'Child segment does not belong to this split lineage.');
+    }
+    if (!this.db.batch) {
+      throw new SegmentPersistenceError('D1_BATCH_UNAVAILABLE', 'Atomic D1 batch support is required for split restore.');
+    }
+
+    const original = normalizeSegmentRestoreInput(rawOriginal, current);
+    await this.assertLegalTiming(projectId, userId, original.startMs, original.endMs, [segmentId, childSegmentId]);
+    const restored: Segment = {
+      ...current,
+      ...original,
+      voiceStatus: 'pending',
+      version: current.version + 1,
+    };
+
+    await this.db.batch([
+      this.db.prepare(`DELETE FROM segments
+        WHERE id = ? AND project_id = ? AND split_parent_id = ?
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+        .bind(childSegmentId, projectId, segmentId, userId),
+      this.db.prepare(`UPDATE segments
+        SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = 'pending', version = version + 1
+        WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+        .bind(
+          restored.sourceText,
+          restored.translatedText,
+          restored.speakerId,
+          restored.startMs,
+          restored.endMs,
+          segmentId,
+          projectId,
+          userId,
+        ),
+    ]);
+    return restored;
   }
 
   async setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null> {
@@ -91,7 +258,13 @@ export class SegmentRepository implements SegmentStore {
     await this.db.prepare(`UPDATE segments SET translated_text = ?, translation_engine = ?, translation_status = 'completed', version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(translatedText, engine, segmentId, projectId, userId).run();
-    return this.get(projectId, segmentId, userId);
+    return {
+      ...current,
+      translatedText,
+      translationEngine: engine,
+      translationStatus: 'completed',
+      version: current.version + 1,
+    };
   }
 
   async replaceFromAsr(projectId: string, userId: string, rawSegments: PersistedAsrSegment[]): Promise<Segment[]> {
