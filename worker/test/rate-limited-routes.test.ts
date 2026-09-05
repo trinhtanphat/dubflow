@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import type { Env } from '../src/env';
 import { createProcessRoutes } from '../src/routes/process';
 import { createExportRoutes } from '../src/routes/export';
+import { createUploadRoutes } from '../src/routes/uploads';
+import { UploadServiceError } from '../src/services/uploads';
 
 function analytics() {
   return { writeDataPoint() {} } as Env['ANALYTICS'];
@@ -94,5 +96,66 @@ describe('Phase 3C expensive route admission', () => {
     expect(response.headers.get('Retry-After')).toBe('60');
     expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
     expect(calls).toEqual(['project:get', 'limit:dev-user:export']);
+  });
+
+  it('rejects upload session after authorization and validation but before multipart creation', async () => {
+    const calls: string[] = [];
+    const service = {
+      async validateBegin() {
+        calls.push('upload:validate');
+        return { filename: 'movie.mp4', sizeBytes: 1000, contentType: 'video/mp4', extension: 'mp4' as const };
+      },
+      async beginValidated() {
+        calls.push('multipart:create');
+        return { uploadId: 'u1', objectKey: 'projects/p1/source/a.mp4', partSizeBytes: 1 };
+      },
+      async uploadPart() { throw new Error('unused'); },
+      async complete() { throw new Error('unused'); },
+    };
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/projects', createUploadRoutes({ makeService: () => service as never } as never));
+    const env = {
+      ANALYTICS: analytics(),
+      RATE_LIMIT_UPLOAD: rejectedLimiter(calls),
+    } as unknown as Env;
+
+    const response = await app.request('/api/projects/p1/uploads', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filename: 'movie.mp4', sizeBytes: 1000, contentType: 'video/mp4' }),
+    }, env);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(calls).toEqual(['upload:validate', 'limit:dev-user:upload']);
+  });
+
+  it('does not consume upload budget when ownership/validation fails', async () => {
+    const calls: string[] = [];
+    const service = {
+      async validateBegin() {
+        calls.push('upload:validate');
+        throw new UploadServiceError('PROJECT_NOT_FOUND', 'Project not found.');
+      },
+      async beginValidated() { calls.push('multipart:create'); throw new Error('must not create'); },
+      async uploadPart() { throw new Error('unused'); },
+      async complete() { throw new Error('unused'); },
+    };
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/projects', createUploadRoutes({ makeService: () => service as never } as never));
+    const env = {
+      ANALYTICS: analytics(),
+      RATE_LIMIT_UPLOAD: rejectedLimiter(calls),
+    } as unknown as Env;
+
+    const response = await app.request('/api/projects/foreign/uploads', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ filename: 'movie.mp4', sizeBytes: 1000, contentType: 'video/mp4' }),
+    }, env);
+
+    expect(response.status).toBe(404);
+    expect(calls).toEqual(['upload:validate']);
   });
 });
