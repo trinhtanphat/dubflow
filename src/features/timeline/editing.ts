@@ -11,7 +11,7 @@ export type SnapKind = 'neighbor' | 'playhead' | 'grid';
 export type SnapCandidate = { timeMs: number; kind: SnapKind };
 export type SplitSegmentDraft = {
   left: Segment;
-  right: Omit<Segment, 'id'>;
+  right: Omit<Segment, 'id' | 'version'>;
 };
 
 const SNAP_PRIORITY: Record<SnapKind, number> = {
