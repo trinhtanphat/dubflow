@@ -1,10 +1,11 @@
-import type { Dispatch } from 'react';
+import { useState, type Dispatch } from 'react';
 import type { StudioAction } from '../../app/studioState';
 import type { Segment, Speaker } from '../timeline/types';
 import type { SegmentPatch } from './segmentApi';
 import type { TranslationMode } from '../translation/translationApi';
 
 type TranslationComparison = { workersAI: string; google: string };
+type InspectorTab = 'script' | 'characters';
 
 type ScriptInspectorProps = {
   segment?: Segment;
@@ -20,6 +21,11 @@ type ScriptInspectorProps = {
   onApplyTranslation?: (text: string) => void;
   busy?: boolean;
   error?: string;
+  voiceConfigured?: boolean;
+  voiceProviderLabel?: string;
+  voiceBusy?: boolean;
+  voiceError?: string;
+  onPreviewVoice?: (text: string) => void;
 };
 
 export function ScriptInspector({
@@ -36,13 +42,25 @@ export function ScriptInspector({
   onApplyTranslation,
   busy = false,
   error = '',
+  voiceConfigured = false,
+  voiceProviderLabel = 'Chưa cấu hình',
+  voiceBusy = false,
+  voiceError = '',
+  onPreviewVoice,
 }: ScriptInspectorProps) {
+  const [activeTab, setActiveTab] = useState<InspectorTab>('script');
+
   if (!segment) {
     return <aside className="script-inspector" aria-label="Inspector dubbing">Chưa có phân đoạn.</aside>;
   }
 
   const commit = (patch: SegmentPatch) => {
     if (cloudEditable) onCommitPatch?.(segment.id, patch);
+  };
+  const previewEnabled = voiceConfigured && !voiceBusy && Boolean(segment.translatedText.trim());
+  const selectedSpeaker = speakers.find((speaker) => speaker.id === segment.speakerId) ?? speakers[0];
+  const previewVoice = () => {
+    if (previewEnabled) onPreviewVoice?.(segment.translatedText.trim());
   };
 
   return (
@@ -53,69 +71,90 @@ export function ScriptInspector({
       </div>
 
       <div className="inspector-tabs" aria-label="Chế độ inspector">
-        <button className="is-active" type="button" aria-current="page">Kịch bản</button>
-        <button type="button" disabled title="Chế độ Nhân vật sẽ được kích hoạt trong Studio Pro V2.4">Nhân vật</button>
+        <button
+          className={activeTab === 'script' ? 'is-active' : ''}
+          type="button"
+          aria-current={activeTab === 'script' ? 'page' : undefined}
+          onClick={() => setActiveTab('script')}
+        >Kịch bản</button>
+        <button
+          className={activeTab === 'characters' ? 'is-active' : ''}
+          type="button"
+          aria-current={activeTab === 'characters' ? 'page' : undefined}
+          onClick={() => setActiveTab('characters')}
+        >Nhân vật</button>
       </div>
 
-      <div className="language-card language-card--source reference-script-card">
-        <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
-        <textarea
-          aria-label="Lời thoại gốc"
-          value={segment.sourceText}
-          onChange={(event) => dispatch({ type: 'editSource', segmentId: segment.id, text: event.target.value })}
-          onBlur={() => commit({ sourceText: segment.sourceText })}
-        />
-        <div className="romanization">Nǐ zhōngyú láile, wǒ děng nǐ hěnjiǔle.</div>
-      </div>
-
-      <div className="swap-marker" aria-hidden="true">↻</div>
-
-      <div className="language-card language-card--target reference-script-card">
-        <div className="language-card__head"><span>🇻🇳 Tiếng Việt (Dubbing)</span><time>00:15:23</time></div>
-        <textarea
-          aria-label="Lời thoại dubbing tiếng Việt"
-          value={segment.translatedText}
-          onChange={(event) => dispatch({ type: 'editTranslation', segmentId: segment.id, text: event.target.value })}
-          onBlur={() => commit({ translatedText: segment.translatedText })}
-        />
-
-        {cloudEditable && (
-          <div className="translation-controls reference-translation-tools">
-            <select
-              aria-label="Nhà cung cấp dịch"
-              value={translationMode}
-              onChange={(event) => onTranslationModeChange?.(event.target.value as TranslationMode)}
-            >
-              <option value="workers-ai">Workers AI</option>
-              <option value="google">Google</option>
-              <option value="compare">So sánh</option>
-            </select>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={busy}
-              onClick={() => onRetranslate?.(segment.id)}
-            >{busy ? 'Đang dịch…' : 'Dịch lại'}</button>
+      {activeTab === 'script' ? (
+        <>
+          <div className="language-card language-card--source reference-script-card">
+            <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
+            <textarea
+              aria-label="Lời thoại gốc"
+              value={segment.sourceText}
+              onChange={(event) => dispatch({ type: 'editSource', segmentId: segment.id, text: event.target.value })}
+              onBlur={() => commit({ sourceText: segment.sourceText })}
+            />
+            <div className="romanization">Nǐ zhōngyú láile, wǒ děng nǐ hěnjiǔle.</div>
           </div>
-        )}
 
-        {comparison && (
-          <div className="translation-compare" aria-label="So sánh bản dịch">
-            <div>
-              <strong>Workers AI</strong>
-              <p>{comparison.workersAI}</p>
-              <button type="button" className="ghost-button" disabled={busy} onClick={() => onApplyTranslation?.(comparison.workersAI)}>Áp dụng</button>
-            </div>
-            <div>
-              <strong>Google</strong>
-              <p>{comparison.google}</p>
-              <button type="button" className="ghost-button" disabled={busy} onClick={() => onApplyTranslation?.(comparison.google)}>Áp dụng</button>
-            </div>
+          <div className="swap-marker" aria-hidden="true">↻</div>
+
+          <div className="language-card language-card--target reference-script-card">
+            <div className="language-card__head"><span>🇻🇳 Tiếng Việt (Dubbing)</span><time>00:15:23</time></div>
+            <textarea
+              aria-label="Lời thoại dubbing tiếng Việt"
+              value={segment.translatedText}
+              onChange={(event) => dispatch({ type: 'editTranslation', segmentId: segment.id, text: event.target.value })}
+              onBlur={() => commit({ translatedText: segment.translatedText })}
+            />
+
+            {cloudEditable && (
+              <div className="translation-controls reference-translation-tools">
+                <select
+                  aria-label="Nhà cung cấp dịch"
+                  value={translationMode}
+                  onChange={(event) => onTranslationModeChange?.(event.target.value as TranslationMode)}
+                >
+                  <option value="workers-ai">Workers AI</option>
+                  <option value="google">Google</option>
+                  <option value="compare">So sánh</option>
+                </select>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onRetranslate?.(segment.id)}
+                >{busy ? 'Đang dịch…' : 'Dịch lại'}</button>
+              </div>
+            )}
+
+            {comparison && (
+              <div className="translation-compare" aria-label="So sánh bản dịch">
+                <div>
+                  <strong>Workers AI</strong>
+                  <p>{comparison.workersAI}</p>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => onApplyTranslation?.(comparison.workersAI)}>Áp dụng</button>
+                </div>
+                <div>
+                  <strong>Google</strong>
+                  <p>{comparison.google}</p>
+                  <button type="button" className="ghost-button" disabled={busy} onClick={() => onApplyTranslation?.(comparison.google)}>Áp dụng</button>
+                </div>
+              </div>
+            )}
+
+            {error && <p className="error-banner" role="alert">{error}</p>}
           </div>
-        )}
-
-        {error && <p className="error-banner" role="alert">{error}</p>}
-      </div>
+        </>
+      ) : (
+        <div className="character-inspector-card reference-character-card">
+          <span className="eyebrow">NHÂN VẬT ĐANG CHỌN</span>
+          <strong>{selectedSpeaker?.name ?? 'Chưa nhận diện nhân vật'}</strong>
+          <p>{selectedSpeaker?.label ?? 'Chưa có nhãn'} · {Math.round((selectedSpeaker?.share ?? 0) * (selectedSpeaker && selectedSpeaker.share <= 1 ? 100 : 1))}% thời lượng</p>
+          <small>Voice provider: {voiceConfigured ? voiceProviderLabel : 'Chưa cấu hình'}</small>
+        </div>
+      )}
 
       <div className="voice-section reference-voice-assignment">
         <label htmlFor="speaker-assignment">Gán giọng cho nhân vật</label>
@@ -130,8 +169,21 @@ export function ScriptInspector({
         >
           {speakers.map((speaker) => <option key={speaker.id} value={speaker.id}>{speaker.name} · {speaker.label}</option>)}
         </select>
-        <button className="secondary-button" type="button" disabled title="Provider giọng chưa được live-qualified">▷ Nghe thử giọng · Chưa cấu hình</button>
-        <button className="ghost-button" type="button" disabled title="Provider giọng chưa được live-qualified">Tạo lại giọng · Chưa cấu hình</button>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!previewEnabled}
+          title={voiceConfigured ? `Tạo preview bằng ${voiceProviderLabel}` : 'Provider giọng chưa được cấu hình'}
+          onClick={previewVoice}
+        >{voiceBusy ? 'Đang tạo giọng…' : `▷ Nghe thử giọng · ${voiceConfigured ? voiceProviderLabel : 'Chưa cấu hình'}`}</button>
+        <button
+          className="ghost-button"
+          type="button"
+          disabled={!previewEnabled}
+          title={voiceConfigured ? 'Tạo lại preview từ lời thoại hiện tại' : 'Provider giọng chưa được cấu hình'}
+          onClick={previewVoice}
+        >Tạo lại giọng{voiceConfigured ? '' : ' · Chưa cấu hình'}</button>
+        {voiceError && <p className="error-banner" role="alert">{voiceError}</p>}
       </div>
 
       <div className="toggle-row">
