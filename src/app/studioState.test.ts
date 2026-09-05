@@ -23,4 +23,24 @@ describe('studioReducer', () => {
     state = studioReducer(state, { type: 'toggleLipSync' });
     expect(state.lipSyncEnabled).toBe(false);
   });
+
+  it('hydrates cloud data while preserving a still-valid selected segment', () => {
+    let state = studioReducer(createInitialStudioState(mockProject), { type: 'selectSegment', segmentId: 's2' });
+    const refreshed = {
+      ...mockProject,
+      title: 'Cloud refresh',
+      segments: mockProject.segments.map((segment) => segment.id === 's2' ? { ...segment, translatedText: 'Đã refresh' } : segment),
+    };
+    state = studioReducer(state, { type: 'hydrateProject', project: refreshed });
+    expect(state.project.title).toBe('Cloud refresh');
+    expect(state.selectedSegmentId).toBe('s2');
+    expect(state.project.segments.find((segment) => segment.id === 's2')?.translatedText).toBe('Đã refresh');
+  });
+
+  it('selects the first segment when a cloud refresh removes the previous selection', () => {
+    let state = studioReducer(createInitialStudioState(mockProject), { type: 'selectSegment', segmentId: 's3' });
+    state = studioReducer(state, { type: 'hydrateProject', project: { ...mockProject, segments: [mockProject.segments[0]] } });
+    expect(state.selectedSegmentId).toBe('s1');
+    expect(state.playheadMs).toBe(mockProject.segments[0].startMs);
+  });
 });
