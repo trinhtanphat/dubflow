@@ -5,7 +5,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY containers/ffmpeg/server.mjs /app/server.mjs
+COPY server.mjs /app/server.mjs
 
 ENV PORT=8080
 EXPOSE 8080
