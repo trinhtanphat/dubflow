@@ -43,13 +43,16 @@ export function editDraft(current: SegmentDraft | undefined, base: Segment, patc
   const draftBase = current?.base ?? base;
   const merged = normalizedPatch(draftBase, { ...(current?.patch ?? {}), ...patch });
   const requestInFlight = current?.savingRevision !== undefined;
+  const conflicted = current?.phase === 'conflict' && current.conflictingServer !== undefined;
   return {
     base: draftBase,
     patch: merged,
-    phase: requestInFlight ? 'saving' : 'dirty',
+    phase: conflicted ? 'conflict' : requestInFlight ? 'saving' : 'dirty',
     editRevision: (current?.editRevision ?? 0) + 1,
     savingRevision: current?.savingRevision,
     savingPatch: current?.savingPatch,
+    error: conflicted ? current.error : undefined,
+    conflictingServer: conflicted ? current.conflictingServer : undefined,
   };
 }
 
