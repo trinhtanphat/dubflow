@@ -29,6 +29,7 @@ function deps() {
       setExportObject: vi.fn(async () => {}),
     },
     jobs: {
+      getForProject: vi.fn(async () => ({ status: 'running' as const })),
       setProgress: vi.fn(async () => {}),
       fail: vi.fn(async () => {}),
       complete: vi.fn(async () => {}),
@@ -82,5 +83,21 @@ describe('final dubbing export pipeline', () => {
     expect(d.media.renderExport).not.toHaveBeenCalled();
     expect(d.jobs.fail).toHaveBeenCalledWith('j1', 'EXPORT_FAILED', expect.any(String));
     expect(d.projects.setStatus).toHaveBeenLastCalledWith('p1', 'dev-user', 'needs_review');
+  });
+
+  it('stops before voice generation when the durable export job is cancelled', async () => {
+    const d = deps();
+    let checks = 0;
+    d.jobs.getForProject.mockImplementation(async () => {
+      checks += 1;
+      return { status: checks >= 2 ? 'cancelled' as const : 'running' as const };
+    });
+
+    await expect(runExportPipeline({ projectId: 'p1', userId: 'dev-user', jobId: 'j1' }, d as any, step() as any))
+      .rejects.toMatchObject({ code: 'JOB_CANCELLED' });
+    expect(d.voice.generate).not.toHaveBeenCalled();
+    expect(d.media.renderExport).not.toHaveBeenCalled();
+    expect(d.jobs.fail).not.toHaveBeenCalled();
+    expect(d.projects.setStatus).toHaveBeenLastCalledWith('p1', 'dev-user', 'cancelled');
   });
 });
