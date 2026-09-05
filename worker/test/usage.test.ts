@@ -57,6 +57,10 @@ function usageDb() {
               const [userId] = values;
               return (userId === 'u1' ? { credit_balance: 50000 } : null) as T | null;
             }
+            if (statement.includes('SELECT id FROM projects')) {
+              const [projectId, userId] = values;
+              return (projectOwners.get(String(projectId)) === userId ? { id: projectId } : null) as T | null;
+            }
             return null;
           },
           async all<T>() {
@@ -147,10 +151,7 @@ describe('UsageRepository', () => {
     const repo = new UsageRepository(memory.db);
     await repo.record(base);
 
-    await expect(repo.summarizeForProject('p1', 'u2')).resolves.toEqual({
-      totals: { asrAudioMinutes: 0, translationCharacters: 0, ttsCharacters: 0, renderMinutes: 0 },
-      providers: {},
-    });
+    await expect(repo.summarizeForProject('p1', 'u2')).rejects.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
   });
 
   it('reads the internal credit balance without mutating it', async () => {
