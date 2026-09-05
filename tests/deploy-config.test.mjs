@@ -23,3 +23,18 @@ test('deployment uses Wrangler with automatic resource provisioning support', ()
 test('production custom domain stays pinned to yupvox.qs3d.site', () => {
   assert.deepEqual(config.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
 });
+
+test('deployment config defines the FFmpeg container Durable Object', () => {
+  const container = config.containers?.find((item) => item.class_name === 'FfmpegContainer');
+  assert.ok(container, 'missing FfmpegContainer container definition');
+  assert.equal(container.image, './containers/ffmpeg/Dockerfile');
+  assert.equal(container.instance_type, 'basic');
+
+  const binding = config.durable_objects?.bindings?.find((item) => item.name === 'FFMPEG_CONTAINER');
+  assert.deepEqual(binding, { name: 'FFMPEG_CONTAINER', class_name: 'FfmpegContainer' });
+  assert.deepEqual(config.exports?.FfmpegContainer, {
+    type: 'durable-object',
+    state: 'created',
+    storage: 'sqlite',
+  });
+});
