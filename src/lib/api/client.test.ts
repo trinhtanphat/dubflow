@@ -7,9 +7,10 @@ describe('apiFetch', () => {
     expect(result).toEqual({ ok: true });
   });
 
-  it('throws structured ApiError for API failures', async () => {
-    await expect(apiFetch('/x', {}, async () => Response.json({ error: true, code: 'NOPE', message: 'bad' }, { status: 400 })))
-      .rejects.toMatchObject({ status: 400, code: 'NOPE', message: 'bad' });
+  it('throws structured ApiError and preserves the parsed JSON payload', async () => {
+    const payload = { error: true, code: 'NOPE', message: 'bad', segment: { id: 's1' } };
+    await expect(apiFetch('/x', {}, async () => Response.json(payload, { status: 400 })))
+      .rejects.toMatchObject({ status: 400, code: 'NOPE', message: 'bad', payload });
     expect(ApiError.name).toBe('ApiError');
   });
 });

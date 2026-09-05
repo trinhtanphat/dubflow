@@ -29,6 +29,33 @@ describe('segment API', () => {
     });
   });
 
+  it('converts a well-formed 409 revision conflict into a typed error with the canonical segment', async () => {
+    const canonical = { ...segment, translatedText: 'Bản mới', version: 8 };
+    vi.stubGlobal('fetch', async () => Response.json({
+      code: 'SEGMENT_VERSION_CONFLICT',
+      message: 'stale segment',
+      segment: canonical,
+    }, { status: 409 }));
+
+    await expect(segmentApi.patchSegment('p', 'seg-1', 7, { translatedText: 'Bản cũ' }))
+      .rejects.toMatchObject({
+        name: 'SegmentVersionConflictError',
+        code: 'SEGMENT_VERSION_CONFLICT',
+        canonical: { id: 'seg-1', version: 8, translatedText: 'Bản mới' },
+      });
+  });
+
+  it('keeps malformed revision conflicts fail-closed as the original API error', async () => {
+    vi.stubGlobal('fetch', async () => Response.json({
+      code: 'SEGMENT_VERSION_CONFLICT',
+      message: 'stale segment',
+      segment: { id: 'seg-1' },
+    }, { status: 409 }));
+
+    await expect(segmentApi.patchSegment('p', 'seg-1', 7, { translatedText: 'Bản cũ' }))
+      .rejects.toMatchObject({ name: 'ApiError', status: 409, code: 'SEGMENT_VERSION_CONFLICT' });
+  });
+
   it('calls dedicated split and restore-split endpoints with narrow payloads', async () => {
     const split = (segmentApi as any).splitSegment;
     const restore = (segmentApi as any).restoreSplit;
