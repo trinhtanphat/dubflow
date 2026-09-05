@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState, type Dispatch } from 'react';
+import {
+  applySegmentFieldPatch,
+  segmentFieldKeys,
+  type SegmentDraft,
+  type SegmentFieldPatch,
+} from '../../app/autosaveDraft';
 import type { StudioAction } from '../../app/studioState';
 import { createVoicePreviewAction } from '../../app/voicePreviewAction';
 import type { Segment, Speaker } from '../timeline/types';
 import type { TranslationMode } from '../translation/translationApi';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../voice/voiceApi';
+import { SegmentConflictNotice } from './SegmentConflictNotice';
 import type { SegmentPatch } from './segmentApi';
 
 type TranslationComparison = { workersAI: string; google: string };
@@ -15,6 +22,12 @@ type ScriptInspectorProps = {
   lipSyncEnabled: boolean;
   dispatch: Dispatch<StudioAction>;
   cloudEditable?: boolean;
+  draft?: SegmentDraft;
+  onEditDraft?: (segmentId: string, patch: SegmentFieldPatch) => void;
+  onFlushDraft?: (segmentId: string) => void;
+  onRetryDraft?: (segmentId: string) => void;
+  onDiscardConflict?: (segmentId: string) => void;
+  onReapplyConflict?: (segmentId: string) => void;
   translationMode?: TranslationMode;
   onTranslationModeChange?: (mode: TranslationMode) => void;
   onCommitPatch?: (segmentId: string, patch: SegmentPatch) => void;
@@ -42,6 +55,12 @@ export function ScriptInspector({
   lipSyncEnabled,
   dispatch,
   cloudEditable = false,
+  draft,
+  onEditDraft,
+  onFlushDraft,
+  onRetryDraft,
+  onDiscardConflict,
+  onReapplyConflict,
   translationMode = 'workers-ai',
   onTranslationModeChange,
   onCommitPatch,
@@ -84,19 +103,29 @@ export function ScriptInspector({
     return <aside className="script-inspector" aria-label="Inspector dubbing">Chưa có phân đoạn.</aside>;
   }
 
+  const visibleSegment = draft ? applySegmentFieldPatch(segment, draft.patch) : segment;
   const effectiveVoiceConfigured = voiceConfigured ?? Boolean(detectedVoice?.configured && detectedVoice?.preview);
   const effectiveVoiceProvider = voiceProviderLabel ?? providerLabel(detectedVoice);
   const effectiveVoiceBusy = voiceBusy || internalVoiceBusy;
   const effectiveVoiceError = voiceError || internalVoiceError;
 
-  const commit = (patch: SegmentPatch) => {
+  const commitLegacy = (patch: SegmentPatch) => {
     if (cloudEditable) onCommitPatch?.(segment.id, patch);
   };
-  const previewEnabled = effectiveVoiceConfigured && !effectiveVoiceBusy && Boolean(segment.translatedText.trim());
-  const selectedSpeaker = speakers.find((speaker) => speaker.id === segment.speakerId) ?? speakers[0];
+  const editField = (patch: SegmentFieldPatch, legacy: StudioAction) => {
+    if (cloudEditable && onEditDraft) onEditDraft(segment.id, patch);
+    else dispatch(legacy);
+  };
+  const flushField = (legacyPatch: SegmentPatch) => {
+    if (cloudEditable && onFlushDraft) onFlushDraft(segment.id);
+    else commitLegacy(legacyPatch);
+  };
+
+  const previewEnabled = effectiveVoiceConfigured && !effectiveVoiceBusy && Boolean(visibleSegment.translatedText.trim());
+  const selectedSpeaker = speakers.find((speaker) => speaker.id === visibleSegment.speakerId) ?? speakers[0];
   const previewVoice = () => {
     if (!previewEnabled) return;
-    const text = segment.translatedText.trim();
+    const text = visibleSegment.translatedText.trim();
     if (onPreviewVoice) onPreviewVoice(text);
     else void internalPreview(text);
   };
@@ -129,9 +158,12 @@ export function ScriptInspector({
             <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
             <textarea
               aria-label="Lời thoại gốc"
-              value={segment.sourceText}
-              onChange={(event) => dispatch({ type: 'editSource', segmentId: segment.id, text: event.target.value })}
-              onBlur={() => commit({ sourceText: segment.sourceText })}
+              value={visibleSegment.sourceText}
+              onChange={(event) => editField(
+                { sourceText: event.target.value },
+                { type: 'editSource', segmentId: segment.id, text: event.target.value },
+              )}
+              onBlur={() => flushField({ sourceText: visibleSegment.sourceText })}
             />
             <div className="romanization">Nǐ zhōngyú láile, wǒ děng nǐ hěnjiǔle.</div>
           </div>
@@ -142,9 +174,12 @@ export function ScriptInspector({
             <div className="language-card__head"><span>🇻🇳 Tiếng Việt (Dubbing)</span><time>00:15:23</time></div>
             <textarea
               aria-label="Lời thoại dubbing tiếng Việt"
-              value={segment.translatedText}
-              onChange={(event) => dispatch({ type: 'editTranslation', segmentId: segment.id, text: event.target.value })}
-              onBlur={() => commit({ translatedText: segment.translatedText })}
+              value={visibleSegment.translatedText}
+              onChange={(event) => editField(
+                { translatedText: event.target.value },
+                { type: 'editTranslation', segmentId: segment.id, text: event.target.value },
+              )}
+              onBlur={() => flushField({ translatedText: visibleSegment.translatedText })}
             />
 
             {cloudEditable && (
@@ -183,6 +218,21 @@ export function ScriptInspector({
             )}
 
             {error && <p className="error-banner" role="alert">{error}</p>}
+            {draft?.phase === 'error' && (
+              <div className="segment-save-error" role="alert">
+                <p>{draft.error || 'Không thể lưu thay đổi.'}</p>
+                <button type="button" className="ghost-button" onClick={() => onRetryDraft?.(segment.id)}>Thử lưu lại</button>
+              </div>
+            )}
+            {draft?.phase === 'conflict' && draft.conflictingServer && (
+              <SegmentConflictNotice
+                local={visibleSegment}
+                server={draft.conflictingServer}
+                touchedFields={segmentFieldKeys(draft.patch)}
+                onUseServer={() => onDiscardConflict?.(segment.id)}
+                onReapply={() => onReapplyConflict?.(segment.id)}
+              />
+            )}
           </div>
         </>
       ) : (
@@ -198,11 +248,16 @@ export function ScriptInspector({
         <label htmlFor="speaker-assignment">Gán giọng cho nhân vật</label>
         <select
           id="speaker-assignment"
-          value={segment.speakerId}
+          value={visibleSegment.speakerId}
           onChange={(event) => {
             const speakerId = event.target.value;
-            dispatch({ type: 'assignSpeaker', segmentId: segment.id, speakerId });
-            commit({ speakerId });
+            if (cloudEditable && onEditDraft) {
+              onEditDraft(segment.id, { speakerId });
+              onFlushDraft?.(segment.id);
+            } else {
+              dispatch({ type: 'assignSpeaker', segmentId: segment.id, speakerId });
+              commitLegacy({ speakerId });
+            }
           }}
         >
           {speakers.map((speaker) => <option key={speaker.id} value={speaker.id}>{speaker.name} · {speaker.label}</option>)}
