@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommandPalette } from '../components/CommandPalette/CommandPalette';
 import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
@@ -247,6 +247,8 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
+  const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
   const previousSelectedSegmentId = useRef(state.selectedSegmentId);
 
   const cloudEditable = state.project.id !== 'demo';
@@ -438,7 +440,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
       switch (action) {
         case 'open-commands':
-          setCommandPaletteOpen(true);
+          openCommandPalette();
           return;
         case 'undo':
           void editorActions.undo();
@@ -471,7 +473,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           dispatch({ type: 'setPlayhead', playheadMs: state.playheadMs + 5000 });
           return;
         case 'escape':
-          setCommandPaletteOpen(false);
+          closeCommandPalette();
           setMobilePanel('none');
           return;
       }
@@ -482,8 +484,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     canRedo,
     canSplit,
     canUndo,
+    closeCommandPalette,
     dispatch,
     editorActions,
+    openCommandPalette,
     state.playback.playing,
     state.playheadMs,
     state.timelineView.pixelsPerSecond,
@@ -505,7 +509,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
-        onOpenCommands={() => setCommandPaletteOpen(true)}
+        onOpenCommands={openCommandPalette}
         onOpenSources={() => toggleMobilePanel('sources')}
         onOpenInspector={() => toggleMobilePanel('inspector')}
       />
@@ -513,7 +517,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       <CommandPalette
         open={commandPaletteOpen}
         commands={studioCommands}
-        onClose={() => setCommandPaletteOpen(false)}
+        onClose={closeCommandPalette}
       />
 
       {cloudError && <div className="error-banner" role="alert">{cloudError}</div>}
