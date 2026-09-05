@@ -21,6 +21,7 @@ export type Segment = {
   translationEngine: string;
   translationStatus: string;
   voiceStatus: string;
+  dubbedObjectKey: string | null;
   version: number;
   splitParentId: string | null;
 };
@@ -28,15 +29,15 @@ export type Segment = {
 type SegmentRow = {
   id: string; project_id: string; speaker_id: string | null; start_ms: number; end_ms: number;
   source_text: string; translated_text: string; translation_engine: string; translation_status: string;
-  voice_status: string; version: number; split_parent_id?: string | null;
+  voice_status: string; dubbed_object_key?: string | null; version: number; split_parent_id?: string | null;
 };
 
 function fromRow(row: SegmentRow): Segment {
   return {
     id: row.id, projectId: row.project_id, speakerId: row.speaker_id, startMs: row.start_ms, endMs: row.end_ms,
     sourceText: row.source_text, translatedText: row.translated_text, translationEngine: row.translation_engine,
-    translationStatus: row.translation_status, voiceStatus: row.voice_status, version: row.version,
-    splitParentId: row.split_parent_id ?? null,
+    translationStatus: row.translation_status, voiceStatus: row.voice_status, dubbedObjectKey: row.dubbed_object_key ?? null,
+    version: row.version, splitParentId: row.split_parent_id ?? null,
   };
 }
 
@@ -59,7 +60,7 @@ export class SegmentPersistenceError extends Error {
 }
 
 const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s.source_text, s.translated_text,
- s.translation_engine, s.translation_status, s.voice_status, s.version, s.split_parent_id
+ s.translation_engine, s.translation_status, s.voice_status, s.dubbed_object_key, s.version, s.split_parent_id
  FROM segments s JOIN projects p ON p.id = s.project_id`;
 
 type AuthorizedProject = { id: string; duration_ms: number | null };
@@ -124,18 +125,22 @@ export class SegmentRepository implements SegmentStore {
       endMs: patch.endMs ?? current.endMs,
     };
     const timingChanged = next.startMs !== current.startMs || next.endMs !== current.endMs;
+    const textOrSpeakerChanged = next.translatedText !== current.translatedText || next.speakerId !== current.speakerId;
     if (timingChanged) {
       await this.assertLegalTiming(projectId, userId, next.startMs, next.endMs, [segmentId]);
     }
-    const voiceStatus = timingChanged ? 'pending' : current.voiceStatus;
+    const invalidatesVoice = timingChanged || textOrSpeakerChanged;
+    const voiceStatus = invalidatesVoice ? 'pending' : current.voiceStatus;
+    const dubbedObjectKey = invalidatesVoice ? null : current.dubbedObjectKey;
     await this.db.prepare(`UPDATE segments
-      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, version = version + 1
+      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-      .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, voiceStatus, segmentId, projectId, userId).run();
+      .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, voiceStatus, dubbedObjectKey, segmentId, projectId, userId).run();
     return {
       ...current,
       ...next,
       voiceStatus,
+      dubbedObjectKey,
       version: current.version + 1,
     };
   }
@@ -166,6 +171,7 @@ export class SegmentRepository implements SegmentStore {
       sourceText: source.left,
       translatedText: translated.left,
       voiceStatus: 'pending',
+      dubbedObjectKey: null,
       version: current.version + 1,
     };
     const right: Segment = {
@@ -175,19 +181,20 @@ export class SegmentRepository implements SegmentStore {
       sourceText: source.right,
       translatedText: translated.right,
       voiceStatus: 'pending',
+      dubbedObjectKey: null,
       version: 1,
       splitParentId: current.id,
     };
 
     await this.db.batch([
       this.db.prepare(`UPDATE segments
-        SET end_ms = ?, source_text = ?, translated_text = ?, voice_status = 'pending', version = version + 1
+        SET end_ms = ?, source_text = ?, translated_text = ?, voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
         WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
         .bind(left.endMs, left.sourceText, left.translatedText, segmentId, projectId, userId),
       this.db.prepare(`INSERT INTO segments (
         id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
-        translation_engine, translation_status, voice_status, version, split_parent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?)`)
+        translation_engine, translation_status, voice_status, dubbed_object_key, version, split_parent_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 1, ?)`)
         .bind(
           right.id,
           right.projectId,
@@ -227,6 +234,7 @@ export class SegmentRepository implements SegmentStore {
       ...current,
       ...original,
       voiceStatus: 'pending',
+      dubbedObjectKey: null,
       version: current.version + 1,
     };
 
@@ -236,7 +244,7 @@ export class SegmentRepository implements SegmentStore {
         AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
         .bind(childSegmentId, projectId, segmentId, userId),
       this.db.prepare(`UPDATE segments
-        SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = 'pending', version = version + 1
+        SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
         WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
         .bind(
           restored.sourceText,
@@ -255,7 +263,7 @@ export class SegmentRepository implements SegmentStore {
   async setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null> {
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
-    await this.db.prepare(`UPDATE segments SET translated_text = ?, translation_engine = ?, translation_status = 'completed', version = version + 1
+    await this.db.prepare(`UPDATE segments SET translated_text = ?, translation_engine = ?, translation_status = 'completed', voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(translatedText, engine, segmentId, projectId, userId).run();
     return {
@@ -263,8 +271,20 @@ export class SegmentRepository implements SegmentStore {
       translatedText,
       translationEngine: engine,
       translationStatus: 'completed',
+      voiceStatus: 'pending',
+      dubbedObjectKey: null,
       version: current.version + 1,
     };
+  }
+
+  async setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void> {
+    const prefix = `projects/${projectId}/dubbed/`;
+    if (!objectKey.startsWith(prefix)) {
+      throw new SegmentPersistenceError('VOICE_OBJECT_KEY_INVALID', 'Voice object key must belong to the project dubbed prefix.');
+    }
+    await this.db.prepare(`UPDATE segments SET dubbed_object_key = ?, voice_status = 'completed', version = version + 1
+      WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+      .bind(objectKey, segmentId, projectId, userId).run();
   }
 
   async replaceFromAsr(projectId: string, userId: string, rawSegments: PersistedAsrSegment[]): Promise<Segment[]> {
@@ -284,8 +304,8 @@ export class SegmentRepository implements SegmentStore {
       ...segments.map((segment) => this.db.prepare(
         `INSERT INTO segments (
           id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
-          translation_engine, translation_status, voice_status, version
-        ) VALUES (?, ?, NULL, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', 1)`,
+          translation_engine, translation_status, voice_status, dubbed_object_key, version
+        ) VALUES (?, ?, NULL, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', NULL, 1)`,
       ).bind(segment.id, projectId, segment.startMs, segment.endMs, segment.sourceText)),
     ];
     await this.db.batch(statements);
