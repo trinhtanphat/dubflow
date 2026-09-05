@@ -1,5 +1,6 @@
 export const MIN_PIXELS_PER_SECOND = 0.25;
 export const MAX_PIXELS_PER_SECOND = 240;
+const RULER_INTERVAL_SECONDS = [1, 2, 5, 10, 30, 60, 300, 600] as const;
 
 export function clamp(value: number, min: number, max: number): number {
   if (min > max) {
@@ -44,4 +45,22 @@ export function fitPixelsPerSecond(durationMs: number, viewportWidth: number): n
     return MIN_PIXELS_PER_SECOND;
   }
   return clampPixelsPerSecond(viewportWidth / (durationMs / 1000));
+}
+
+export function pointerXToTime(
+  pointerClientX: number,
+  viewportLeft: number,
+  scrollLeft: number,
+  pixelsPerSecond: number,
+): number {
+  const pointer = Number.isFinite(pointerClientX) ? pointerClientX : 0;
+  const left = Number.isFinite(viewportLeft) ? viewportLeft : 0;
+  const scroll = Number.isFinite(scrollLeft) ? Math.max(0, scrollLeft) : 0;
+  return pixelsToTime(Math.max(0, pointer - left + scroll), pixelsPerSecond);
+}
+
+export function chooseRulerIntervalSeconds(pixelsPerSecond: number): number {
+  const zoom = clampPixelsPerSecond(pixelsPerSecond);
+  return RULER_INTERVAL_SECONDS.find((seconds) => seconds * zoom >= 80)
+    ?? RULER_INTERVAL_SECONDS[RULER_INTERVAL_SECONDS.length - 1];
 }
