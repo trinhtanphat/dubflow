@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { UsageRecordInput } from '../src/db/usage';
 import { runExportPipeline } from '../src/workflows/exportPipeline';
 
 function step() {
@@ -10,14 +11,19 @@ describe('speaker-specific voice export', () => {
     const voiceGenerate = vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), {
       headers: { 'content-type': 'audio/mpeg' },
     }));
+    const usageRows = new Map<string, UsageRecordInput>();
     const deps = {
       projects: {
-        getByIdForUser: vi.fn(async () => ({ id: 'p1', sourceObjectKey: 'projects/p1/source/video.mp4' })),
+        getByIdForUser: vi.fn(async () => ({
+          id: 'p1',
+          sourceObjectKey: 'projects/p1/source/video.mp4',
+          durationMs: 1000,
+        })),
         setStatus: vi.fn(async () => {}),
         setExportObject: vi.fn(async () => {}),
       },
       jobs: {
-        getForProject: vi.fn(async () => ({ status: 'running' as const })),
+        getForProject: vi.fn(async () => ({ status: 'running' as const, retryCount: 0 })),
         setProgress: vi.fn(async () => {}),
         fail: vi.fn(async () => {}),
         complete: vi.fn(async () => {}),
@@ -37,7 +43,17 @@ describe('speaker-specific voice export', () => {
       },
       bucket: { put: vi.fn(async () => ({})) },
       voice: { generate: voiceGenerate },
-      media: { renderExport: vi.fn(async () => ({ exportObjectKey: 'projects/p1/export/dubbed.mp4' })) },
+      media: {
+        probe: vi.fn(async () => ({ durationMs: 900 })),
+        renderExport: vi.fn(async () => ({ exportObjectKey: 'projects/p1/export/dubbed.mp4' })),
+      },
+      usage: {
+        getByOperation: vi.fn(async (operationKey: string, phase: string) => usageRows.get(`${operationKey}|${phase}`) ?? null),
+        record: vi.fn(async (input: UsageRecordInput) => {
+          usageRows.set(`${input.operationKey}|${input.phase}`, input);
+          return input as never;
+        }),
+      },
     };
 
     await runExportPipeline({ projectId: 'p1', userId: 'dev-user', jobId: 'j1' }, deps as any, step() as any);
