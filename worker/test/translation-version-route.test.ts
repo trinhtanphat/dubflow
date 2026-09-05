@@ -61,7 +61,9 @@ class FakeDb implements D1DatabaseLike {
 
 function makeApp() {
   const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/projects', createTranslationRoutes());
+  app.route('/api/projects', createTranslationRoutes(() => ({
+    async record(input: unknown) { return { inserted: true, event: input }; },
+  })));
   return app;
 }
 
