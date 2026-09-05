@@ -1,9 +1,19 @@
+export const MIN_SEGMENT_MS = 100;
+
 export type SegmentPatch = {
   sourceText?: string;
   translatedText?: string;
   speakerId?: string | null;
   startMs?: number;
   endMs?: number;
+};
+
+export type SegmentRestoreInput = {
+  sourceText: string;
+  translatedText: string;
+  speakerId: string | null;
+  startMs: number;
+  endMs: number;
 };
 
 export type PersistedAsrSegment = {
@@ -52,6 +62,44 @@ export function normalizeSegmentPatch(input: unknown, current: { startMs: number
   const endMs = patch.endMs ?? current.endMs;
   if (endMs <= startMs) throw new SegmentInputError('endMs must be greater than startMs.');
   return patch;
+}
+
+export function normalizeSegmentRestoreInput(input: unknown, current: { startMs: number; endMs: number }): SegmentRestoreInput {
+  const patch = normalizeSegmentPatch(input, current);
+  if (patch.sourceText === undefined || patch.translatedText === undefined || patch.speakerId === undefined
+    || patch.startMs === undefined || patch.endMs === undefined) {
+    throw new SegmentInputError('Restore payload requires sourceText, translatedText, speakerId, startMs, and endMs.');
+  }
+  return patch as SegmentRestoreInput;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+export function splitTextAtRatio(text: string, ratio: number): { left: string; right: string } {
+  const chars = Array.from(text);
+  if (chars.length < 2) return { left: text.trim(), right: '' };
+
+  const safeRatio = clamp(Number.isFinite(ratio) ? ratio : 0.5, 0, 1);
+  const target = safeRatio * chars.length;
+  const whitespaceBoundaries: number[] = [];
+  for (let index = 1; index < chars.length; index += 1) {
+    if (/\s/u.test(chars[index])) whitespaceBoundaries.push(index);
+  }
+
+  const splitIndex = whitespaceBoundaries.length > 0
+    ? whitespaceBoundaries.reduce((best, candidate) => {
+      const bestDistance = Math.abs(best - target);
+      const candidateDistance = Math.abs(candidate - target);
+      return candidateDistance < bestDistance ? candidate : best;
+    })
+    : Math.round(clamp(target, 1, chars.length - 1));
+
+  return {
+    left: chars.slice(0, splitIndex).join('').trim(),
+    right: chars.slice(splitIndex).join('').trim(),
+  };
 }
 
 export function normalizeAsrSegments(input: unknown): PersistedAsrSegment[] {
