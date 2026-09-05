@@ -25,6 +25,12 @@
       "binding": "MEDIA"
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "dubflow_events"
+    }
+  ],
   "ai": {
     "binding": "AI"
   },
@@ -61,6 +67,16 @@
     }
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    },
+    "redact_query_string": true
   }
 }
