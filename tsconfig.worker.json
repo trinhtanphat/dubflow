@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": []
   },
-  "include": ["worker/src", "worker/test"]
+  "include": ["worker/src", "worker/test", "shared"]
 }
