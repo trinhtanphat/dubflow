@@ -38,3 +38,12 @@ test('deployment config defines the FFmpeg container Durable Object', () => {
     storage: 'sqlite',
   });
 });
+
+test('deployment config binds the Cloudflare dubbing Workflow', () => {
+  const workflow = config.workflows?.find((item) => item.binding === 'DUBBING_WORKFLOW');
+  assert.deepEqual(workflow, {
+    binding: 'DUBBING_WORKFLOW',
+    name: 'dubflow-dubbing',
+    class_name: 'DubbingWorkflow',
+  });
+});
