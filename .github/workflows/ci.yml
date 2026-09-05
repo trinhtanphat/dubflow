@@ -37,3 +37,43 @@ jobs:
 
       - name: Wrangler dry-run
         run: npx wrangler deploy --dry-run
+
+      - name: Capture 1448x1086 reference screenshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run dev -- --host 127.0.0.1 > /tmp/yupvox-vite.log 2>&1 &
+          VITE_PID=$!
+          trap 'kill "$VITE_PID" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5173/ > /dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/yupvox-vite.log
+              exit 1
+            fi
+            sleep 1
+          done
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$CHROME" ]; then
+            echo 'No Chromium-compatible browser found on runner.' >&2
+            exit 1
+          fi
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=1448,1086 \
+            --screenshot="$RUNNER_TEMP/yupvox-v2-2-reference.png" \
+            http://127.0.0.1:5173/
+          test -s "$RUNNER_TEMP/yupvox-v2-2-reference.png"
+
+      - name: Upload reference screenshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: yupvox-reference-${{ github.sha }}
+          path: ${{ runner.temp }}/yupvox-v2-2-reference.png
+          if-no-files-found: error
+          retention-days: 14
