@@ -23,4 +23,24 @@ describe('studioReducer', () => {
     state = studioReducer(state, { type: 'toggleLipSync' });
     expect(state.lipSyncEnabled).toBe(false);
   });
+
+  it('keeps playback controls transient and clamps volume', () => {
+    const initial = createInitialStudioState(mockProject);
+    expect(initial.playback).toEqual({ playing: false, rate: 1, volume: 1, muted: false });
+
+    const playing = studioReducer(initial, { type: 'setPlaying', playing: true });
+    expect(playing.playback.playing).toBe(true);
+    expect(playing.project).toBe(initial.project);
+
+    const rated = studioReducer(initial, { type: 'setPlaybackRate', rate: 1.5 });
+    expect(rated.playback.rate).toBe(1.5);
+
+    const tooLoud = studioReducer(initial, { type: 'setVolume', volume: 2 });
+    expect(tooLoud.playback.volume).toBe(1);
+    const tooQuiet = studioReducer(initial, { type: 'setVolume', volume: -1 });
+    expect(tooQuiet.playback.volume).toBe(0);
+
+    const muted = studioReducer(initial, { type: 'toggleMuted' });
+    expect(muted.playback.muted).toBe(true);
+  });
 });
