@@ -44,6 +44,7 @@ export function buildCloudStudioProject(project: CloudProject, segments: CloudSe
       endMs: segment.endMs,
       sourceText: segment.sourceText,
       translatedText: segment.translatedText,
+      version: segment.version,
     })),
   };
 }
