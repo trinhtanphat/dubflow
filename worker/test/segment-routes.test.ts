@@ -154,7 +154,7 @@ describe('segment mutation routes', () => {
     });
   });
 
-  it('maps stable persistence errors instead of hiding them behind a generic 500', async () => {
+  it('maps stable overlap persistence errors instead of hiding them behind a generic 500', async () => {
     const store = new MemorySegmentStore();
     store.updateError = new SegmentPersistenceError('SEGMENT_OVERLAP', 'Segment overlaps s2.');
     const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
@@ -169,5 +169,18 @@ describe('segment mutation routes', () => {
       code: 'SEGMENT_OVERLAP',
       message: 'Segment overlaps s2.',
     });
+  });
+
+  it('maps a project processing lock to HTTP 409', async () => {
+    const store = new MemorySegmentStore();
+    store.updateError = new SegmentPersistenceError('PROJECT_BUSY', 'Project is locked while cloud processing or export is active.');
+    const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ translatedText: 'locked' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'PROJECT_BUSY' });
   });
 });
