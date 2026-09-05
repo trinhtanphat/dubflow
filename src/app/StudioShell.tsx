@@ -265,9 +265,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
   const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
     if (!cloudEditable) return;
+    const current = state.project.segments.find((segment) => segment.id === segmentId);
+    if (!current) return;
     setEditorError('');
     try {
-      const updated = await persistEditorPatch(state.project.id, segmentId, patch);
+      const updated = await persistEditorPatch(state.project.id, segmentId, current.version, patch);
       if (patch.sourceText !== undefined) {
         dispatch({ type: 'editSource', segmentId, text: updated.sourceText });
       }
@@ -307,7 +309,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     setEditorBusy(true);
     setEditorError('');
     try {
-      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
+      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, selectedSegment.version, { translatedText: text });
       dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
       setTranslationComparison(null);
     } catch (error) {
