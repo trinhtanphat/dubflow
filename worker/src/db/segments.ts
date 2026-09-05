@@ -64,7 +64,7 @@ const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s
  s.translation_engine, s.translation_status, s.voice_status, s.dubbed_object_key, s.version, s.split_parent_id
  FROM segments s JOIN projects p ON p.id = s.project_id`;
 
-type AuthorizedProject = { id: string; duration_ms: number | null };
+type AuthorizedProject = { id: string; duration_ms: number | null; status: string };
 
 export class SegmentRepository implements SegmentStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -82,8 +82,17 @@ export class SegmentRepository implements SegmentStore {
   }
 
   private async getAuthorizedProject(projectId: string, userId: string): Promise<AuthorizedProject | null> {
-    return this.db.prepare(`SELECT id, duration_ms FROM projects WHERE id = ? AND user_id = ? LIMIT 1`)
+    return this.db.prepare(`SELECT id, duration_ms, status FROM projects WHERE id = ? AND user_id = ? LIMIT 1`)
       .bind(projectId, userId).first<AuthorizedProject>();
+  }
+
+  private async assertEditorMutationAllowed(projectId: string, userId: string): Promise<AuthorizedProject> {
+    const project = await this.getAuthorizedProject(projectId, userId);
+    if (!project) throw new SegmentPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
+    if (project.status === 'processing') {
+      throw new SegmentPersistenceError('PROJECT_BUSY', 'Project is locked while cloud processing or export is active.');
+    }
+    return project;
   }
 
   private invalidationStatement(projectId: string, userId: string) {
@@ -135,6 +144,7 @@ export class SegmentRepository implements SegmentStore {
   async updateSegment(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
+    await this.assertEditorMutationAllowed(projectId, userId);
     const patch = normalizeSegmentPatch(rawPatch, current);
     const next = {
       sourceText: patch.sourceText ?? current.sourceText,
@@ -172,6 +182,7 @@ export class SegmentRepository implements SegmentStore {
   async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }> {
     const current = await this.get(projectId, segmentId, userId);
     if (!current) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    await this.assertEditorMutationAllowed(projectId, userId);
     if (!Number.isInteger(playheadMs)
       || playheadMs - current.startMs < MIN_SEGMENT_MS
       || current.endMs - playheadMs < MIN_SEGMENT_MS) {
@@ -242,6 +253,7 @@ export class SegmentRepository implements SegmentStore {
     const current = await this.get(projectId, segmentId, userId);
     const child = await this.get(projectId, childSegmentId, userId);
     if (!current || !child) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    await this.assertEditorMutationAllowed(projectId, userId);
     if (child.splitParentId !== segmentId) {
       throw new SegmentPersistenceError('SPLIT_LINEAGE_MISMATCH', 'Child segment does not belong to this split lineage.');
     }
