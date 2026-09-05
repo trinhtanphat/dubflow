@@ -77,7 +77,7 @@ function deps() {
 }
 
 describe('final dubbing export pipeline', () => {
-  it('meters newly generated TTS by probed audio seconds and final render by durable project minutes', async () => {
+  it('meters newly generated TTS by probed audio seconds and final render by durable project seconds', async () => {
     const d = deps();
     const result = await runExportPipeline({ projectId: 'p1', userId: 'dev-user', jobId: 'j1' }, d as any, step() as any);
 
@@ -94,12 +94,10 @@ describe('final dubbing export pipeline', () => {
     ]);
     expect(d.usageEvents.some((event) => event.operationKey.includes(':tts:s2:'))).toBe(false);
 
-    const render = d.usageEvents.filter((event) => event.kind === 'render_minute');
+    const render = d.usageEvents.filter((event) => event.kind === 'render_second');
     expect(render).toHaveLength(2);
-    expect(render[0]).toMatchObject({ provider: 'ffmpeg-container', phase: 'started', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
-    expect(render[0].units).toBeCloseTo(1 / 6, 10);
-    expect(render[1]).toMatchObject({ provider: 'ffmpeg-container', phase: 'completed', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
-    expect(render[1].units).toBeCloseTo(1 / 6, 10);
+    expect(render[0]).toMatchObject({ units: 10, provider: 'ffmpeg-container', phase: 'started', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
+    expect(render[1]).toMatchObject({ units: 10, provider: 'ffmpeg-container', phase: 'completed', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
 
     expect(d.media.renderExport).toHaveBeenCalledWith(
       'p1',
