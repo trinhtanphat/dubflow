@@ -13,11 +13,15 @@ type StudioTopbarProps = {
   cloudDetail?: string;
   canUndo: boolean;
   canRedo: boolean;
+  canExport?: boolean;
+  exportBusy?: boolean;
+  exportHref?: string;
   onUndo(): void;
   onRedo(): void;
   onOpenCommands(): void;
   onOpenSources?(): void;
   onOpenInspector?(): void;
+  onExport?(): void;
 };
 
 const saveCopy = {
@@ -44,11 +48,15 @@ export function StudioTopbar({
   cloudDetail,
   canUndo,
   canRedo,
+  canExport = false,
+  exportBusy = false,
+  exportHref,
   onUndo,
   onRedo,
   onOpenCommands,
   onOpenSources,
   onOpenInspector,
+  onExport,
 }: StudioTopbarProps) {
   const save = saveCopy[saveState];
   const cloud = cloudCopy[cloudState];
@@ -94,9 +102,20 @@ export function StudioTopbar({
         </div>
         <div className="credits studio-credits"><span>✦</span><div><strong>50,000</strong><small>Credits</small></div></div>
         <div className="avatar" aria-label="Tài khoản YupVox">YV</div>
-        <Tooltip text="Export sẽ bật khi media processor được cấu hình và capability pass">
-          <button className="export-button reference-export-button" type="button" disabled>Xuất bản Dubbing</button>
-        </Tooltip>
+        {exportHref ? (
+          <a className="export-button reference-export-button" href={exportHref}>Tải Dubbing</a>
+        ) : (
+          <Tooltip text={canExport ? 'Tạo video dubbing cuối cùng' : 'Hoàn tất xử lý và review trước khi xuất bản'}>
+            <button
+              className="export-button reference-export-button"
+              type="button"
+              disabled={!canExport || exportBusy}
+              onClick={onExport}
+            >
+              {exportBusy ? 'Đang xuất…' : 'Xuất bản Dubbing'}
+            </button>
+          </Tooltip>
+        )}
       </div>
     </header>
   );
