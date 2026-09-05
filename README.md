@@ -14,7 +14,22 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - Workers AI ASR adapter using `@cf/openai/whisper-large-v3-turbo` in `transcribe` mode with VAD.
 - Voice provider boundary that **does not claim Vietnamese TTS or voice cloning** until a live capability check explicitly verifies it.
 - Media-processing boundary that reports `MEDIA_PROCESSOR_UNAVAILABLE` until an FFmpeg Cloudflare Container is actually configured; export is never faked.
-- No GitHub Actions. `.github/workflows` is forbidden by a repository guard.
+- GitHub Actions CI verifies dependency installation, tests, TypeScript typecheck and production build on pull requests and `main`.
+
+## Continuous integration
+
+The repository uses `.github/workflows/ci.yml` for verification-only CI. It runs on pull requests, pushes to `main`, and manual `workflow_dispatch` runs.
+
+The gate executes:
+
+```bash
+npm install --no-audit --no-fund
+npm run test
+npm run typecheck
+npm run build
+```
+
+Cloudflare deployment remains separate and explicit; the CI workflow does not require deployment secrets.
 
 ## Cloudflare target
 
