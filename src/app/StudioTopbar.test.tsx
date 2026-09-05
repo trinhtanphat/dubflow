@@ -72,4 +72,41 @@ describe('StudioTopbar', () => {
     expect(html).toContain('aria-label="Mở nguồn media"');
     expect(html).toContain('aria-label="Mở inspector"');
   });
+
+  it('enables final export only when the studio marks the project exportable', () => {
+    const html = renderToStaticMarkup(
+      <StudioTopbar
+        projectTitle="Ready"
+        saveState="saved"
+        cloudState="ready"
+        canUndo={false}
+        canRedo={false}
+        canExport
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onOpenCommands={() => {}}
+        onExport={() => {}}
+      />,
+    );
+    expect(html).toMatch(/<button[^>]*class="export-button reference-export-button"[^>]*>Xuất bản Dubbing<\/button>/);
+    expect(html).not.toMatch(/class="export-button reference-export-button"[^>]*disabled/);
+  });
+
+  it('shows a project-scoped download action after a durable export exists', () => {
+    const html = renderToStaticMarkup(
+      <StudioTopbar
+        projectTitle="Done"
+        saveState="saved"
+        cloudState="ready"
+        canUndo={false}
+        canRedo={false}
+        exportHref="/api/projects/p1/export/media"
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onOpenCommands={() => {}}
+      />,
+    );
+    expect(html).toContain('href="/api/projects/p1/export/media"');
+    expect(html).toContain('Tải Dubbing');
+  });
 });
