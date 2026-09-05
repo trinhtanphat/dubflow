@@ -49,7 +49,7 @@ describe('StudioShell live voice preview wiring', () => {
     expect(services.createObjectURL).toHaveBeenCalledWith(blob);
     expect(services.playAudio).toHaveBeenCalledWith('blob:yupvox-preview');
     expect(services.revokeObjectURL).toHaveBeenCalledWith('blob:yupvox-preview');
-    expect(setBusy.mock.calls).toEqual([[true], [false]]]);
+    expect(setBusy.mock.calls).toEqual([[true], [false]]);
     expect(setError).toHaveBeenCalledWith('');
   });
 
