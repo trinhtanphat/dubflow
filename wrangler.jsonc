@@ -28,6 +28,13 @@
   "ai": {
     "binding": "AI"
   },
+  "workflows": [
+    {
+      "binding": "DUBBING_WORKFLOW",
+      "name": "dubflow-dubbing",
+      "class_name": "DubbingWorkflow"
+    }
+  ],
   "containers": [
     {
       "class_name": "FfmpegContainer",

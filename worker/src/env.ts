@@ -7,11 +7,18 @@ export interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
 }
 
+export type WorkflowInstanceLike = { id: string };
+
+export interface WorkflowBindingLike {
+  create(input: { id?: string; params?: unknown }): Promise<WorkflowInstanceLike>;
+}
+
 export interface Env {
   DB: D1DatabaseLike;
   MEDIA: R2BucketLike;
   AI: AiBinding;
   ASSETS: AssetFetcher;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
+  DUBBING_WORKFLOW: WorkflowBindingLike;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
 }
