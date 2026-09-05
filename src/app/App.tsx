@@ -4,7 +4,11 @@ import type { CloudJob } from '../features/projects/jobApi';
 import type { CloudProject } from '../features/projects/projectApi';
 import { cancelDashboardJob, retryDashboardJob, type DashboardJobResult } from './dashboardJobControl';
 import { StudioShell } from './StudioShell';
-import { loadProjectDashboardSnapshot, openDashboardProject } from './projectDashboardFlow';
+import {
+  createDashboardProject,
+  loadProjectDashboardSnapshot,
+  openDashboardProject,
+} from './projectDashboardFlow';
 import { useStudioState } from './useStudioState';
 
 type AppView = 'dashboard' | 'studio';
@@ -61,6 +65,17 @@ export function App() {
     }
   }
 
+  async function handleCreateProject() {
+    setDashboardError('');
+    try {
+      const project = await createDashboardProject('Dự án mới');
+      studio.dispatch({ type: 'hydrateProject', project });
+      setView('studio');
+    } catch (error) {
+      setDashboardError(errorMessage(error, 'Không thể tạo dự án.'));
+    }
+  }
+
   async function handleRetryJob(projectId: string, jobId: string) {
     setDashboardError('');
     try {
@@ -109,7 +124,7 @@ export function App() {
       onOpenProject={(projectId) => { void handleOpenProject(projectId); }}
       onRetryJob={(projectId, jobId) => { void handleRetryJob(projectId, jobId); }}
       onCancelJob={(projectId, jobId) => { void handleCancelJob(projectId, jobId); }}
-      onCreateProject={() => setView('studio')}
+      onCreateProject={() => { void handleCreateProject(); }}
     />
   );
 }
