@@ -2,6 +2,7 @@ import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
 import type { Project, ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
+import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
@@ -29,8 +30,10 @@ export type DubbingPipelineDeps = {
   media: Pick<MediaProcessor, 'probe' | 'extractAudioChunks'>;
   bucket: Pick<R2BucketLike, 'get'>;
   asr: AsrProvider;
+  asrProvider: string;
   segments: PipelineSegments;
   translation: TranslationProvider;
+  usage: Pick<UsageStore, 'record'>;
 };
 
 function asMessage(error: unknown): string {
@@ -51,6 +54,7 @@ export async function runDubbingPipeline(
 ): Promise<{ status: 'needs_review'; segmentCount: number }> {
   let failureCode = 'PIPELINE_FAILED';
   const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
+  const usageAttempt = params.usageAttempt ?? 0;
   try {
     const project = await step.do('authorize project', async () => deps.projects.getByIdForUser(params.projectId, params.userId));
     if (!project) throw new Error('Project not found.');
@@ -87,6 +91,15 @@ export async function runDubbingPipeline(
         const audio = await readChunk(deps.bucket, chunk.objectKey);
         return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
       });
+      await step.do(`record ASR usage ${index + 1}`, async () => deps.usage.record({
+        userId: params.userId,
+        projectId: params.projectId,
+        jobId: params.jobId,
+        kind: 'asr_audio_seconds',
+        units: chunk.durationMs / 1000,
+        provider: deps.asrProvider,
+        idempotencyKey: `job:${params.jobId}:attempt:${usageAttempt}:asr:${chunk.objectKey}`,
+      }));
       normalizedInputs.push({
         projectId: params.projectId,
         chunkId: chunk.objectKey,
@@ -121,6 +134,18 @@ export async function runDubbingPipeline(
           'vi',
         ),
       );
+      const translatedCharacters = batch.reduce((sum, segment) => sum + segment.sourceText.length, 0);
+      if (translatedCharacters > 0) {
+        await step.do(`record translation usage ${offset + 1}`, async () => deps.usage.record({
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'translation_characters',
+          units: translatedCharacters,
+          provider: 'workers-ai',
+          idempotencyKey: `job:${params.jobId}:attempt:${usageAttempt}:translation:${offset}`,
+        }));
+      }
       const byId = new Map(translated.map((item) => [item.id, item]));
       await step.do(`persist translations ${offset + 1}-${offset + batch.length}`, async () => {
         for (const segment of batch) {
