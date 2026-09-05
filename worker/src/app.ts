@@ -12,6 +12,7 @@ import { createSpeakerRoutes } from './routes/speakers';
 import { createTranslationRoutes } from './routes/translation';
 import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
+import { createUsageRoutes } from './routes/usage';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -30,6 +31,7 @@ app.route('/api/projects', createTranslationRoutes());
 app.route('/api/projects', createJobRoutes());
 app.route('/api/projects', createMediaRoutes());
 app.route('/api/voice', createVoiceRoutes());
+app.route('/api/usage', createUsageRoutes());
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;
