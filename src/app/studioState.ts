@@ -58,6 +58,7 @@ export type StudioAction =
   | { type: 'cancelSegmentPreview' }
   | { type: 'commitTimingMutation'; before: Segment; after: Segment }
   | { type: 'commitSplitMutation'; originalBefore: Segment; leftAfter: Segment; rightAfter: Segment }
+  | { type: 'reconcileLatestSplitMutation'; previousRightId: string; mutation: SplitMutation }
   | { type: 'applyUndoLocal' }
   | { type: 'applyRedoLocal' };
 
@@ -188,6 +189,33 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         history: pushHistory(state.history, mutation),
         segmentPreview: null,
         selectedSegmentId: selectionAfterMutation(state, project, action.leftAfter.id),
+      };
+    }
+    case 'reconcileLatestSplitMutation': {
+      const latestIndex = state.history.past.length - 1;
+      const latest = state.history.past[latestIndex];
+      if (!latest || latest.kind !== 'split' || latest.rightAfter.id !== action.previousRightId) return state;
+      if (action.mutation.originalBefore.id !== latest.originalBefore.id
+        || action.mutation.leftAfter.id !== latest.leftAfter.id) return state;
+      if (!state.project.segments.some((segment) => segment.id === action.previousRightId)
+        || !state.project.segments.some((segment) => segment.id === action.mutation.leftAfter.id)) return state;
+      if (action.mutation.rightAfter.id !== action.previousRightId
+        && state.project.segments.some((segment) => segment.id === action.mutation.rightAfter.id)) return state;
+
+      const segments = state.project.segments.map((segment) => {
+        if (segment.id === action.mutation.leftAfter.id) return action.mutation.leftAfter;
+        if (segment.id === action.previousRightId) return action.mutation.rightAfter;
+        return segment;
+      });
+      const past = state.history.past.slice();
+      past[latestIndex] = action.mutation;
+      return {
+        ...state,
+        project: { ...state.project, segments },
+        history: { ...state.history, past },
+        selectedSegmentId: state.selectedSegmentId === action.previousRightId
+          ? action.mutation.rightAfter.id
+          : state.selectedSegmentId,
       };
     }
     case 'applyUndoLocal': {
