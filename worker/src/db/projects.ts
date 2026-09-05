@@ -7,12 +7,15 @@ export type Project = {
   sourceLanguage: CreateProjectInput['sourceLanguage'];
   targetLanguage: 'vi';
   status: string;
+  sourceObjectKey?: string | null;
+  sizeBytes?: number | null;
 };
 
 export interface ProjectStore {
   create(userId: string, input: CreateProjectInput): Promise<Project>;
   listByUser(userId: string): Promise<Project[]>;
   getByIdForUser(id: string, userId: string): Promise<Project | null>;
+  setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
 }
 
 export interface D1StatementLike {
@@ -33,6 +36,8 @@ type ProjectRow = {
   source_language: CreateProjectInput['sourceLanguage'];
   target_language: 'vi';
   status: string;
+  source_object_key?: string | null;
+  size_bytes?: number | null;
 };
 
 function fromRow(row: ProjectRow): Project {
@@ -43,6 +48,8 @@ function fromRow(row: ProjectRow): Project {
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
     status: row.status,
+    sourceObjectKey: row.source_object_key,
+    sizeBytes: row.size_bytes,
   };
 }
 
@@ -75,7 +82,7 @@ export class ProjectRepository implements ProjectStore {
 
   async listByUser(userId: string): Promise<Project[]> {
     const result = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status
+      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, size_bytes
        FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
     ).bind(userId).all<ProjectRow>();
     return (result.results ?? []).map(fromRow);
@@ -83,9 +90,17 @@ export class ProjectRepository implements ProjectStore {
 
   async getByIdForUser(id: string, userId: string): Promise<Project | null> {
     const row = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status
+      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, size_bytes
        FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
     ).bind(id, userId).first<ProjectRow>();
     return row ? fromRow(row) : null;
+  }
+
+  async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
+    await this.db.prepare(
+      `UPDATE projects
+       SET source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+    ).bind(objectKey, sizeBytes, id, userId).run();
   }
 }
