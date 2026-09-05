@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
@@ -11,15 +11,15 @@ import {
   persistUndo,
 } from '../features/timeline/segmentMutationService';
 import type { CloudJob } from '../features/projects/jobApi';
-import type { SegmentPatch } from '../features/transcript/segmentApi';
 import type { TranslationMode } from '../features/translation/translationApi';
-import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
+import { retranslateEditorSegment } from '../features/transcript/editorPersistence';
 import type { EditorMutation } from './editorHistory';
 import type { StudioAction, StudioState } from './studioState';
 import type { useStudioState } from './useStudioState';
 import { followCloudJob } from './cloudJobFlow';
 import { loadCloudStudioProject } from './cloudHydration';
-import { StudioTopbar } from './StudioTopbar';
+import { StudioTopbar, type SaveState } from './StudioTopbar';
+import { useSegmentAutosave } from './useSegmentAutosave';
 
 type StudioShellProps = ReturnType<typeof useStudioState>;
 type MobilePanel = 'none' | 'sources' | 'inspector';
@@ -51,6 +51,21 @@ const defaultStudioEditorServices: StudioEditorServices = {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+export function deriveStudioSaveState(
+  state: StudioState,
+  cloudEditable: boolean,
+  editorError: string,
+  editorBusy: boolean,
+): SaveState {
+  if (!cloudEditable) return 'offline';
+  const phases = Object.values(state.drafts).map((draft) => draft.phase);
+  if (phases.includes('conflict')) return 'conflict';
+  if (phases.includes('error') || Boolean(editorError)) return 'error';
+  if (phases.includes('saving') || editorBusy) return 'saving';
+  if (phases.includes('dirty')) return 'dirty';
+  return 'saved';
 }
 
 export function createStudioEditorActions({
@@ -175,8 +190,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const previousSelectedSegmentId = useRef(state.selectedSegmentId);
 
   const cloudEditable = state.project.id !== 'demo';
+  const autosave = useSegmentAutosave({ state, dispatch });
+  const selectedDraft = selectedSegment ? state.drafts[selectedSegment.id] : undefined;
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -221,6 +239,14 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   }, [activeJob, dispatch]);
 
   useEffect(() => {
+    const previousId = previousSelectedSegmentId.current;
+    if (previousId && previousId !== state.selectedSegmentId) {
+      void autosave.flush(previousId);
+    }
+    previousSelectedSegmentId.current = state.selectedSegmentId;
+  }, [state.selectedSegmentId]);
+
+  useEffect(() => {
     setTranslationComparison(null);
     setEditorError('');
   }, [state.selectedSegmentId]);
@@ -263,28 +289,6 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     return () => window.removeEventListener('keydown', handleEditorHistoryShortcut);
   }, [cloudEditable, editorBusy, editorActions, state.history.future.length, state.history.past.length]);
 
-  const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
-    if (!cloudEditable) return;
-    const current = state.project.segments.find((segment) => segment.id === segmentId);
-    if (!current) return;
-    setEditorError('');
-    try {
-      const updated = await persistEditorPatch(state.project.id, segmentId, current.version, patch);
-      if (patch.sourceText !== undefined) {
-        dispatch({ type: 'editSource', segmentId, text: updated.sourceText });
-      }
-      if (patch.translatedText !== undefined) {
-        dispatch({ type: 'editTranslation', segmentId, text: updated.translatedText });
-      }
-      if (patch.speakerId !== undefined && updated.speakerId && state.project.speakers.some((speaker) => speaker.id === updated.speakerId)) {
-        dispatch({ type: 'assignSpeaker', segmentId, speakerId: updated.speakerId });
-      }
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
-      await restoreCloudProject();
-    }
-  };
-
   const retranslate = async (segmentId: string) => {
     if (!cloudEditable || editorBusy) return;
     const current = state.project.segments.find((segment) => segment.id === segmentId);
@@ -308,23 +312,15 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
   const applyTranslation = async (text: string) => {
     if (!selectedSegment || !cloudEditable || editorBusy) return;
-    setEditorBusy(true);
     setEditorError('');
-    try {
-      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, selectedSegment.version, { translatedText: text });
-      dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
-      setTranslationComparison(null);
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
-      await restoreCloudProject();
-    } finally {
-      setEditorBusy(false);
-    }
+    autosave.edit(selectedSegment.id, { translatedText: text });
+    setTranslationComparison(null);
+    await autosave.flush(selectedSegment.id);
   };
 
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
   const cloudDetail = cloudError || cloudJob?.currentStep || (cloudJob ? cloudJob.status : undefined);
-  const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
+  const saveState = deriveStudioSaveState(state, cloudEditable, editorError, editorBusy);
   const canUndo = cloudEditable && !editorBusy && state.history.past.length > 0;
   const canRedo = cloudEditable && !editorBusy && state.history.future.length > 0;
 
@@ -379,9 +375,14 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           lipSyncEnabled={state.lipSyncEnabled}
           dispatch={dispatch}
           cloudEditable={cloudEditable}
+          draft={selectedDraft}
+          onEditDraft={autosave.edit}
+          onFlushDraft={(segmentId) => { void autosave.flush(segmentId); }}
+          onRetryDraft={(segmentId) => { void autosave.retry(segmentId); }}
+          onDiscardConflict={autosave.discardConflict}
+          onReapplyConflict={(segmentId) => { void autosave.reapplyConflict(segmentId); }}
           translationMode={translationMode}
           onTranslationModeChange={setTranslationMode}
-          onCommitPatch={commitPatch}
           onRetranslate={retranslate}
           comparison={translationComparison}
           onApplyTranslation={applyTranslation}
