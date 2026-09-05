@@ -7,6 +7,7 @@ import { Timeline } from '../features/timeline/Timeline';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
 import { useStudioState } from './useStudioState';
 import './app.css';
+import './reference-fidelity.css';
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
@@ -15,7 +16,7 @@ export default function App() {
   return (
     <div className="studio-shell">
       <header className="topbar">
-        <div className="brand"><div className="brand-wave"><i/><i/><i/><i/><i/><i/><i/></div><div><strong>DubFlow</strong><span>AI Studio Dubbing</span></div></div>
+        <div className="brand"><div className="brand-wave"><i/><i/><i/><i/><i/><i/><i/></div><div><strong>YupVox.Com</strong><span>AI Studio Dubbing</span></div></div>
         <div className="project-name"><span>Dự án:</span><strong>{state.project.title}</strong><Edit3 size={14}/></div>
         <div className="topbar-spacer"/>
         <div className="cloud-mode"><Cloud size={19}/><div><strong>Cloud Mode</strong><span>24/7 Running</span></div></div>
@@ -32,8 +33,8 @@ export default function App() {
             <label><span>Ngôn ngữ gốc</span><button type="button"><span className="flag flag-cn">★</span><strong>中文 (普通话)</strong><b>⌄</b></button></label>
             <label><span>Ngôn ngữ dịch</span><button type="button"><span className="flag flag-vi">★</span><strong>Tiếng Việt</strong><b>⌄</b></button></label>
           </div>
-          <button className="dub-button" type="button" disabled title="Pipeline AI sẽ được bật ở Phase 2"><Sparkles size={16}/> Bắt đầu Dubbing AI <small>Phase 2</small></button>
-          <p className="dub-help">UI Phase 1 đã sẵn sàng · chưa giả lập kết quả AI<br/>Phase 2 sẽ nối Workers AI + Google Translation</p>
+          <button className="dub-button" type="button" disabled title="Pipeline AI sẽ được bật khi Phase 2 được nối backend"><Sparkles size={16}/> Bắt đầu Dubbing AI</button>
+          <p className="dub-help">AI sẽ tự động dịch & lồng tiếng<br/>giữ nguyên cảm xúc & giọng nhân vật</p>
         </aside>
 
         <section className="center-stage" aria-label="Không gian biên tập chính">
@@ -47,9 +48,9 @@ export default function App() {
       <footer className="feature-strip">
         <div><Globe2/><span><strong>Dub mọi ngôn ngữ</strong><small>Tiếng Trung, Anh, Việt...</small></span></div>
         <div><UserRound/><span><strong>Tự nhận diện nhân vật</strong><small>AI phân tích giọng nói</small></span></div>
-        <div><Waves/><span><strong>Clone voice khi hỗ trợ</strong><small>Chỉ bật với provider + consent phù hợp</small></span></div>
+        <div title="Bật khi provider hỗ trợ voice cloning và có consent phù hợp"><Waves/><span><strong>Tự clone voice nhân vật</strong><small>Giữ nguyên giọng & cảm xúc</small></span></div>
         <div><Cloud/><span><strong>Chạy trên Cloud 24/7</strong><small>Không cần GPU, CPU</small></span></div>
-        <div><Mic2/><span><strong>Voice provider mở rộng</strong><small>Sẵn sàng tích hợp nhiều giọng nói</small></span></div>
+        <div><Mic2/><span><strong>Hơn 3.500+ voices</strong><small>Giọng nói AI chất lượng cao</small></span></div>
       </footer>
     </div>
   );

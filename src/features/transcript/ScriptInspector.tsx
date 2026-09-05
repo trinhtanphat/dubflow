@@ -1,4 +1,4 @@
-import { Play, RefreshCcw, WandSparkles } from 'lucide-react';
+import { Play, RefreshCcw } from 'lucide-react';
 import type { Segment, Speaker } from '../timeline/types';
 
 type Props = {
@@ -15,7 +15,7 @@ export function ScriptInspector({ segment, speakers, lipSync, onLipSync, onSourc
   return (
     <aside className="right-rail" aria-label="AI Dubbing Studio">
       <div className="inspector-header"><strong>AI Dubbing Studio</strong><span>Dịch & lồng tiếng với AI</span></div>
-      <div className="inspector-tabs"><button className="active">Kịch bản</button><button>Nhân vật</button></div>
+      <div className="inspector-tabs"><button className="active" type="button">Kịch bản</button><button type="button">Nhân vật</button></div>
       <div className="script-card source-card">
         <div className="script-lang"><span className="flag flag-cn">★</span><strong>中文 (原声)</strong></div>
         <div className="script-time">00:15:23</div>
@@ -32,9 +32,8 @@ export function ScriptInspector({ segment, speakers, lipSync, onLipSync, onSourc
       </div>
       <div className="voice-assignment">
         <div className="rail-heading">Gán giọng cho nhân vật</div>
-        <button className="voice-select" type="button"><span className={`avatar small avatar-${speaker.accent}`}>{speaker.initials}</span><span>{speaker.name} ({speaker.gender})</span><span>⌄</span></button>
-        <button className="voice-preview" type="button" disabled title="Sẽ bật ở Phase 2"><Play size={15} fill="currentColor"/> Nghe thử giọng <small>Phase 2</small></button>
-        <div className="phase-note"><WandSparkles size={14}/> Chưa tạo giọng giả: provider AI sẽ được kích hoạt ở Phase 2</div>
+        <button className="voice-select" type="button"><span className={`avatar small avatar-${speaker.accent}`}>{speaker.initials}</span><span>{speaker.name} ({speaker.gender}主)</span><span>⌄</span></button>
+        <button className="voice-preview" type="button" disabled title="Sẽ bật khi voice provider được cấu hình"><Play size={15} fill="currentColor"/> Nghe thử giọng</button>
       </div>
       <div className="lip-row"><div><strong>Đồng bộ khẩu hình</strong><span>Tự động khớp môi với giọng lồng tiếng</span></div><button className={`toggle ${lipSync ? 'on' : ''}`} type="button" onClick={onLipSync} aria-pressed={lipSync}><i /></button></div>
     </aside>

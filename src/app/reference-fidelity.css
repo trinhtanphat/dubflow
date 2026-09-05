@@ -1,0 +1,66 @@
+/* Pixel contract measured from the supplied 1448×1086 reference. */
+@media (min-width: 1181px) {
+  .studio-shell {
+    grid-template-rows: 76px minmax(0, 1fr) 66px;
+  }
+
+  .topbar {
+    gap: 22px;
+    padding: 0 31px 0 20px;
+  }
+
+  .brand {
+    min-width: 278px;
+  }
+
+  .workspace {
+    grid-template-columns: 304px minmax(640px, 1fr) 304px;
+  }
+
+  .left-rail {
+    padding: 17px 14px 16px 31px;
+  }
+
+  .right-rail {
+    padding: 17px 14px;
+  }
+
+  .center-stage {
+    grid-template-rows: minmax(430px, 1fr) 408px;
+  }
+
+  .player-controls {
+    height: 68px;
+  }
+
+  .timeline-row {
+    height: 47px;
+  }
+
+  .timeline-body {
+    height: 282px;
+  }
+
+  .speaker-card {
+    height: 62px;
+  }
+
+  .speaker-meta {
+    min-width: 104px;
+  }
+
+  .speaker-meta strong {
+    font-size: 10.5px;
+  }
+
+  .dub-button:disabled,
+  .voice-preview:disabled {
+    opacity: 1;
+    color: #fff;
+    cursor: default;
+  }
+
+  .feature-strip {
+    padding: 0 30px;
+  }
+}

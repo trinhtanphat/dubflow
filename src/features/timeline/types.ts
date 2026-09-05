@@ -1,6 +1,7 @@
 export type Speaker = {
   id: string;
   name: string;
+  roleZh: '女主' | '男主' | '反派';
   gender: 'Nữ' | 'Nam';
   share: number;
   accent: 'violet' | 'blue' | 'green';
