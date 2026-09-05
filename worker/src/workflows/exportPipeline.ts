@@ -1,5 +1,7 @@
 import type { ProjectStatus } from '../db/projects';
+import type { JobStore } from '../db/jobs';
 import type { VoiceGenerateInput } from '../services/voice/types';
+import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -41,11 +43,7 @@ export type ExportPipelineDeps = {
     setStatus(projectId: string, userId: string, status: ProjectStatus): Promise<void>;
     setExportObject(projectId: string, userId: string, objectKey: string): Promise<void>;
   };
-  jobs: {
-    setProgress(jobId: string, progress: number, currentStep: string): Promise<void>;
-    fail(jobId: string, errorCode: string, errorMessage: string): Promise<void>;
-    complete(jobId: string): Promise<void>;
-  };
+  jobs: Pick<JobStore, 'getForProject' | 'setProgress' | 'fail' | 'complete'>;
   segments: {
     list(projectId: string, userId: string): Promise<ExportSegment[]>;
     setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
@@ -88,6 +86,7 @@ export async function runExportPipeline(
   deps: ExportPipelineDeps,
   step: ExportWorkflowStepLike,
 ): Promise<{ status: 'completed'; exportObjectKey: string }> {
+  const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
   try {
     const project = await step.do('authorize export project', async () =>
       deps.projects.getByIdForUser(params.projectId, params.userId),
@@ -107,6 +106,7 @@ export async function runExportPipeline(
       : [];
     const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
 
+    await step.do('check cancellation before export processing', ensureActive);
     await step.do('mark export processing', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'processing');
       await deps.jobs.setProgress(params.jobId, 0.05, 'generating_voice');
@@ -115,6 +115,7 @@ export async function runExportPipeline(
     const clips: ExportClip[] = [];
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index];
+      await step.do(`check cancellation before voice ${segment.id}`, ensureActive);
       let objectKey = segment.voiceStatus === 'completed' && segment.dubbedObjectKey
         ? segment.dubbedObjectKey
         : null;
@@ -151,6 +152,7 @@ export async function runExportPipeline(
       );
     }
 
+    await step.do('check cancellation before export render', ensureActive);
     await step.do('mark render stage', async () =>
       deps.jobs.setProgress(params.jobId, 0.72, 'rendering_export'),
     );
@@ -162,6 +164,7 @@ export async function runExportPipeline(
       throw new Error('Media processor returned an invalid export object key.');
     }
 
+    await step.do('check cancellation before export publish', ensureActive);
     await step.do('publish final export', async () => {
       await deps.projects.setExportObject(params.projectId, params.userId, rendered.exportObjectKey);
       await deps.projects.setStatus(params.projectId, params.userId, 'completed');
@@ -170,6 +173,15 @@ export async function runExportPipeline(
 
     return { status: 'completed', exportObjectKey: rendered.exportObjectKey };
   } catch (error) {
+    if (isJobCancelledError(error)) {
+      try {
+        await deps.projects.setStatus(params.projectId, params.userId, 'cancelled');
+      } catch {
+        // Preserve the cancellation error if the project status write also fails.
+      }
+      throw error;
+    }
+
     const message = errorMessage(error);
     try {
       await deps.jobs.fail(params.jobId, 'EXPORT_FAILED', message);
