@@ -8,7 +8,7 @@ import { useStudioState } from './useStudioState';
 export function App() {
   const { state, dispatch, selectedSegment, selectedSpeaker } = useStudioState();
   return (
-    <div className="app-shell">
+    <div className="app-shell studio-pro-shell">
       <header className="topbar">
         <div className="brand"><div className="brand-mark" aria-hidden="true">◫</div><div><strong>YupVox</strong><span>AI Dubbing Studio</span></div></div>
         <div className="project-title"><span>Dự án:</span><strong>{state.project.title}</strong><button type="button" aria-label="Đổi tên dự án">✎</button></div>
