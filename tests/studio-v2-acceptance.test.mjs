@@ -33,8 +33,9 @@ test('V2 acceptance: timeline supports select, move, resize, split, zoom and pla
   assert.match(timeline, /onSplitSelected\?\(\)|onSplitSelected\(\)/);
   assert.match(timeline, /setTimelineZoom/);
   assert.match(timeline, /timeline-playhead-handle/);
-  assert.match(timelineTests, /move|resize/i);
-  assert.match(editingTests, /clampMoveTiming|clampResizeTiming/);
+  assert.match(timelineTests, /data-segment-editing|Kéo playhead/);
+  assert.match(editingTests, /clampMoveTiming/);
+  assert.match(editingTests, /clampResizeTiming/);
   assert.match(splitTests, /split/i);
 });
 
