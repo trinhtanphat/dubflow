@@ -11,4 +11,14 @@ describe('DubFlow studio shell', () => {
     expect(html).toContain('aria-label="Không gian chỉnh sửa"');
     expect(html).toContain('aria-label="Inspector dubbing"');
   });
+
+  it('integrates the truthful player state with the interactive timeline', () => {
+    const html = renderToStaticMarkup(<App />);
+    expect(html).toContain('Chưa có media phát được');
+    expect(html).not.toContain('aria-label="Video source"');
+    expect(html).not.toContain('character--left');
+    expect(html).toContain('aria-label="Phóng to timeline"');
+    expect(html).toContain('aria-label="Vừa toàn dự án"');
+    expect(html).toContain('aria-label="Kéo playhead"');
+  });
 });
