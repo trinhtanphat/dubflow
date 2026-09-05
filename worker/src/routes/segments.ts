@@ -19,7 +19,10 @@ function persistenceErrorResponse(c: any, error: SegmentPersistenceError) {
   if (error.code === 'SEGMENT_NOT_FOUND' || error.code === 'PROJECT_NOT_FOUND') {
     return c.json(errorBody(error.code, error.message), 404);
   }
-  if (error.code === 'SEGMENT_OVERLAP' || error.code === 'SPLIT_LINEAGE_MISMATCH' || error.code === 'SEGMENT_VERSION_CONFLICT') {
+  if (error.code === 'SEGMENT_OVERLAP'
+    || error.code === 'SPLIT_LINEAGE_MISMATCH'
+    || error.code === 'SEGMENT_VERSION_CONFLICT'
+    || error.code === 'PROJECT_BUSY') {
     return c.json(errorBody(error.code, error.message), 409);
   }
   if (error.code === 'D1_BATCH_UNAVAILABLE') {
