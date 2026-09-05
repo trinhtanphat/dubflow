@@ -2,11 +2,11 @@ import { patchSegment, type CloudSegment, type SegmentPatch } from './segmentApi
 import { retranslateSegment, type RetranslateResult, type TranslationMode } from '../translation/translationApi';
 
 export type EditorPatchDeps = {
-  patchSegment: (projectId: string, segmentId: string, patch: SegmentPatch) => Promise<CloudSegment>;
+  patchSegment: (projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) => Promise<CloudSegment>;
 };
 
 export type EditorRetranslateDeps = {
-  retranslateSegment: (projectId: string, segmentId: string, mode: TranslationMode) => Promise<RetranslateResult>;
+  retranslateSegment: (projectId: string, segmentId: string, expectedVersion: number, mode: TranslationMode) => Promise<RetranslateResult>;
 };
 
 export type EditorRetranslateResult =
@@ -26,19 +26,21 @@ const defaultRetranslateDeps: EditorRetranslateDeps = { retranslateSegment };
 export function persistEditorPatch(
   projectId: string,
   segmentId: string,
+  expectedVersion: number,
   patch: SegmentPatch,
   deps: EditorPatchDeps = defaultPatchDeps,
 ) {
-  return deps.patchSegment(projectId, segmentId, patch);
+  return deps.patchSegment(projectId, segmentId, expectedVersion, patch);
 }
 
 export async function retranslateEditorSegment(
   projectId: string,
   segmentId: string,
+  expectedVersion: number,
   mode: TranslationMode,
   deps: EditorRetranslateDeps = defaultRetranslateDeps,
 ): Promise<EditorRetranslateResult> {
-  const result = await deps.retranslateSegment(projectId, segmentId, mode);
+  const result = await deps.retranslateSegment(projectId, segmentId, expectedVersion, mode);
   if (result.mode === 'compare') {
     const workersAI = result.workersAI[0]?.text;
     const google = result.google[0]?.text;

@@ -9,12 +9,12 @@ const project: CloudProject = {
   exportObjectKey: 'projects/project-1/export/dubbed.mp4',
 };
 const segments: CloudSegment[] = [
-  { id: 'b', projectId: 'project-1', speakerId: null, startMs: 5000, endMs: 7000, sourceText: '二', translatedText: 'hai', translationEngine: 'workers-ai', translationStatus: 'completed', voiceStatus: 'pending', version: 1 },
-  { id: 'a', projectId: 'project-1', speakerId: null, startMs: 1000, endMs: 3000, sourceText: '一', translatedText: 'một', translationEngine: 'workers-ai', translationStatus: 'completed', voiceStatus: 'pending', version: 1 },
+  { id: 'b', projectId: 'project-1', speakerId: null, startMs: 5000, endMs: 7000, sourceText: '二', translatedText: 'hai', translationEngine: 'workers-ai', translationStatus: 'completed', voiceStatus: 'pending', version: 7 },
+  { id: 'a', projectId: 'project-1', speakerId: null, startMs: 1000, endMs: 3000, sourceText: '一', translatedText: 'một', translationEngine: 'workers-ai', translationStatus: 'completed', voiceStatus: 'pending', version: 3 },
 ];
 
 describe('cloud studio adapter', () => {
-  it('hydrates deterministic timeline data, media readiness, durable export and null speakers', () => {
+  it('hydrates deterministic timeline data, media readiness, durable export, null speakers and canonical revisions', () => {
     const studio = buildCloudStudioProject(project, segments);
     expect(studio.id).toBe('project-1');
     expect(studio.durationMs).toBe(12_000);
@@ -22,6 +22,7 @@ describe('cloud studio adapter', () => {
     expect(studio.exportObjectKey).toBe('projects/project-1/export/dubbed.mp4');
     expect(studio.status).toBe('needs_review');
     expect(studio.segments.map((segment) => segment.id)).toEqual(['a', 'b']);
+    expect(studio.segments.map((segment) => segment.version)).toEqual([3, 7]);
     expect(studio.segments.every((segment) => segment.speakerId === 'unassigned')).toBe(true);
     expect(studio.speakers).toContainEqual({ id: 'unassigned', name: 'Chưa gán', label: 'AI transcript', share: 100 });
   });

@@ -2,7 +2,7 @@ import { IconButton } from '../components/IconButton/IconButton';
 import { StatusBadge } from '../components/StatusBadge/StatusBadge';
 import { Tooltip } from '../components/Tooltip/Tooltip';
 
-export type SaveState = 'saved' | 'saving' | 'offline' | 'retrying' | 'error';
+export type SaveState = 'saved' | 'dirty' | 'saving' | 'offline' | 'retrying' | 'error' | 'conflict';
 export type CloudState = 'ready' | 'processing' | 'degraded';
 
 type StudioTopbarProps = {
@@ -25,11 +25,13 @@ type StudioTopbarProps = {
 };
 
 const saveCopy = {
-  saved: { label: 'Saved', detail: 'Cloud synced', tone: 'success' },
-  saving: { label: 'Saving…', detail: 'Syncing changes', tone: 'accent' },
-  offline: { label: 'Offline', detail: 'Changes stay local', tone: 'warning' },
-  retrying: { label: 'Retrying', detail: 'Reconnecting', tone: 'warning' },
-  error: { label: 'Save failed', detail: 'Retry required', tone: 'danger' },
+  saved: { label: 'Đã lưu', detail: 'Đã đồng bộ Cloud', tone: 'success' },
+  dirty: { label: 'Chưa lưu', detail: 'Đang chờ tự động lưu', tone: 'warning' },
+  saving: { label: 'Đang lưu…', detail: 'Đang đồng bộ thay đổi', tone: 'accent' },
+  offline: { label: 'Offline', detail: 'Thay đổi chỉ ở local', tone: 'warning' },
+  retrying: { label: 'Đang thử lại', detail: 'Đang kết nối lại', tone: 'warning' },
+  error: { label: 'Lỗi lưu', detail: 'Cần thử lưu lại', tone: 'danger' },
+  conflict: { label: 'Xung đột', detail: 'Cần chọn cách xử lý', tone: 'danger' },
 } as const;
 
 const cloudCopy = {

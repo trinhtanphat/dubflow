@@ -88,6 +88,7 @@ describe('segment split drafting', () => {
     endMs: 3000,
     sourceText: 'hello beautiful world',
     translatedText: 'xin chao the gioi',
+    version: 1,
   };
 
   it('splits text near the proportional whitespace boundary', () => {
@@ -105,8 +106,9 @@ describe('segment split drafting', () => {
 
   it('creates two children only when both sides meet the minimum duration', () => {
     const draft = splitSegmentDraft(segment, 2000);
-    expect(draft.left).toMatchObject({ id: 'seg-1', startMs: 1000, endMs: 2000, speakerId: 'speaker-1' });
+    expect(draft.left).toMatchObject({ id: 'seg-1', startMs: 1000, endMs: 2000, speakerId: 'speaker-1', version: 1 });
     expect(draft.right).toMatchObject({ startMs: 2000, endMs: 3000, speakerId: 'speaker-1' });
+    expect(draft.right).not.toHaveProperty('version');
     expect(draft.left.sourceText).toBe('hello beautiful');
     expect(draft.right.sourceText).toBe('world');
 

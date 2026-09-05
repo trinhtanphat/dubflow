@@ -9,6 +9,7 @@ const segment = {
   endMs: 3000,
   sourceText: '你好',
   translatedText: 'Xin chào',
+  version: 1,
 };
 
 const speakers = [{ id: 'speaker-1', name: 'Nhân vật 1', label: 'Nữ chính', share: 1 }];

@@ -1,12 +1,25 @@
 import { clampPixelsPerSecond } from '../features/timeline/math';
 import type { Segment, StudioProject } from '../features/timeline/types';
 import {
+  beginDraftSave as beginSegmentDraftSave,
+  commitDraftSave as commitSegmentDraftSave,
+  conflictDraftSave as markSegmentDraftConflict,
+  editDraft as editSegmentDraft,
+  failDraftSave as failSegmentDraftSave,
+  hasUnresolvedDraft,
+  rebaseDraftForSafeReapply as rebaseSegmentDraftForSafeReapply,
+  type SegmentDraft,
+  type SegmentFieldPatch,
+} from './autosaveDraft';
+import {
   applyMutation,
   emptyEditorHistory,
   pushHistory,
   redoHistory,
   undoHistory,
   type EditorHistory,
+  type EditorMutation,
+  type FieldMutation,
   type SplitMutation,
   type TimingMutation,
 } from './editorHistory';
@@ -36,6 +49,7 @@ export type StudioState = {
     viewportWidth: number;
   };
   history: EditorHistory;
+  drafts: Record<string, SegmentDraft>;
   segmentPreview: SegmentPreview | null;
 };
 
@@ -45,6 +59,13 @@ export type StudioAction =
   | { type: 'editSource'; segmentId: string; text: string }
   | { type: 'editTranslation'; segmentId: string; text: string }
   | { type: 'assignSpeaker'; segmentId: string; speakerId: string }
+  | { type: 'editDraft'; segmentId: string; patch: SegmentFieldPatch }
+  | { type: 'beginDraftSave'; segmentId: string }
+  | { type: 'commitDraftSave'; segmentId: string; canonical: Segment }
+  | { type: 'failDraftSave'; segmentId: string; error: string }
+  | { type: 'conflictDraftSave'; segmentId: string; canonical: Segment }
+  | { type: 'discardDraftForServer'; segmentId: string }
+  | { type: 'rebaseDraftForSafeReapply'; segmentId: string }
   | { type: 'hydrateProject'; project: StudioProject }
   | { type: 'toggleLipSync' }
   | { type: 'setPlaying'; playing: boolean }
@@ -59,6 +80,7 @@ export type StudioAction =
   | { type: 'commitTimingMutation'; before: Segment; after: Segment }
   | { type: 'commitSplitMutation'; originalBefore: Segment; leftAfter: Segment; rightAfter: Segment }
   | { type: 'reconcileLatestSplitMutation'; previousRightId: string; mutation: SplitMutation }
+  | { type: 'reconcileHistoryMutation'; direction: 'undo' | 'redo'; previous: EditorMutation; mutation: EditorMutation }
   | { type: 'applyUndoLocal' }
   | { type: 'applyRedoLocal' };
 
@@ -72,6 +94,7 @@ export function createInitialStudioState(project: StudioProject): StudioState {
     playback: { playing: false, rate: 1, volume: 1, muted: false },
     timelineView: { pixelsPerSecond: 1, scrollLeft: 0, viewportWidth: 0 },
     history: emptyEditorHistory(),
+    drafts: {},
     segmentPreview: null,
   };
 }
@@ -81,10 +104,107 @@ function updateSegment(state: StudioState, segmentId: string, update: (segment: 
   return { ...state, project: { ...state.project, segments } };
 }
 
+function replaceProjectSegment(project: StudioProject, segmentId: string, replacement: Segment): StudioProject {
+  return {
+    ...project,
+    segments: project.segments.map((segment) => segment.id === segmentId ? replacement : segment),
+  };
+}
+
+function sortProjectSegments(project: StudioProject, segments: Segment[]): StudioProject {
+  return {
+    ...project,
+    segments: [...segments].sort((left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id)),
+  };
+}
+
+function withDraft(state: StudioState, segmentId: string, draft: SegmentDraft | undefined): StudioState {
+  const drafts = { ...state.drafts };
+  if (draft) drafts[segmentId] = draft;
+  else delete drafts[segmentId];
+  return { ...state, drafts };
+}
+
 function selectionAfterMutation(state: StudioState, project: StudioProject, preferredId?: string): string {
   if (preferredId && project.segments.some((segment) => segment.id === preferredId)) return preferredId;
   if (project.segments.some((segment) => segment.id === state.selectedSegmentId)) return state.selectedSegmentId;
   return project.segments[0]?.id ?? '';
+}
+
+function hydrateWithoutOverwritingDraftBases(state: StudioState, incoming: StudioProject): StudioProject {
+  const currentById = new Map(state.project.segments.map((segment) => [segment.id, segment]));
+  const incomingIds = new Set(incoming.segments.map((segment) => segment.id));
+  const segments = incoming.segments.map((segment) => {
+    const draft = state.drafts[segment.id];
+    const current = currentById.get(segment.id);
+    return hasUnresolvedDraft(draft) && current ? current : segment;
+  });
+  for (const [segmentId, draft] of Object.entries(state.drafts)) {
+    if (!hasUnresolvedDraft(draft) || incomingIds.has(segmentId)) continue;
+    const current = currentById.get(segmentId);
+    if (current) segments.push(current);
+  }
+  segments.sort((left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id));
+  return { ...incoming, segments };
+}
+
+function sameMutationLineage(left: EditorMutation | undefined, right: EditorMutation): boolean {
+  if (!left || left.kind !== right.kind) return false;
+  if (left.kind === 'split' && right.kind === 'split') {
+    return left.originalBefore.id === right.originalBefore.id && left.rightAfter.id === right.rightAfter.id;
+  }
+  if (left.kind !== 'split' && right.kind !== 'split') return left.segmentId === right.segmentId;
+  return false;
+}
+
+function reconcileHistoryEntry(
+  history: EditorHistory,
+  direction: 'undo' | 'redo',
+  previous: EditorMutation,
+  mutation: EditorMutation,
+): EditorHistory | null {
+  if (direction === 'undo') {
+    if (!sameMutationLineage(history.future[0], previous)) return null;
+    return { ...history, future: [mutation, ...history.future.slice(1)] };
+  }
+  const latestIndex = history.past.length - 1;
+  if (!sameMutationLineage(history.past[latestIndex], previous)) return null;
+  const past = history.past.slice();
+  past[latestIndex] = mutation;
+  return { ...history, past };
+}
+
+function reconcileHistoryProject(
+  project: StudioProject,
+  direction: 'undo' | 'redo',
+  previous: EditorMutation,
+  mutation: EditorMutation,
+): StudioProject | null {
+  if (previous.kind !== mutation.kind) return null;
+  if (mutation.kind === 'fields' || mutation.kind === 'timing') {
+    if (previous.kind === 'split' || previous.segmentId !== mutation.segmentId) return null;
+    const canonical = direction === 'undo' ? mutation.before : mutation.after;
+    if (!project.segments.some((segment) => segment.id === mutation.segmentId)) return null;
+    return replaceProjectSegment(project, mutation.segmentId, canonical);
+  }
+
+  if (previous.kind !== 'split'
+    || previous.originalBefore.id !== mutation.originalBefore.id
+    || previous.leftAfter.id !== mutation.leftAfter.id) return null;
+
+  if (direction === 'undo') {
+    const segments = project.segments
+      .filter((segment) => segment.id !== previous.rightAfter.id && segment.id !== mutation.rightAfter.id)
+      .map((segment) => segment.id === mutation.originalBefore.id ? mutation.originalBefore : segment);
+    if (!segments.some((segment) => segment.id === mutation.originalBefore.id)) return null;
+    return sortProjectSegments(project, segments);
+  }
+
+  if (!project.segments.some((segment) => segment.id === mutation.leftAfter.id)) return null;
+  const segments = project.segments
+    .filter((segment) => segment.id !== previous.rightAfter.id && segment.id !== mutation.rightAfter.id)
+    .map((segment) => segment.id === mutation.leftAfter.id ? mutation.leftAfter : segment);
+  return sortProjectSegments(project, [...segments, mutation.rightAfter]);
 }
 
 export function studioReducer(state: StudioState, action: StudioAction): StudioState {
@@ -102,17 +222,73 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     case 'assignSpeaker':
       if (!state.project.speakers.some((speaker) => speaker.id === action.speakerId)) return state;
       return updateSegment(state, action.segmentId, (segment) => ({ ...segment, speakerId: action.speakerId }));
+    case 'editDraft': {
+      const canonical = state.project.segments.find((segment) => segment.id === action.segmentId);
+      if (!canonical) return state;
+      if (action.patch.speakerId !== undefined
+        && !state.project.speakers.some((speaker) => speaker.id === action.patch.speakerId)) return state;
+      return withDraft(
+        state,
+        action.segmentId,
+        editSegmentDraft(state.drafts[action.segmentId], canonical, action.patch),
+      );
+    }
+    case 'beginDraftSave': {
+      const draft = state.drafts[action.segmentId];
+      return draft ? withDraft(state, action.segmentId, beginSegmentDraftSave(draft)) : state;
+    }
+    case 'commitDraftSave': {
+      const draft = state.drafts[action.segmentId];
+      if (!draft) return { ...state, project: replaceProjectSegment(state.project, action.segmentId, action.canonical) };
+      const result = commitSegmentDraftSave(draft, action.canonical);
+      const project = replaceProjectSegment(state.project, action.segmentId, action.canonical);
+      let history = state.history;
+      if (result.committedFields.length > 0) {
+        const mutation: FieldMutation = {
+          kind: 'fields',
+          segmentId: action.segmentId,
+          fields: result.committedFields,
+          before: draft.base,
+          after: action.canonical,
+        };
+        history = pushHistory(history, mutation);
+      }
+      const next = withDraft({ ...state, project, history }, action.segmentId, result.draft);
+      return { ...next, selectedSegmentId: selectionAfterMutation(state, project, action.segmentId) };
+    }
+    case 'failDraftSave': {
+      const draft = state.drafts[action.segmentId];
+      return draft ? withDraft(state, action.segmentId, failSegmentDraftSave(draft, action.error)) : state;
+    }
+    case 'conflictDraftSave': {
+      const draft = state.drafts[action.segmentId];
+      return draft ? withDraft(state, action.segmentId, markSegmentDraftConflict(draft, action.canonical)) : state;
+    }
+    case 'discardDraftForServer': {
+      const draft = state.drafts[action.segmentId];
+      if (!draft?.conflictingServer) return state;
+      const project = replaceProjectSegment(state.project, action.segmentId, draft.conflictingServer);
+      return withDraft({ ...state, project }, action.segmentId, undefined);
+    }
+    case 'rebaseDraftForSafeReapply': {
+      const draft = state.drafts[action.segmentId];
+      if (!draft?.conflictingServer) return state;
+      const project = replaceProjectSegment(state.project, action.segmentId, draft.conflictingServer);
+      const rebased = rebaseSegmentDraftForSafeReapply(draft);
+      return withDraft({ ...state, project }, action.segmentId, hasUnresolvedDraft(rebased) ? rebased : undefined);
+    }
     case 'hydrateProject': {
-      const retained = action.project.segments.find((segment) => segment.id === state.selectedSegmentId);
-      const selected = retained ?? action.project.segments[0];
+      const project = hydrateWithoutOverwritingDraftBases(state, action.project);
+      const retained = project.segments.find((segment) => segment.id === state.selectedSegmentId);
+      const selected = retained ?? project.segments[0];
       const retainedPlayhead = retained && state.playheadMs >= retained.startMs && state.playheadMs <= retained.endMs
         ? state.playheadMs
         : selected?.startMs ?? 0;
       return {
         ...state,
-        project: action.project,
+        project,
         selectedSegmentId: selected?.id ?? '',
-        playheadMs: Math.max(0, Math.min(action.project.durationMs, retainedPlayhead)),
+        playheadMs: Math.max(0, Math.min(project.durationMs, retainedPlayhead)),
         playback: { ...state.playback, playing: false },
         history: emptyEditorHistory(),
         segmentPreview: null,
@@ -216,6 +392,31 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedSegmentId: state.selectedSegmentId === action.previousRightId
           ? action.mutation.rightAfter.id
           : state.selectedSegmentId,
+      };
+    }
+    case 'reconcileHistoryMutation': {
+      const history = reconcileHistoryEntry(state.history, action.direction, action.previous, action.mutation);
+      if (!history) return state;
+      const project = reconcileHistoryProject(state.project, action.direction, action.previous, action.mutation);
+      if (!project) return state;
+      let preferredId: string;
+      if (action.mutation.kind === 'split') {
+        preferredId = action.direction === 'undo' ? action.mutation.originalBefore.id : action.mutation.leftAfter.id;
+      } else {
+        preferredId = action.mutation.segmentId;
+      }
+      const remappedSelection = action.direction === 'redo'
+        && action.previous.kind === 'split'
+        && action.mutation.kind === 'split'
+        && state.selectedSegmentId === action.previous.rightAfter.id
+        ? action.mutation.rightAfter.id
+        : state.selectedSegmentId;
+      const selectionState = { ...state, selectedSegmentId: remappedSelection };
+      return {
+        ...state,
+        project,
+        history,
+        selectedSegmentId: selectionAfterMutation(selectionState, project, preferredId),
       };
     }
     case 'applyUndoLocal': {

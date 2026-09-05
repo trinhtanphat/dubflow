@@ -116,7 +116,14 @@ export async function runDubbingPipeline(
         for (const segment of batch) {
           const result = byId.get(segment.id);
           if (!result) throw new Error(`Missing translation result for ${segment.id}.`);
-          await deps.segments.setTranslationResult(params.projectId, segment.id, params.userId, result.text, 'workers-ai');
+          await deps.segments.setTranslationResult(
+            params.projectId,
+            segment.id,
+            params.userId,
+            segment.version,
+            result.text,
+            'workers-ai',
+          );
         }
       });
       const progress = 0.7 + Math.min(0.25, ((offset + batch.length) / Math.max(1, persisted.length)) * 0.25);

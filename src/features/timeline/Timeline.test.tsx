@@ -7,7 +7,7 @@ import { Timeline } from './Timeline';
 const project: StudioProject = {
   id: 'p1', title: 'Episode', durationMs: 10_000, sourceLanguage: 'zh', targetLanguage: 'vi',
   speakers: [{ id: 'speaker-1', name: 'Nhân vật 1', label: 'Nữ chính', share: 100 }],
-  segments: [{ id: 's1', speakerId: 'speaker-1', startMs: 1_000, endMs: 3_000, sourceText: '原文', translatedText: 'Bản dịch' }],
+  segments: [{ id: 's1', speakerId: 'speaker-1', startMs: 1_000, endMs: 3_000, sourceText: '原文', translatedText: 'Bản dịch', version: 1 }],
 };
 const timelineView: StudioState['timelineView'] = { pixelsPerSecond: 50, scrollLeft: 0, viewportWidth: 500 };
 const TestTimeline = Timeline as any;

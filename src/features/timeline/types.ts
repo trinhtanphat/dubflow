@@ -7,7 +7,7 @@ export type Speaker = {
   voiceProvider?: string | null;
   voiceId?: string | null;
 };
-export type Segment = { id: string; speakerId: string; startMs: number; endMs: number; sourceText: string; translatedText: string };
+export type Segment = { id: string; speakerId: string; startMs: number; endMs: number; sourceText: string; translatedText: string; version: number };
 export type StudioProject = {
   id: string;
   title: string;

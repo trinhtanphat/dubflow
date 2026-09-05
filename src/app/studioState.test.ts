@@ -165,7 +165,7 @@ describe('studioReducer', () => {
       ...mockProject,
       id: 'cloud-p2',
       durationMs: 1000,
-      segments: [{ id: 'cloud-s1', speakerId: 'lin', startMs: 100, endMs: 500, sourceText: '新', translatedText: 'mới' }],
+      segments: [{ id: 'cloud-s1', speakerId: 'lin', startMs: 100, endMs: 500, sourceText: '新', translatedText: 'mới', version: 1 }],
     };
     const next = studioReducer(initial, { type: 'hydrateProject', project: cloudProject });
     expect(next.selectedSegmentId).toBe('cloud-s1');

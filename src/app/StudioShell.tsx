@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
@@ -10,16 +10,19 @@ import {
   persistRedo,
   persistUndo,
 } from '../features/timeline/segmentMutationService';
+import type { Segment } from '../features/timeline/types';
 import { startExport, type CloudJob } from '../features/projects/jobApi';
-import type { SegmentPatch } from '../features/transcript/segmentApi';
 import type { TranslationMode } from '../features/translation/translationApi';
-import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
+import { retranslateEditorSegment } from '../features/transcript/editorPersistence';
+import { SegmentVersionConflictError, type CloudSegment } from '../features/transcript/segmentApi';
+import type { SegmentFieldPatch } from './autosaveDraft';
 import type { EditorMutation } from './editorHistory';
 import type { StudioAction, StudioState } from './studioState';
 import type { useStudioState } from './useStudioState';
 import { followCloudJob } from './cloudJobFlow';
 import { loadCloudStudioProject } from './cloudHydration';
-import { StudioTopbar } from './StudioTopbar';
+import { StudioTopbar, type SaveState } from './StudioTopbar';
+import { useSegmentAutosave } from './useSegmentAutosave';
 
 type StudioShellProps = ReturnType<typeof useStudioState>;
 type MobilePanel = 'none' | 'sources' | 'inspector';
@@ -55,6 +58,59 @@ function errorMessage(error: unknown, fallback: string): string {
 
 export function isStudioMutationLocked(editorBusy: boolean, hasActiveJob: boolean): boolean {
   return editorBusy || hasActiveJob;
+}
+
+function toStudioSegment(segment: CloudSegment): Segment {
+  return {
+    id: segment.id,
+    speakerId: segment.speakerId?.trim() || 'unassigned',
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    sourceText: segment.sourceText,
+    translatedText: segment.translatedText,
+    version: segment.version,
+  };
+}
+
+function historyFieldPatch(mutation: EditorMutation, direction: 'undo' | 'redo'): SegmentFieldPatch | null {
+  if (mutation.kind !== 'fields') return null;
+  const source = direction === 'undo' ? mutation.before : mutation.after;
+  const patch: SegmentFieldPatch = {};
+  for (const field of mutation.fields) {
+    if (field === 'sourceText') patch.sourceText = source.sourceText;
+    else if (field === 'translatedText') patch.translatedText = source.translatedText;
+    else patch.speakerId = source.speakerId;
+  }
+  return patch;
+}
+
+function dispatchFieldHistoryConflict(
+  dispatch: (action: StudioAction) => void,
+  mutation: EditorMutation,
+  direction: 'undo' | 'redo',
+  error: SegmentVersionConflictError,
+): boolean {
+  const patch = historyFieldPatch(mutation, direction);
+  if (!patch || mutation.kind !== 'fields') return false;
+  const canonical = toStudioSegment(error.canonical);
+  dispatch({ type: 'editDraft', segmentId: mutation.segmentId, patch });
+  dispatch({ type: 'conflictDraftSave', segmentId: mutation.segmentId, canonical });
+  return true;
+}
+
+export function deriveStudioSaveState(
+  state: StudioState,
+  cloudEditable: boolean,
+  editorError: string,
+  editorBusy: boolean,
+): SaveState {
+  if (!cloudEditable) return 'offline';
+  const phases = Object.values(state.drafts).map((draft) => draft.phase);
+  if (phases.includes('conflict')) return 'conflict';
+  if (phases.includes('error') || Boolean(editorError)) return 'error';
+  if (phases.includes('saving') || editorBusy) return 'saving';
+  if (phases.includes('dirty')) return 'dirty';
+  return 'saved';
 }
 
 export function createStudioEditorActions({
@@ -127,9 +183,13 @@ export function createStudioEditorActions({
     setError('');
     dispatch({ type: 'applyUndoLocal' });
     try {
-      await services.persistUndo(state.project.id, mutation);
+      const canonical = await services.persistUndo(state.project.id, mutation, state.project);
+      dispatch({ type: 'reconcileHistoryMutation', direction: 'undo', previous: mutation, mutation: canonical });
     } catch (error) {
       dispatch({ type: 'applyRedoLocal' });
+      if (error instanceof SegmentVersionConflictError && dispatchFieldHistoryConflict(dispatch, mutation, 'undo', error)) {
+        return;
+      }
       setError(errorMessage(error, 'Không thể hoàn tác thay đổi.'));
     } finally {
       setBusy(false);
@@ -145,16 +205,13 @@ export function createStudioEditorActions({
     setError('');
     dispatch({ type: 'applyRedoLocal' });
     try {
-      const canonical: EditorMutation = await services.persistRedo(state.project.id, mutation);
-      if (mutation.kind === 'split' && canonical.kind === 'split') {
-        dispatch({
-          type: 'reconcileLatestSplitMutation',
-          previousRightId: mutation.rightAfter.id,
-          mutation: canonical,
-        });
-      }
+      const canonical = await services.persistRedo(state.project.id, mutation, state.project);
+      dispatch({ type: 'reconcileHistoryMutation', direction: 'redo', previous: mutation, mutation: canonical });
     } catch (error) {
       dispatch({ type: 'applyUndoLocal' });
+      if (error instanceof SegmentVersionConflictError && dispatchFieldHistoryConflict(dispatch, mutation, 'redo', error)) {
+        return;
+      }
       setError(errorMessage(error, 'Không thể làm lại thay đổi.'));
     } finally {
       setBusy(false);
@@ -179,9 +236,12 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const previousSelectedSegmentId = useRef(state.selectedSegmentId);
 
   const cloudEditable = state.project.id !== 'demo';
   const mutationLocked = isStudioMutationLocked(editorBusy, Boolean(activeJob));
+  const autosave = useSegmentAutosave({ state, dispatch });
+  const selectedDraft = selectedSegment ? state.drafts[selectedSegment.id] : undefined;
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -203,7 +263,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const startFinalExport = async () => {
-    if (!cloudEditable || mutationLocked) return;
+    if (!cloudEditable || mutationLocked || deriveStudioSaveState(state, cloudEditable, editorError, editorBusy) !== 'saved') return;
     setCloudError('');
     try {
       const job = await startExport(state.project.id);
@@ -245,6 +305,14 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     });
     return () => controller.abort();
   }, [activeJob, dispatch]);
+
+  useEffect(() => {
+    const previousId = previousSelectedSegmentId.current;
+    if (previousId && previousId !== state.selectedSegmentId) {
+      void autosave.flush(previousId);
+    }
+    previousSelectedSegmentId.current = state.selectedSegmentId;
+  }, [state.selectedSegmentId]);
 
   useEffect(() => {
     setTranslationComparison(null);
@@ -289,39 +357,19 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     return () => window.removeEventListener('keydown', handleEditorHistoryShortcut);
   }, [cloudEditable, mutationLocked, editorActions, state.history.future.length, state.history.past.length]);
 
-  const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
-    if (!cloudEditable || mutationLocked) return;
-    setEditorError('');
-    try {
-      const updated = await persistEditorPatch(state.project.id, segmentId, patch);
-      if (patch.sourceText !== undefined) {
-        dispatch({ type: 'editSource', segmentId, text: updated.sourceText });
-      }
-      if (patch.translatedText !== undefined) {
-        dispatch({ type: 'editTranslation', segmentId, text: updated.translatedText });
-      }
-      if (patch.speakerId !== undefined && updated.speakerId && state.project.speakers.some((speaker) => speaker.id === updated.speakerId)) {
-        dispatch({ type: 'assignSpeaker', segmentId, speakerId: updated.speakerId });
-      }
-      if (patch.translatedText !== undefined || patch.speakerId !== undefined) await restoreCloudProject();
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
-      await restoreCloudProject();
-    }
-  };
-
   const retranslate = async (segmentId: string) => {
     if (!cloudEditable || mutationLocked) return;
+    const current = state.project.segments.find((segment) => segment.id === segmentId);
+    if (!current) return;
     setEditorBusy(true);
     setEditorError('');
     setTranslationComparison(null);
     try {
-      const result = await retranslateEditorSegment(state.project.id, segmentId, translationMode);
+      const result = await retranslateEditorSegment(state.project.id, segmentId, current.version, translationMode);
       if (result.mode === 'compare') {
         setTranslationComparison({ workersAI: result.workersAI, google: result.google });
       } else {
         dispatch({ type: 'editTranslation', segmentId, text: result.segment.translatedText });
-        await restoreCloudProject();
       }
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Dịch lại thất bại.');
@@ -332,29 +380,21 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
   const applyTranslation = async (text: string) => {
     if (!selectedSegment || !cloudEditable || mutationLocked) return;
-    setEditorBusy(true);
     setEditorError('');
-    try {
-      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
-      dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
-      setTranslationComparison(null);
-      await restoreCloudProject();
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
-      await restoreCloudProject();
-    } finally {
-      setEditorBusy(false);
-    }
+    autosave.edit(selectedSegment.id, { translatedText: text });
+    setTranslationComparison(null);
+    await autosave.flush(selectedSegment.id);
   };
 
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
   const cloudDetail = cloudError || cloudJob?.currentStep || (cloudJob ? cloudJob.status : undefined);
-  const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
+  const saveState = deriveStudioSaveState(state, cloudEditable, editorError, editorBusy);
   const canUndo = cloudEditable && !mutationLocked && state.history.past.length > 0;
   const canRedo = cloudEditable && !mutationLocked && state.history.future.length > 0;
   const exportBusy = Boolean(activeJob && cloudJob?.type === 'export');
   const canExport = cloudEditable
     && !mutationLocked
+    && saveState === 'saved'
     && !state.project.exportObjectKey
     && (state.project.status === 'needs_review' || state.project.status === 'completed');
   const exportHref = state.project.exportObjectKey
@@ -416,9 +456,14 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           lipSyncEnabled={state.lipSyncEnabled}
           dispatch={dispatch}
           cloudEditable={cloudEditable}
+          draft={selectedDraft}
+          onEditDraft={autosave.edit}
+          onFlushDraft={(segmentId) => { void autosave.flush(segmentId); }}
+          onRetryDraft={(segmentId) => { void autosave.retry(segmentId); }}
+          onDiscardConflict={autosave.discardConflict}
+          onReapplyConflict={(segmentId) => { void autosave.reapplyConflict(segmentId); }}
           translationMode={translationMode}
           onTranslationModeChange={setTranslationMode}
-          onCommitPatch={commitPatch}
           onRetranslate={retranslate}
           comparison={translationComparison}
           onApplyTranslation={applyTranslation}

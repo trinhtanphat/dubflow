@@ -16,6 +16,7 @@ const base: Segment = {
   endMs: 2000,
   sourceText: 'hello world',
   translatedText: 'xin chao',
+  version: 1,
 };
 
 const project: StudioProject = {
@@ -64,6 +65,44 @@ describe('editor history', () => {
     expect(redo.mutation).toEqual(mutation);
     expect(redo.history.past).toEqual([mutation]);
     expect(redo.history.future).toEqual([]);
+  });
+
+  it('applies historical timing values without replacing the current canonical revision or fields', () => {
+    const mutation: EditorMutation = {
+      kind: 'timing',
+      segmentId: 's1',
+      before: { ...base, startMs: 1000, endMs: 2000, sourceText: 'historical source', version: 2 },
+      after: { ...base, startMs: 1100, endMs: 2100, sourceText: 'historical source', version: 3 },
+    };
+    const current: StudioProject = {
+      ...project,
+      segments: [{
+        ...base,
+        startMs: 1100,
+        endMs: 2100,
+        sourceText: 'server newer source',
+        translatedText: 'server newer translation',
+        version: 10,
+      }],
+    };
+
+    const backward = applyMutation(current, mutation, 'backward');
+    expect(backward.segments[0]).toMatchObject({
+      startMs: 1000,
+      endMs: 2000,
+      sourceText: 'server newer source',
+      translatedText: 'server newer translation',
+      version: 10,
+    });
+
+    const forward = applyMutation(current, mutation, 'forward');
+    expect(forward.segments[0]).toMatchObject({
+      startMs: 1100,
+      endMs: 2100,
+      sourceText: 'server newer source',
+      translatedText: 'server newer translation',
+      version: 10,
+    });
   });
 
   it('reverses a split without treating it as arbitrary deletion', () => {

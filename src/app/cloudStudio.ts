@@ -69,6 +69,7 @@ export function buildCloudStudioProject(
       endMs: segment.endMs,
       sourceText: segment.sourceText,
       translatedText: segment.translatedText,
+      version: segment.version,
     })),
   };
 }
