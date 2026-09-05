@@ -9,7 +9,7 @@ import { normalizeAsrChunks } from '../services/asr/normalize';
 import type { TranslationProvider } from '../services/translation/types';
 import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
-export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
+export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string; usageAttempt?: number };
 
 export interface WorkflowStepLike {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
