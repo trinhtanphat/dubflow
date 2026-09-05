@@ -3,7 +3,7 @@ import type { JobStore } from '../db/jobs';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
-export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string };
+export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string; usageAttempt?: number };
 
 export type ExportClip = {
   segmentId: string;
