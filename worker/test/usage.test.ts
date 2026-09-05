@@ -82,6 +82,15 @@ describe('UsageRepository', () => {
     expect(memory.rows[0].cost_basis).toBe(0);
   });
 
+  it('fails closed when the same operation phase reappears with different units', async () => {
+    const memory = usageDb();
+    const repo = new UsageRepository(memory.db);
+    await repo.record(base);
+    await expect(repo.record({ ...base, units: 80 })).rejects.toThrow(/collision/i);
+    expect(memory.rows).toHaveLength(1);
+    expect(memory.rows[0].units).toBe(75.125);
+  });
+
   it('keeps started and completed as separate phases and supports canonical lookup', async () => {
     const memory = usageDb();
     const repo = new UsageRepository(memory.db);
