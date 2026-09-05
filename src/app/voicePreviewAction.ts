@@ -28,15 +28,18 @@ const defaultServices: VoicePreviewServices = {
 };
 
 export function createVoicePreviewAction({ setBusy, setError, services = defaultServices }: CreateVoicePreviewActionOptions) {
-  return async (inputText: string) => {
+  return async (inputText: string, inputVoice?: string) => {
     const text = inputText.trim();
     if (!text) return;
+    const voice = inputVoice?.trim();
 
     setBusy(true);
     setError('');
     let objectUrl = '';
     try {
-      const blob = await services.fetchVoicePreview({ text, language: 'vi' });
+      const blob = await services.fetchVoicePreview(
+        voice ? { text, language: 'vi', voice } : { text, language: 'vi' },
+      );
       objectUrl = services.createObjectURL(blob);
       await services.playAudio(objectUrl);
     } catch (error) {
