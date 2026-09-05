@@ -1,10 +1,10 @@
 import type { D1DatabaseLike } from './projects';
 
 export type UsageKind =
-  | 'asr_audio_minute'
+  | 'asr_audio_second'
   | 'translation_character'
   | 'tts_audio_second'
-  | 'render_minute';
+  | 'render_second';
 
 export type UsagePhase = 'started' | 'completed';
 
@@ -25,10 +25,10 @@ export type UsageEvent = {
 export type UsageRecordInput = Omit<UsageEvent, 'id' | 'costBasis' | 'createdAt'>;
 
 export type UsageTotals = {
-  asrAudioMinutes: number;
+  asrAudioSeconds: number;
   translationCharacters: number;
   ttsAudioSeconds: number;
-  renderMinutes: number;
+  renderSeconds: number;
 };
 
 export type UsageSummary = {
@@ -69,10 +69,10 @@ type UsageAggregateRow = Pick<UsageRow, 'kind' | 'units' | 'provider'>;
 
 const USAGE_COLUMNS = `id, user_id, project_id, job_id, kind, units, provider, phase, operation_key, cost_basis, created_at`;
 const USAGE_KINDS = new Set<UsageKind>([
-  'asr_audio_minute',
+  'asr_audio_second',
   'translation_character',
   'tts_audio_second',
-  'render_minute',
+  'render_second',
 ]);
 
 function fromRow(row: UsageRow): UsageEvent {
@@ -93,18 +93,18 @@ function fromRow(row: UsageRow): UsageEvent {
 
 function emptyTotals(): UsageTotals {
   return {
-    asrAudioMinutes: 0,
+    asrAudioSeconds: 0,
     translationCharacters: 0,
     ttsAudioSeconds: 0,
-    renderMinutes: 0,
+    renderSeconds: 0,
   };
 }
 
 function addUnits(totals: UsageTotals, kind: UsageKind, units: number): void {
-  if (kind === 'asr_audio_minute') totals.asrAudioMinutes += units;
+  if (kind === 'asr_audio_second') totals.asrAudioSeconds += units;
   else if (kind === 'translation_character') totals.translationCharacters += units;
   else if (kind === 'tts_audio_second') totals.ttsAudioSeconds += units;
-  else totals.renderMinutes += units;
+  else totals.renderSeconds += units;
 }
 
 function summarize(rows: UsageAggregateRow[]): UsageSummary {

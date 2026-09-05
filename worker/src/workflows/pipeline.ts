@@ -119,14 +119,14 @@ export async function runDubbingPipeline(
       await step.do(`check cancellation before ASR chunk ${index + 1}`, ensureActive);
       const asrResult = await step.do(`transcribe audio chunk ${index + 1}`, async () => {
         const audio = await readChunk(deps.bucket, chunk.objectKey);
-        const units = chunk.durationMs / 60000;
+        const units = chunk.durationMs / 1000;
         if (!Number.isFinite(units) || units < 0) throw new Error('ASR chunk duration is invalid.');
         const key = operationKey(params.jobId, retryCount, 'asr', chunk.objectKey, asrProvider);
         const common = {
           userId: params.userId,
           projectId: params.projectId,
           jobId: params.jobId,
-          kind: 'asr_audio_minute' as const,
+          kind: 'asr_audio_second' as const,
           units,
           provider: asrProvider,
           operationKey: key,

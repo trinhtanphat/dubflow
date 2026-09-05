@@ -2,7 +2,7 @@ import type { ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
 import type { UsageStore } from '../db/usage';
 import type { VoiceGenerateInput } from '../services/voice/types';
-import { assertJobActive, isJobCancelledError } from './jobCancellation';
+import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -84,7 +84,7 @@ function audioObjectKey(projectId: string, segmentId: string): string {
   return `projects/${projectId}/dubbed/${segmentId}.mp3`;
 }
 
-function usageKey(jobId: string, retryCount: number, stage: string, item: string, provider: string): string {
+function operationKey(jobId: string, retryCount: number, stage: string, item: string, provider: string): string {
   return `job:${jobId}:retry:${retryCount}:${stage}:${item}:${provider}`;
 }
 
@@ -99,9 +99,16 @@ function speakerVoiceId(segment: ExportSegment, speakers: Map<string, ExportSpea
   return speaker.voiceId.trim();
 }
 
-function positiveDurationMs(value: number, label: string): number {
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} duration is invalid.`);
-  return value;
+async function probeTtsSeconds(
+  deps: ExportPipelineDeps,
+  objectKey: string,
+): Promise<number> {
+  const metadata = await deps.media.probe(objectKey);
+  const seconds = metadata.durationMs / 1000;
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error('Generated voice duration is invalid.');
+  }
+  return seconds;
 }
 
 export async function runExportPipeline(
@@ -117,11 +124,14 @@ export async function runExportPipeline(
     if (!project) throw new Error('Project not found.');
     if (!project.sourceObjectKey) throw new Error('Project source media is missing.');
 
-    const job = await step.do('load export usage retry generation', async () =>
+    const job = await step.do('load export retry generation', async () =>
       deps.jobs.getForProject(params.projectId, params.jobId, params.userId),
     );
     if (!job) throw new Error('Job not found.');
-    if (!Number.isInteger(job.retryCount) || job.retryCount < 0) throw new Error('Job retry generation is invalid.');
+    if (job.status === 'cancelled') throw new JobCancelledError();
+    if (!Number.isInteger(job.retryCount) || job.retryCount < 0) {
+      throw new Error('Job retry generation is invalid.');
+    }
     const retryCount = job.retryCount;
 
     const segments = await step.do('load translated export segments', async () =>
@@ -149,9 +159,36 @@ export async function runExportPipeline(
       let objectKey = segment.voiceStatus === 'completed' && segment.dubbedObjectKey
         ? segment.dubbedObjectKey
         : null;
-      const ttsOperationKey = usageKey(params.jobId, retryCount, 'tts', segment.id, 'elevenlabs');
 
-      if (!objectKey) {
+      const ttsProvider = 'elevenlabs';
+      const ttsKey = operationKey(params.jobId, retryCount, 'tts', segment.id, ttsProvider);
+      const started = await step.do(`load TTS started usage ${segment.id}`, async () =>
+        deps.usage.getByOperation(ttsKey, 'started'),
+      );
+      const completed = await step.do(`load TTS completed usage ${segment.id}`, async () =>
+        deps.usage.getByOperation(ttsKey, 'completed'),
+      );
+
+      if (objectKey) {
+        if (started && !completed) {
+          await step.do(`recover TTS usage ${segment.id}`, async () => {
+            const units = await probeTtsSeconds(deps, objectKey!);
+            await deps.usage.record({
+              userId: params.userId,
+              projectId: params.projectId,
+              jobId: params.jobId,
+              kind: 'tts_audio_second',
+              units,
+              provider: ttsProvider,
+              phase: 'completed',
+              operationKey: ttsKey,
+            });
+          });
+        }
+      } else {
+        if (completed) {
+          throw new Error(`Segment ${segment.id} has completed TTS usage without a durable voice artifact.`);
+        }
         objectKey = audioObjectKey(params.projectId, segment.id);
         await step.do(`generate voice ${segment.id}`, async () => {
           if (!deps.bucket.put) throw new Error('R2 put is unavailable for voice generation.');
@@ -161,9 +198,9 @@ export async function runExportPipeline(
             jobId: params.jobId,
             kind: 'tts_audio_second',
             units: 0,
-            provider: 'elevenlabs',
+            provider: ttsProvider,
             phase: 'started',
-            operationKey: ttsOperationKey,
+            operationKey: ttsKey,
           });
           const text = segment.translatedText.trim();
           const voice = speakerVoiceId(segment, speakers);
@@ -177,47 +214,18 @@ export async function runExportPipeline(
           if (audio.byteLength === 0) throw new Error('Voice provider returned empty audio.');
           await deps.bucket.put(objectKey!, audio);
           await deps.segments.setVoiceResult(params.projectId, segment.id, params.userId, objectKey!);
-        });
-
-        await step.do(`complete voice usage ${segment.id}`, async () => {
-          const metadata = await deps.media.probe(objectKey!);
-          const durationMs = positiveDurationMs(metadata.durationMs, `Generated voice ${segment.id}`);
+          const units = await probeTtsSeconds(deps, objectKey!);
           await deps.usage.record({
             userId: params.userId,
             projectId: params.projectId,
             jobId: params.jobId,
             kind: 'tts_audio_second',
-            units: durationMs / 1000,
-            provider: 'elevenlabs',
+            units,
+            provider: ttsProvider,
             phase: 'completed',
-            operationKey: ttsOperationKey,
+            operationKey: ttsKey,
           });
         });
-      } else {
-        const started = await step.do(`read voice usage start ${segment.id}`, async () =>
-          deps.usage.getByOperation(ttsOperationKey, 'started'),
-        );
-        if (started) {
-          const completed = await step.do(`read voice usage completion ${segment.id}`, async () =>
-            deps.usage.getByOperation(ttsOperationKey, 'completed'),
-          );
-          if (!completed) {
-            await step.do(`recover voice usage ${segment.id}`, async () => {
-              const metadata = await deps.media.probe(objectKey!);
-              const durationMs = positiveDurationMs(metadata.durationMs, `Generated voice ${segment.id}`);
-              await deps.usage.record({
-                userId: params.userId,
-                projectId: params.projectId,
-                jobId: params.jobId,
-                kind: 'tts_audio_second',
-                units: durationMs / 1000,
-                provider: 'elevenlabs',
-                phase: 'completed',
-                operationKey: ttsOperationKey,
-              });
-            });
-          }
-        }
       }
 
       clips.push({
@@ -238,36 +246,29 @@ export async function runExportPipeline(
       deps.jobs.setProgress(params.jobId, 0.72, 'rendering_export'),
     );
 
-    const projectDurationMs = positiveDurationMs(project.durationMs ?? Number.NaN, 'Project');
-    const renderUnits = projectDurationMs / 60000;
-    const renderOperationKey = usageKey(params.jobId, retryCount, 'render', 'final', 'ffmpeg-container');
-    const rendered = await step.do('render final dubbed media', async () => {
-      await deps.usage.record({
-        userId: params.userId,
-        projectId: params.projectId,
-        jobId: params.jobId,
-        kind: 'render_minute',
-        units: renderUnits,
-        provider: 'ffmpeg-container',
-        phase: 'started',
-        operationKey: renderOperationKey,
-      });
-      return deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips);
-    });
-    if (!rendered.exportObjectKey?.startsWith(`projects/${params.projectId}/export/`)) {
-      throw new Error('Media processor returned an invalid export object key.');
+    const renderSeconds = Number(project.durationMs) / 1000;
+    if (!Number.isFinite(renderSeconds) || renderSeconds <= 0) {
+      throw new Error('Project duration is missing or invalid for render metering.');
     }
-    await step.do('complete render usage', async () => {
-      await deps.usage.record({
+    const renderProvider = 'ffmpeg-container';
+    const renderKey = operationKey(params.jobId, retryCount, 'render', 'final', renderProvider);
+    const rendered = await step.do('render final dubbed media', async () => {
+      const common = {
         userId: params.userId,
         projectId: params.projectId,
         jobId: params.jobId,
-        kind: 'render_minute',
-        units: renderUnits,
-        provider: 'ffmpeg-container',
-        phase: 'completed',
-        operationKey: renderOperationKey,
-      });
+        kind: 'render_second' as const,
+        units: renderSeconds,
+        provider: renderProvider,
+        operationKey: renderKey,
+      };
+      await deps.usage.record({ ...common, phase: 'started' });
+      const result = await deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips);
+      if (!result.exportObjectKey?.startsWith(`projects/${params.projectId}/export/`)) {
+        throw new Error('Media processor returned an invalid export object key.');
+      }
+      await deps.usage.record({ ...common, phase: 'completed' });
+      return result;
     });
 
     await step.do('check cancellation before export publish', ensureActive);
