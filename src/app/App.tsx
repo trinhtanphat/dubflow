@@ -5,6 +5,9 @@ import { VideoStage } from '../features/player/VideoStage';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
 import { Timeline } from '../features/timeline/Timeline';
 import type { CloudJob } from '../features/projects/jobApi';
+import type { SegmentPatch } from '../features/transcript/segmentApi';
+import type { TranslationMode } from '../features/translation/translationApi';
+import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
 import { followCloudJob } from './cloudJobFlow';
 import { useStudioState } from './useStudioState';
 
@@ -13,18 +16,18 @@ export function App() {
   const [activeJob, setActiveJob] = useState<{ projectId: string; jobId: string } | null>(null);
   const [cloudJob, setCloudJob] = useState<CloudJob | null>(null);
   const [cloudError, setCloudError] = useState('');
+  const [translationMode, setTranslationMode] = useState<TranslationMode>('workers-ai');
+  const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [editorError, setEditorError] = useState('');
+
+  const cloudEditable = state.project.id !== 'demo';
 
   const onProcessStarted: NonNullable<UploadPanelProps['onProcessStarted']> = ({ project, job }) => {
     setCloudError('');
     setCloudJob({
-      id: job.jobId,
-      projectId: project.id,
-      type: 'dubbing',
-      status: 'queued',
-      progress: 0,
-      currentStep: 'queued',
-      errorCode: null,
-      errorMessage: null,
+      id: job.jobId, projectId: project.id, type: 'dubbing', status: 'queued', progress: 0,
+      currentStep: 'queued', errorCode: null, errorMessage: null,
     });
     setActiveJob({ projectId: project.id, jobId: job.jobId });
   };
@@ -49,6 +52,52 @@ export function App() {
     });
     return () => controller.abort();
   }, [activeJob?.projectId, activeJob?.jobId, dispatch]);
+
+  useEffect(() => {
+    setTranslationComparison(null);
+    setEditorError('');
+  }, [state.selectedSegmentId]);
+
+  const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
+    if (!cloudEditable) return;
+    setEditorError('');
+    try {
+      await persistEditorPatch(state.project.id, segmentId, patch);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
+    }
+  };
+
+  const retranslate = async (segmentId: string) => {
+    if (!cloudEditable || editorBusy) return;
+    setEditorBusy(true); setEditorError(''); setTranslationComparison(null);
+    try {
+      const result = await retranslateEditorSegment(state.project.id, segmentId, translationMode);
+      if (result.mode === 'compare') {
+        setTranslationComparison({ workersAI: result.workersAI, google: result.google });
+      } else {
+        dispatch({ type: 'editTranslation', segmentId, text: result.segment.translatedText });
+      }
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Dịch lại thất bại.');
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
+  const applyTranslation = async (text: string) => {
+    if (!selectedSegment || !cloudEditable || editorBusy) return;
+    setEditorBusy(true); setEditorError('');
+    try {
+      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
+      dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
+      setTranslationComparison(null);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
+    } finally {
+      setEditorBusy(false);
+    }
+  };
 
   const cloudPercent = cloudJob ? Math.round(cloudJob.progress * 100) : 0;
 
@@ -81,7 +130,21 @@ export function App() {
           <Timeline project={state.project} playheadMs={state.playheadMs} selectedSegmentId={state.selectedSegmentId} dispatch={dispatch} />
         </section>
 
-        <ScriptInspector segment={selectedSegment} speakers={state.project.speakers} lipSyncEnabled={state.lipSyncEnabled} dispatch={dispatch} />
+        <ScriptInspector
+          segment={selectedSegment}
+          speakers={state.project.speakers}
+          lipSyncEnabled={state.lipSyncEnabled}
+          dispatch={dispatch}
+          cloudEditable={cloudEditable}
+          translationMode={translationMode}
+          onTranslationModeChange={setTranslationMode}
+          onCommitPatch={commitPatch}
+          onRetranslate={retranslate}
+          comparison={translationComparison}
+          onApplyTranslation={applyTranslation}
+          busy={editorBusy}
+          error={editorError}
+        />
       </main>
 
       <footer className="capability-strip">
