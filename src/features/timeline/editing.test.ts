@@ -64,19 +64,19 @@ describe('segment timing editing', () => {
   });
 
   it('snaps within 8px and uses neighbor > playhead > grid when tied', () => {
-    expect(snapEdgeTime(1006, [
-      { timeMs: 1000, kind: 'grid' },
-      { timeMs: 1012, kind: 'playhead' },
-      { timeMs: 1000, kind: 'neighbor' },
-    ], 1000)).toBe(1000);
+    expect(snapEdgeTime(1000, [
+      { timeMs: 1060, kind: 'grid' },
+      { timeMs: 1060, kind: 'playhead' },
+      { timeMs: 940, kind: 'neighbor' },
+    ], 100)).toBe(940);
 
     expect(snapEdgeTime(1000, [
-      { timeMs: 1008, kind: 'grid' },
-    ], 1000)).toBe(1008);
+      { timeMs: 1080, kind: 'grid' },
+    ], 100)).toBe(1080);
 
     expect(snapEdgeTime(1000, [
-      { timeMs: 1009, kind: 'neighbor' },
-    ], 1000)).toBe(1000);
+      { timeMs: 1090, kind: 'neighbor' },
+    ], 100)).toBe(1000);
   });
 });
 
