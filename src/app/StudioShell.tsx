@@ -209,12 +209,12 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         onClick={() => setMobilePanel('none')}
       />
 
-      <footer className="capability-strip studio-capability-strip" aria-label="Năng lực hệ thống">
-        <span><i className="capability-dot capability-dot--ready" />Workers AI translation</span>
-        <span><i className="capability-dot capability-dot--optional" />Google Translation · optional</span>
-        <span><i className="capability-dot capability-dot--ready" />R2 multipart media</span>
-        <span><i className="capability-dot capability-dot--ready" />D1 project state</span>
-        <span><i className="capability-dot capability-dot--guarded" />Voice · capability-aware</span>
+      <footer className="capability-strip studio-capability-strip reference-feature-strip" aria-label="Năng lực hệ thống">
+        <span><i className="capability-dot capability-dot--ready" />Dub mọi ngôn ngữ</span>
+        <span><i className="capability-dot capability-dot--ready" />Tự nhận diện nhân vật</span>
+        <span><i className="capability-dot capability-dot--guarded" />Voice preservation <small>Capability-gated</small></span>
+        <span><i className="capability-dot capability-dot--ready" />Chạy trên Cloud 24/7</span>
+        <span><i className="capability-dot capability-dot--guarded" />AI voices <small>Capability-gated</small></span>
       </footer>
     </div>
   );
