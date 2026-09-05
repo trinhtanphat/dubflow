@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { Dispatch, PointerEvent as ReactPointerEvent, UIEvent } from 'react';
 import type { StudioAction, StudioState } from '../../app/studioState';
-import { fitPixelsPerSecond, pixelsToTime, projectWidthPx, timeToPixels } from './math';
+import {
+  chooseRulerIntervalSeconds,
+  fitPixelsPerSecond,
+  pixelsToTime,
+  pointerXToTime,
+  projectWidthPx,
+  timeToPixels,
+} from './math';
 import { TimelineTrack } from './TimelineTrack';
 import { WaveformTrack } from './WaveformTrack';
 import type { StudioProject } from './types';
@@ -23,32 +30,40 @@ function formatRulerLabel(timeMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-function rulerStepMs(pixelsPerSecond: number): number {
-  const candidates = [1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000];
-  return candidates.find((step) => timeToPixels(step, pixelsPerSecond) >= 72) ?? candidates[candidates.length - 1]!;
-}
-
-function buildRulerMarks(durationMs: number, pixelsPerSecond: number): RulerMark[] {
-  const step = rulerStepMs(pixelsPerSecond);
+function buildVisibleRulerMarks(
+  durationMs: number,
+  pixelsPerSecond: number,
+  scrollLeft: number,
+  viewportWidth: number,
+): RulerMark[] {
+  const stepMs = chooseRulerIntervalSeconds(pixelsPerSecond) * 1000;
+  const safeViewportWidth = Math.max(1, viewportWidth || 1000);
+  const visibleStartMs = pixelsToTime(scrollLeft, pixelsPerSecond);
+  const visibleEndMs = Math.min(durationMs, pixelsToTime(scrollLeft + safeViewportWidth, pixelsPerSecond));
+  const firstMarkMs = Math.max(0, Math.floor(visibleStartMs / stepMs) * stepMs);
   const marks: RulerMark[] = [];
-  for (let timeMs = 0; timeMs <= durationMs; timeMs += step) {
-    marks.push({ timeMs, label: formatRulerLabel(timeMs) });
+  const maxMarks = Math.ceil(safeViewportWidth / 80) + 3;
+
+  for (let timeMs = firstMarkMs; timeMs <= visibleEndMs + stepMs && marks.length < maxMarks; timeMs += stepMs) {
+    if (timeMs <= durationMs) marks.push({ timeMs, label: formatRulerLabel(timeMs) });
   }
-  if (marks.at(-1)?.timeMs !== durationMs) {
-    marks.push({ timeMs: durationMs, label: formatRulerLabel(durationMs) });
-  }
+
   return marks;
 }
 
 export function Timeline({ project, playheadMs, selectedSegmentId, timelineView, dispatch }: TimelineProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const draggingPlayhead = useRef(false);
   const pixelsPerSecond = timelineView.pixelsPerSecond;
   const canvasWidth = Math.max(projectWidthPx(project.durationMs, pixelsPerSecond), timelineView.viewportWidth || 1);
   const playheadLeft = timeToPixels(playheadMs, pixelsPerSecond);
   const marks = useMemo(
-    () => buildRulerMarks(project.durationMs, pixelsPerSecond),
-    [project.durationMs, pixelsPerSecond],
+    () => buildVisibleRulerMarks(
+      project.durationMs,
+      pixelsPerSecond,
+      timelineView.scrollLeft,
+      timelineView.viewportWidth,
+    ),
+    [project.durationMs, pixelsPerSecond, timelineView.scrollLeft, timelineView.viewportWidth],
   );
   const select = (segmentId: string) => dispatch({ type: 'selectSegment', segmentId });
 
@@ -63,29 +78,29 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
     return () => observer.disconnect();
   }, [dispatch]);
 
-  const seekFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const localPx = Math.max(0, Math.min(canvasWidth, event.clientX - rect.left));
-    dispatch({ type: 'setPlayhead', playheadMs: pixelsToTime(localPx, pixelsPerSecond) });
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || Math.abs(viewport.scrollLeft - timelineView.scrollLeft) < 1) return;
+    viewport.scrollLeft = timelineView.scrollLeft;
+  }, [timelineView.scrollLeft]);
+
+  const seekFromPointer = (event: ReactPointerEvent<HTMLElement>) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const targetMs = pointerXToTime(
+      event.clientX,
+      viewport.getBoundingClientRect().left,
+      viewport.scrollLeft,
+      pixelsPerSecond,
+    );
+    dispatch({ type: 'setPlayhead', playheadMs: Math.max(0, Math.min(project.durationMs, targetMs)) });
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
-    draggingPlayhead.current = true;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, [data-timeline-interactive="true"]')) return;
     seekFromPointer(event);
-  };
-
-  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingPlayhead.current) return;
-    seekFromPointer(event);
-  };
-
-  const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!draggingPlayhead.current) return;
-    seekFromPointer(event);
-    draggingPlayhead.current = false;
-    event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -132,10 +147,7 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
             className="timeline-canvas"
             data-timeline-canvas="true"
             style={{ width: canvasWidth }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerCancel={() => { draggingPlayhead.current = false; }}
+            onPointerDown={handleCanvasPointerDown}
           >
             <div className="ruler-content timeline-content-row">
               {marks.map((mark) => (
