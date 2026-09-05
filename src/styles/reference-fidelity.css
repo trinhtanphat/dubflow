@@ -1,0 +1,28 @@
+@media (min-width: 1400px) {
+  .studio-pro-shell.reference-fidelity {
+    height: 100vh;
+    min-height: 760px;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: var(--yv-ref-topbar-height) minmax(0, 1fr) var(--yv-ref-footer-height);
+  }
+
+  .studio-pro-shell.reference-fidelity .topbar {
+    height: var(--yv-ref-topbar-height);
+    min-height: var(--yv-ref-topbar-height);
+  }
+
+  .studio-pro-shell.reference-fidelity .studio-grid {
+    grid-template-columns: var(--yv-ref-rail-width) minmax(0, 1fr) var(--yv-ref-rail-width);
+    min-height: 0;
+  }
+
+  .studio-pro-shell.reference-fidelity .center-stage {
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .studio-pro-shell.reference-fidelity .studio-capability-strip {
+    min-height: var(--yv-ref-footer-height);
+  }
+}
