@@ -20,6 +20,7 @@ const baseSegment: Segment = {
   translationEngine: 'workers-ai',
   translationStatus: 'completed',
   voiceStatus: 'completed',
+  dubbedObjectKey: 'projects/project-1/dubbed/s1.mp3',
   version: 1,
   splitParentId: null,
 };
@@ -52,10 +53,15 @@ class MemorySegmentStore implements SegmentStore {
     if (expectedVersion !== this.current.version) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+    const invalidatesVoice = patch.startMs !== undefined
+      || patch.endMs !== undefined
+      || patch.translatedText !== undefined
+      || patch.speakerId !== undefined;
     this.current = {
       ...this.current,
       ...patch,
-      voiceStatus: patch.startMs !== undefined || patch.endMs !== undefined ? 'pending' : this.current.voiceStatus,
+      voiceStatus: invalidatesVoice ? 'pending' : this.current.voiceStatus,
+      dubbedObjectKey: invalidatesVoice ? null : this.current.dubbedObjectKey,
       version: this.current.version + 1,
     };
     return this.current;
@@ -70,7 +76,7 @@ class MemorySegmentStore implements SegmentStore {
   ) {
     this.calls.push({ method: 'splitSegment', args: [projectId, segmentId, userId, expectedVersion, playheadMs] });
     return {
-      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', version: expectedVersion + 1 },
+      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', dubbedObjectKey: null, version: expectedVersion + 1 },
       right: {
         ...baseSegment,
         id: 'worker-child',
@@ -78,6 +84,7 @@ class MemorySegmentStore implements SegmentStore {
         sourceText: 'world',
         translatedText: 'chao',
         voiceStatus: 'pending',
+        dubbedObjectKey: null,
         version: 1,
         splitParentId: segmentId,
       },
@@ -97,10 +104,11 @@ class MemorySegmentStore implements SegmentStore {
       method: 'restoreSplit',
       args: [projectId, segmentId, userId, expectedVersion, childSegmentId, expectedChildVersion, original],
     });
-    return { ...baseSegment, ...original, voiceStatus: 'pending', version: expectedVersion + 1 };
+    return { ...baseSegment, ...original, voiceStatus: 'pending', dubbedObjectKey: null, version: expectedVersion + 1 };
   }
 
   async setTranslationResult() { return null; }
+  async setVoiceResult() {}
   async replaceFromAsr() { return []; }
 }
 
@@ -120,7 +128,13 @@ describe('segment mutation routes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', version: 2 });
+    expect(await response.json()).toMatchObject({
+      startMs: 1_200,
+      endMs: 3_200,
+      voiceStatus: 'pending',
+      dubbedObjectKey: null,
+      version: 2,
+    });
     expect(store.calls).toEqual([
       { method: 'updateSegment', args: ['project-1', 's1', 'dev-user', 1, { startMs: 1_200, endMs: 3_200 }] },
     ]);
@@ -167,7 +181,7 @@ describe('segment mutation routes', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as { left: Segment; right: Segment };
     expect(body.left.endMs).toBe(2_000);
-    expect(body.right).toMatchObject({ id: 'worker-child', startMs: 2_000, splitParentId: 's1' });
+    expect(body.right).toMatchObject({ id: 'worker-child', startMs: 2_000, splitParentId: 's1', dubbedObjectKey: null });
     expect(store.calls).toContainEqual({ method: 'splitSegment', args: ['project-1', 's1', 'dev-user', 1, 2_000] });
   });
 
@@ -192,7 +206,7 @@ describe('segment mutation routes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ id: 's1', voiceStatus: 'pending' });
+    expect(await response.json()).toMatchObject({ id: 's1', voiceStatus: 'pending', dubbedObjectKey: null });
     expect(store.calls).toContainEqual({
       method: 'restoreSplit',
       args: ['project-1', 's1', 'dev-user', 1, 'worker-child', 1, original],
@@ -214,5 +228,18 @@ describe('segment mutation routes', () => {
       code: 'SEGMENT_OVERLAP',
       message: 'Segment overlaps s2.',
     });
+  });
+
+  it('maps a project processing lock to HTTP 409 without weakening the revision envelope', async () => {
+    const store = new MemorySegmentStore();
+    store.updateError = new SegmentPersistenceError('PROJECT_BUSY', 'Project is locked while cloud processing or export is active.');
+    const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 1, patch: { translatedText: 'locked' } }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'PROJECT_BUSY' });
   });
 });
