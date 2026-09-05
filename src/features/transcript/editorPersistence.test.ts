@@ -25,9 +25,11 @@ describe('editor persistence', () => {
     expect(updated).toMatchObject({ translatedText: 'Chào bạn', speakerId: 'speaker-2', version: 3 });
   });
 
-  it('keeps compare translations as choices without persisting a winner', async () => {
-    const result = await retranslateEditorSegment('p1', 's1', 'compare', {
-      async retranslateSegment() {
+  it('passes the expected revision through compare translation without persisting a winner', async () => {
+    const calls: unknown[] = [];
+    const result = await retranslateEditorSegment('p1', 's1', 2, 'compare', {
+      async retranslateSegment(projectId, segmentId, expectedVersion, mode) {
+        calls.push({ projectId, segmentId, expectedVersion, mode });
         return {
           mode: 'compare' as const,
           workersAI: [{ id: 's1', text: 'Bản AI', provider: 'workers-ai' }],
@@ -35,16 +37,20 @@ describe('editor persistence', () => {
         };
       },
     });
+    expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', expectedVersion: 2, mode: 'compare' }]);
     expect(result).toEqual({ mode: 'compare', workersAI: 'Bản AI', google: 'Bản Google' });
   });
 
-  it('returns the persisted segment for a single-provider retranslation', async () => {
+  it('returns the persisted canonical segment for a revision-aware single-provider retranslation', async () => {
+    const calls: unknown[] = [];
     const updated = { ...segment, translatedText: 'Bản mới', version: 3 };
-    const result = await retranslateEditorSegment('p1', 's1', 'workers-ai', {
-      async retranslateSegment() {
+    const result = await retranslateEditorSegment('p1', 's1', 2, 'workers-ai', {
+      async retranslateSegment(projectId, segmentId, expectedVersion, mode) {
+        calls.push({ projectId, segmentId, expectedVersion, mode });
         return { mode: 'workers-ai' as const, result: { id: 's1', text: 'Bản mới', provider: 'workers-ai' }, segment: updated };
       },
     });
+    expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', expectedVersion: 2, mode: 'workers-ai' }]);
     expect(result).toEqual({ mode: 'persisted', segment: updated });
   });
 });
