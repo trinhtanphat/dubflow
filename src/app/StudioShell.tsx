@@ -10,9 +10,12 @@ import {
   persistRedo,
   persistUndo,
 } from '../features/timeline/segmentMutationService';
+import type { Segment } from '../features/timeline/types';
 import type { CloudJob } from '../features/projects/jobApi';
 import type { TranslationMode } from '../features/translation/translationApi';
 import { retranslateEditorSegment } from '../features/transcript/editorPersistence';
+import { SegmentVersionConflictError, type CloudSegment } from '../features/transcript/segmentApi';
+import type { SegmentFieldPatch } from './autosaveDraft';
 import type { EditorMutation } from './editorHistory';
 import type { StudioAction, StudioState } from './studioState';
 import type { useStudioState } from './useStudioState';
@@ -51,6 +54,44 @@ const defaultStudioEditorServices: StudioEditorServices = {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function toStudioSegment(segment: CloudSegment): Segment {
+  return {
+    id: segment.id,
+    speakerId: segment.speakerId?.trim() || 'unassigned',
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    sourceText: segment.sourceText,
+    translatedText: segment.translatedText,
+    version: segment.version,
+  };
+}
+
+function historyFieldPatch(mutation: EditorMutation, direction: 'undo' | 'redo'): SegmentFieldPatch | null {
+  if (mutation.kind !== 'fields') return null;
+  const source = direction === 'undo' ? mutation.before : mutation.after;
+  const patch: SegmentFieldPatch = {};
+  for (const field of mutation.fields) {
+    if (field === 'sourceText') patch.sourceText = source.sourceText;
+    else if (field === 'translatedText') patch.translatedText = source.translatedText;
+    else patch.speakerId = source.speakerId;
+  }
+  return patch;
+}
+
+function dispatchFieldHistoryConflict(
+  dispatch: (action: StudioAction) => void,
+  mutation: EditorMutation,
+  direction: 'undo' | 'redo',
+  error: SegmentVersionConflictError,
+): boolean {
+  const patch = historyFieldPatch(mutation, direction);
+  if (!patch || mutation.kind !== 'fields') return false;
+  const canonical = toStudioSegment(error.canonical);
+  dispatch({ type: 'editDraft', segmentId: mutation.segmentId, patch });
+  dispatch({ type: 'conflictDraftSave', segmentId: mutation.segmentId, canonical });
+  return true;
 }
 
 export function deriveStudioSaveState(
@@ -138,9 +179,13 @@ export function createStudioEditorActions({
     setError('');
     dispatch({ type: 'applyUndoLocal' });
     try {
-      await services.persistUndo(state.project.id, mutation);
+      const canonical = await services.persistUndo(state.project.id, mutation, state.project);
+      dispatch({ type: 'reconcileHistoryMutation', direction: 'undo', previous: mutation, mutation: canonical });
     } catch (error) {
       dispatch({ type: 'applyRedoLocal' });
+      if (error instanceof SegmentVersionConflictError && dispatchFieldHistoryConflict(dispatch, mutation, 'undo', error)) {
+        return;
+      }
       setError(errorMessage(error, 'Không thể hoàn tác thay đổi.'));
     } finally {
       setBusy(false);
@@ -156,16 +201,13 @@ export function createStudioEditorActions({
     setError('');
     dispatch({ type: 'applyRedoLocal' });
     try {
-      const canonical: EditorMutation = await services.persistRedo(state.project.id, mutation);
-      if (mutation.kind === 'split' && canonical.kind === 'split') {
-        dispatch({
-          type: 'reconcileLatestSplitMutation',
-          previousRightId: mutation.rightAfter.id,
-          mutation: canonical,
-        });
-      }
+      const canonical = await services.persistRedo(state.project.id, mutation, state.project);
+      dispatch({ type: 'reconcileHistoryMutation', direction: 'redo', previous: mutation, mutation: canonical });
     } catch (error) {
       dispatch({ type: 'applyUndoLocal' });
+      if (error instanceof SegmentVersionConflictError && dispatchFieldHistoryConflict(dispatch, mutation, 'redo', error)) {
+        return;
+      }
       setError(errorMessage(error, 'Không thể làm lại thay đổi.'));
     } finally {
       setBusy(false);
