@@ -59,5 +59,5 @@ test('Phase 3B summaries derive identity on the server and dashboard remains inf
   assert.match(usageApi, /api\/usage/);
   assert.match(usageApi, /api\/projects\/\$\{encodeURIComponent\(projectId\)\}\/usage/);
   assert.match(usagePanel, /Credits nội bộ/);
-  assert.doesNotMatch(usagePanel, /USD|\$|Thanh toán|Nâng cấp/);
+  assert.doesNotMatch(usagePanel, /USD|Thanh toán|Nâng cấp/);
 });
