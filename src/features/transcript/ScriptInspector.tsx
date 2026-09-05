@@ -1,8 +1,10 @@
-import { useState, type Dispatch } from 'react';
+import { useEffect, useMemo, useState, type Dispatch } from 'react';
 import type { StudioAction } from '../../app/studioState';
+import { createVoicePreviewAction } from '../../app/voicePreviewAction';
 import type { Segment, Speaker } from '../timeline/types';
-import type { SegmentPatch } from './segmentApi';
 import type { TranslationMode } from '../translation/translationApi';
+import { fetchVoiceCapabilities, type VoiceCapabilities } from '../voice/voiceApi';
+import type { SegmentPatch } from './segmentApi';
 
 type TranslationComparison = { workersAI: string; google: string };
 type InspectorTab = 'script' | 'characters';
@@ -28,6 +30,12 @@ type ScriptInspectorProps = {
   onPreviewVoice?: (text: string) => void;
 };
 
+function providerLabel(capabilities: VoiceCapabilities | null): string {
+  if (capabilities?.provider === 'elevenlabs') return 'ElevenLabs';
+  if (capabilities?.provider) return capabilities.provider;
+  return 'Chưa cấu hình';
+}
+
 export function ScriptInspector({
   segment,
   speakers,
@@ -42,25 +50,55 @@ export function ScriptInspector({
   onApplyTranslation,
   busy = false,
   error = '',
-  voiceConfigured = false,
-  voiceProviderLabel = 'Chưa cấu hình',
+  voiceConfigured,
+  voiceProviderLabel,
   voiceBusy = false,
   voiceError = '',
   onPreviewVoice,
 }: ScriptInspectorProps) {
   const [activeTab, setActiveTab] = useState<InspectorTab>('script');
+  const [detectedVoice, setDetectedVoice] = useState<VoiceCapabilities | null>(null);
+  const [internalVoiceBusy, setInternalVoiceBusy] = useState(false);
+  const [internalVoiceError, setInternalVoiceError] = useState('');
+
+  useEffect(() => {
+    if (voiceConfigured !== undefined) return;
+    const controller = new AbortController();
+    fetchVoiceCapabilities().then((capabilities) => {
+      if (!controller.signal.aborted) setDetectedVoice(capabilities);
+    }).catch((cause) => {
+      if (!controller.signal.aborted) {
+        setDetectedVoice(null);
+        setInternalVoiceError(cause instanceof Error ? cause.message : 'Không thể kiểm tra provider giọng nói.');
+      }
+    });
+    return () => controller.abort();
+  }, [voiceConfigured]);
+
+  const internalPreview = useMemo(() => createVoicePreviewAction({
+    setBusy: setInternalVoiceBusy,
+    setError: setInternalVoiceError,
+  }), []);
 
   if (!segment) {
     return <aside className="script-inspector" aria-label="Inspector dubbing">Chưa có phân đoạn.</aside>;
   }
 
+  const effectiveVoiceConfigured = voiceConfigured ?? Boolean(detectedVoice?.configured && detectedVoice?.preview);
+  const effectiveVoiceProvider = voiceProviderLabel ?? providerLabel(detectedVoice);
+  const effectiveVoiceBusy = voiceBusy || internalVoiceBusy;
+  const effectiveVoiceError = voiceError || internalVoiceError;
+
   const commit = (patch: SegmentPatch) => {
     if (cloudEditable) onCommitPatch?.(segment.id, patch);
   };
-  const previewEnabled = voiceConfigured && !voiceBusy && Boolean(segment.translatedText.trim());
+  const previewEnabled = effectiveVoiceConfigured && !effectiveVoiceBusy && Boolean(segment.translatedText.trim());
   const selectedSpeaker = speakers.find((speaker) => speaker.id === segment.speakerId) ?? speakers[0];
   const previewVoice = () => {
-    if (previewEnabled) onPreviewVoice?.(segment.translatedText.trim());
+    if (!previewEnabled) return;
+    const text = segment.translatedText.trim();
+    if (onPreviewVoice) onPreviewVoice(text);
+    else void internalPreview(text);
   };
 
   return (
@@ -151,8 +189,8 @@ export function ScriptInspector({
         <div className="character-inspector-card reference-character-card">
           <span className="eyebrow">NHÂN VẬT ĐANG CHỌN</span>
           <strong>{selectedSpeaker?.name ?? 'Chưa nhận diện nhân vật'}</strong>
-          <p>{selectedSpeaker?.label ?? 'Chưa có nhãn'} · {Math.round((selectedSpeaker?.share ?? 0) * (selectedSpeaker && selectedSpeaker.share <= 1 ? 100 : 1))}% thời lượng</p>
-          <small>Voice provider: {voiceConfigured ? voiceProviderLabel : 'Chưa cấu hình'}</small>
+          <p>{selectedSpeaker?.label ?? 'Chưa có nhãn'} · {Math.round((selectedSpeaker?.share ?? 0) * ((selectedSpeaker?.share ?? 0) <= 1 ? 100 : 1))}% thời lượng</p>
+          <small>Voice provider: {effectiveVoiceConfigured ? effectiveVoiceProvider : 'Chưa cấu hình'}</small>
         </div>
       )}
 
@@ -173,17 +211,17 @@ export function ScriptInspector({
           className="secondary-button"
           type="button"
           disabled={!previewEnabled}
-          title={voiceConfigured ? `Tạo preview bằng ${voiceProviderLabel}` : 'Provider giọng chưa được cấu hình'}
+          title={effectiveVoiceConfigured ? `Tạo preview bằng ${effectiveVoiceProvider}` : 'Provider giọng chưa được cấu hình'}
           onClick={previewVoice}
-        >{voiceBusy ? 'Đang tạo giọng…' : `▷ Nghe thử giọng · ${voiceConfigured ? voiceProviderLabel : 'Chưa cấu hình'}`}</button>
+        >{effectiveVoiceBusy ? 'Đang tạo giọng…' : `▷ Nghe thử giọng · ${effectiveVoiceConfigured ? effectiveVoiceProvider : 'Chưa cấu hình'}`}</button>
         <button
           className="ghost-button"
           type="button"
           disabled={!previewEnabled}
-          title={voiceConfigured ? 'Tạo lại preview từ lời thoại hiện tại' : 'Provider giọng chưa được cấu hình'}
+          title={effectiveVoiceConfigured ? 'Tạo lại preview từ lời thoại hiện tại' : 'Provider giọng chưa được cấu hình'}
           onClick={previewVoice}
-        >Tạo lại giọng{voiceConfigured ? '' : ' · Chưa cấu hình'}</button>
-        {voiceError && <p className="error-banner" role="alert">{voiceError}</p>}
+        >Tạo lại giọng{effectiveVoiceConfigured ? '' : ' · Chưa cấu hình'}</button>
+        {effectiveVoiceError && <p className="error-banner" role="alert">{effectiveVoiceError}</p>}
       </div>
 
       <div className="toggle-row">
