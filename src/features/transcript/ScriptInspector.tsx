@@ -140,6 +140,7 @@ export function ScriptInspector({
             <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
             <textarea
               aria-label="Lời thoại gốc"
+              lang="zh-CN"
               value={segment.sourceText}
               onChange={(event) => dispatch({ type: 'editSource', segmentId: segment.id, text: event.target.value })}
               onBlur={() => commit({ sourceText: segment.sourceText })}
