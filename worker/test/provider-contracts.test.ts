@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
-import type { R2BucketLike } from '../src/cloudflare/r2';
+import type { R2MediaBucketLike } from '../src/cloudflare/r2';
 import type { Env } from '../src/env';
 
 const ai = {
@@ -36,7 +36,10 @@ const bucket = {
       async abort() {},
     };
   },
-} satisfies R2BucketLike;
+  async get() {
+    return null;
+  },
+} satisfies R2MediaBucketLike;
 
 describe('Cloudflare provider contracts', () => {
   it('accepts portable AI and R2 bindings plus the Google secret', () => {
