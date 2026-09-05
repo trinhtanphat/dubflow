@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../src/env';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
 import { createTranslationRoutes } from '../src/routes/translation';
@@ -71,9 +71,11 @@ function envFor(db: FakeDb) {
     AI: {
       async run() { return { translated_text: 'provider-result' }; },
     },
-    GOOGLE_CLOUD_TRANSLATE_API_KEY: '',
+    GOOGLE_CLOUD_TRANSLATE_API_KEY: 'test-key',
   } as any;
 }
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('revision-aware retranslation route', () => {
   it('rejects a persisted provider result when the segment revision is stale', async () => {
@@ -94,6 +96,10 @@ describe('revision-aware retranslation route', () => {
 
   it('compare mode never persists either provider result', async () => {
     const db = new FakeDb();
+    vi.stubGlobal('fetch', async () => Response.json({
+      data: { translations: [{ translatedText: 'google-result' }] },
+    }));
+
     const response = await makeApp().request('/api/projects/p1/segments/s1/retranslate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
