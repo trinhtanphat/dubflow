@@ -90,12 +90,21 @@ describe('ASR chunk normalization', () => {
     expect(first[0].id).toBe(second[0].id);
   });
 
-  it('preserves diarized speaker labels while applying chunk offsets', () => {
-    const [segment] = normalizeAsrChunks([{
+  it('preserves diarized speaker labels and creates a deterministic chunk-scoped speaker id', () => {
+    const input = [{
       projectId: 'p1', chunkId: 'c9', offsetMs: 20_000,
       segments: [{ startMs: 100, endMs: 900, text: 'hello', speakerIndex: 2 }],
-    }]);
-    expect(segment).toMatchObject({ startMs: 20_100, endMs: 20_900, speakerIndex: 2, chunkId: 'c9' });
+    }];
+    const [segment] = normalizeAsrChunks(input);
+    const [again] = normalizeAsrChunks(input);
+    expect(segment).toMatchObject({
+      startMs: 20_100,
+      endMs: 20_900,
+      speakerIndex: 2,
+      chunkId: 'c9',
+      speakerId: expect.stringMatching(/^spk_[0-9a-f]{8}$/),
+    });
+    expect(segment.speakerId).toBe(again.speakerId);
   });
 
   it('rejects inverted ranges', () => {
