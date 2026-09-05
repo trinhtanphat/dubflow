@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { App } from './App';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer, type StudioAction } from './studioState';
 import { createStudioEditorActions, StudioShell } from './StudioShell';
@@ -8,15 +7,27 @@ import { createVoicePreviewAction } from './voicePreviewAction';
 import type { FieldMutation, SplitMutation, TimingMutation } from './editorHistory';
 import { SegmentVersionConflictError } from '../features/transcript/segmentApi';
 
+function renderStudioShell() {
+  const state = createInitialStudioState(mockProject);
+  return renderToStaticMarkup(
+    <StudioShell
+      state={state}
+      dispatch={() => {}}
+      selectedSegment={state.project.segments[0]}
+      selectedSpeaker={state.project.speakers[0]}
+    />,
+  );
+}
+
 describe('StudioShell mobile controls', () => {
   it('exposes accessible source and inspector panel controls', () => {
-    const html = renderToStaticMarkup(<App />);
+    const html = renderStudioShell();
     expect(html).toContain('aria-label="Mở nguồn media"');
     expect(html).toContain('aria-label="Mở inspector"');
   });
 
   it('restores the reference capability footer without overstating guarded features', () => {
-    const html = renderToStaticMarkup(<App />);
+    const html = renderStudioShell();
     for (const label of [
       'Dub mọi ngôn ngữ',
       'Tự nhận diện nhân vật',

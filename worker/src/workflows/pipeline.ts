@@ -1,5 +1,5 @@
 import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
-import type { ProjectStore } from '../db/projects';
+import type { Project, ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
 import type { R2BucketLike } from '../cloudflare/r2';
@@ -7,6 +7,7 @@ import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
 import { normalizeAsrChunks } from '../services/asr/normalize';
 import type { TranslationProvider } from '../services/translation/types';
+import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
 export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -14,8 +15,12 @@ export interface WorkflowStepLike {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
 }
 
-type PipelineProjects = Pick<ProjectStore, 'getByIdForUser' | 'setStatus'>;
-type PipelineJobs = Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
+type PipelineProject = Pick<Project, 'id' | 'sourceObjectKey' | 'sourceLanguage'>;
+type PipelineProjects = {
+  getByIdForUser(projectId: string, userId: string): Promise<PipelineProject | null>;
+  setStatus(projectId: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
+};
+type PipelineJobs = JobStatusReader & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
 
 export type DubbingPipelineDeps = {
@@ -45,6 +50,7 @@ export async function runDubbingPipeline(
   step: WorkflowStepLike,
 ): Promise<{ status: 'needs_review'; segmentCount: number }> {
   let failureCode = 'PIPELINE_FAILED';
+  const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
   try {
     const project = await step.do('authorize project', async () => deps.projects.getByIdForUser(params.projectId, params.userId));
     if (!project) throw new Error('Project not found.');
@@ -56,6 +62,7 @@ export async function runDubbingPipeline(
     });
 
     failureCode = 'MEDIA_PROCESSOR_FAILED';
+    await step.do('check cancellation before media probe', ensureActive);
     const metadata = await step.do('probe source media', async () => deps.media.probe(project.sourceObjectKey!));
     if (!Number.isFinite(metadata.durationMs) || metadata.durationMs <= 0 || metadata.durationMs > MAX_MEDIA_DURATION_SECONDS * 1000) {
       throw new Error('Source media duration is invalid or exceeds 3 hours.');
@@ -65,6 +72,7 @@ export async function runDubbingPipeline(
       await deps.jobs.setProgress(params.jobId, 0.12, 'extracting_audio');
     });
 
+    await step.do('check cancellation before audio extraction', ensureActive);
     const chunks = await step.do('extract bounded audio chunks', async () =>
       deps.media.extractAudioChunks(params.projectId, project.sourceObjectKey!),
     );
@@ -74,6 +82,7 @@ export async function runDubbingPipeline(
     const normalizedInputs = [] as Array<{ projectId: string; chunkId: string; offsetMs: number; segments: Awaited<ReturnType<AsrProvider['transcribe']>>['segments'] }>;
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index];
+      await step.do(`check cancellation before ASR chunk ${index + 1}`, ensureActive);
       const asrResult = await step.do(`transcribe audio chunk ${index + 1}`, async () => {
         const audio = await readChunk(deps.bucket, chunk.objectKey);
         return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
@@ -104,6 +113,7 @@ export async function runDubbingPipeline(
     const batchSize = 25;
     for (let offset = 0; offset < persisted.length; offset += batchSize) {
       const batch = persisted.slice(offset, offset + batchSize);
+      await step.do(`check cancellation before translation ${offset + 1}`, ensureActive);
       const translated = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () =>
         deps.translation.translateBatch(
           batch.map((segment) => ({ id: segment.id, text: segment.sourceText })),
@@ -131,12 +141,22 @@ export async function runDubbingPipeline(
     }
 
     failureCode = 'PIPELINE_FAILED';
+    await step.do('check cancellation before review completion', ensureActive);
     await step.do('mark review ready', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'needs_review');
       await deps.jobs.complete(params.jobId, 'needs_review');
     });
     return { status: 'needs_review', segmentCount: persisted.length };
   } catch (error) {
+    if (isJobCancelledError(error)) {
+      try {
+        await deps.projects.setStatus(params.projectId, params.userId, 'cancelled');
+      } catch {
+        // Preserve the cancellation error if the project status write also fails.
+      }
+      throw error;
+    }
+
     const message = asMessage(error);
     try {
       await deps.jobs.fail(params.jobId, failureCode, message);

@@ -13,6 +13,7 @@ describe('dubbing workflow pipeline', () => {
       { id: 'seg-b', projectId: 'project-1', speakerId: 'spk-b', startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
     ];
     const jobs = {
+      async getForProject() { return { status: 'running' as const }; },
       async setProgress(_id: string, _progress: number, step: string) { calls.push(`job:${step}`); },
       async fail() { calls.push('job:failed'); },
       async complete(_id: string, status?: string) { calls.push(`job:${status ?? 'completed'}`); },
@@ -91,6 +92,7 @@ describe('dubbing workflow pipeline', () => {
         async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
       },
       jobs: {
+        async getForProject() { return { status: 'running' as const }; },
         async setProgress() {},
         async fail(_id: string, code: string) { calls.push(`job:${code}`); },
         async complete() {},
@@ -110,5 +112,43 @@ describe('dubbing workflow pipeline', () => {
     await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step)).rejects.toThrow('provider down');
     expect(calls).toContain('job:ASR_FAILED');
     expect(calls).toContain('project:failed');
+  });
+
+  it('stops before the next expensive ASR boundary when the durable job is cancelled', async () => {
+    const calls: string[] = [];
+    let checks = 0;
+    const deps = {
+      projects: {
+        async getByIdForUser() { return { id: 'p', sourceObjectKey: 'projects/p/source/x.mp4', sourceLanguage: 'zh' as const }; },
+        async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
+      },
+      jobs: {
+        async getForProject() {
+          checks += 1;
+          return { status: checks >= 3 ? 'cancelled' as const : 'running' as const };
+        },
+        async setProgress() {},
+        async fail() { calls.push('job:failed'); },
+        async complete() { calls.push('job:complete'); },
+      },
+      media: {
+        async probe() { calls.push('media:probe'); return { durationMs: 1000 }; },
+        async extractAudioChunks() {
+          calls.push('media:chunks');
+          return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 1000 }];
+        },
+      },
+      bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
+      asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
+      segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+      translation: { async translateBatch() { return []; } },
+    };
+    const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
+
+    await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step))
+      .rejects.toMatchObject({ code: 'JOB_CANCELLED' });
+    expect(calls).not.toContain('asr:called');
+    expect(calls).not.toContain('job:failed');
+    expect(calls).toContain('project:cancelled');
   });
 });

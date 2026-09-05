@@ -17,6 +17,7 @@ describe('speaker-specific voice export', () => {
         setExportObject: vi.fn(async () => {}),
       },
       jobs: {
+        getForProject: vi.fn(async () => ({ status: 'running' as const })),
         setProgress: vi.fn(async () => {}),
         fail: vi.fn(async () => {}),
         complete: vi.fn(async () => {}),
