@@ -91,6 +91,7 @@ export async function runDubbingPipeline(
     failureCode = 'PIPELINE_FAILED';
     const normalized = normalizeAsrChunks(normalizedInputs).map((segment) => ({
       id: segment.id,
+      speakerId: segment.speakerId ?? null,
       startMs: segment.startMs,
       endMs: segment.endMs,
       sourceText: segment.text,
