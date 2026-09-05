@@ -28,36 +28,50 @@ function persistenceErrorResponse(c: any, error: SegmentPersistenceError) {
   return c.json(errorBody(error.code, error.message), 400);
 }
 
+function readPositiveVersion(record: Record<string, unknown>, field: string): number {
+  const value = record[field];
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new SegmentInputError(`${field} must be a positive integer.`);
+  }
+  return value as number;
+}
+
 function readSegmentPatchRequest(input: unknown): { expectedVersion: number; patch: unknown } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new SegmentInputError('Segment patch request must be an object.');
   }
   const record = input as Record<string, unknown>;
-  if (!Number.isInteger(record.expectedVersion) || (record.expectedVersion as number) < 1) {
-    throw new SegmentInputError('expectedVersion must be a positive integer.');
-  }
+  const expectedVersion = readPositiveVersion(record, 'expectedVersion');
   if (!record.patch || typeof record.patch !== 'object' || Array.isArray(record.patch)) {
     throw new SegmentInputError('patch must be an object.');
   }
-  return { expectedVersion: record.expectedVersion as number, patch: record.patch };
+  return { expectedVersion, patch: record.patch };
 }
 
-function readSplitPoint(input: unknown): number {
+function readSplitRequest(input: unknown): { expectedVersion: number; playheadMs: number } {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new SegmentPersistenceError('INVALID_SPLIT_POINT', 'Split payload must contain an integer playheadMs.');
+    throw new SegmentPersistenceError('INVALID_SPLIT_POINT', 'Split payload must contain expectedVersion and playheadMs.');
   }
-  const playheadMs = (input as Record<string, unknown>).playheadMs;
-  if (!Number.isInteger(playheadMs)) {
+  const record = input as Record<string, unknown>;
+  const expectedVersion = readPositiveVersion(record, 'expectedVersion');
+  if (!Number.isInteger(record.playheadMs)) {
     throw new SegmentPersistenceError('INVALID_SPLIT_POINT', 'playheadMs must be an integer.');
   }
-  return playheadMs as number;
+  return { expectedVersion, playheadMs: record.playheadMs as number };
 }
 
-function readRestorePayload(input: unknown): { childSegmentId: string; original: SegmentRestoreInput } {
+function readRestorePayload(input: unknown): {
+  expectedVersion: number;
+  childSegmentId: string;
+  expectedChildVersion: number;
+  original: SegmentRestoreInput;
+} {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new SegmentInputError('Restore payload must be an object.');
   }
   const record = input as Record<string, unknown>;
+  const expectedVersion = readPositiveVersion(record, 'expectedVersion');
+  const expectedChildVersion = readPositiveVersion(record, 'expectedChildVersion');
   if (typeof record.childSegmentId !== 'string' || record.childSegmentId.trim().length === 0) {
     throw new SegmentInputError('childSegmentId must be a non-empty string.');
   }
@@ -65,9 +79,24 @@ function readRestorePayload(input: unknown): { childSegmentId: string; original:
     throw new SegmentInputError('original must be a segment snapshot object.');
   }
   return {
+    expectedVersion,
     childSegmentId: record.childSegmentId.trim(),
+    expectedChildVersion,
     original: record.original as SegmentRestoreInput,
   };
+}
+
+async function versionConflictResponse(
+  c: any,
+  repo: SegmentStore,
+  projectId: string,
+  segmentId: string,
+  userId: string,
+  error: SegmentPersistenceError,
+) {
+  const canonical = await repo.get(projectId, segmentId, userId);
+  if (!canonical) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
+  return c.json({ ...errorBody(error.code, error.message), segment: canonical }, 409);
 }
 
 export function createSegmentRoutes(
@@ -96,9 +125,7 @@ export function createSegmentRoutes(
     } catch (error) {
       if (error instanceof SegmentInputError) return c.json(errorBody(error.code, error.message), 400);
       if (error instanceof SegmentPersistenceError && error.code === 'SEGMENT_VERSION_CONFLICT') {
-        const canonical = await repo.get(projectId, segmentId, userId);
-        if (!canonical) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
-        return c.json({ ...errorBody(error.code, error.message), segment: canonical }, 409);
+        return versionConflictResponse(c, repo, projectId, segmentId, userId, error);
       }
       if (error instanceof SegmentPersistenceError) return persistenceErrorResponse(c, error);
       return c.json(errorBody('SEGMENT_UPDATE_FAILED', 'Unable to update segment.'), 500);
@@ -107,16 +134,24 @@ export function createSegmentRoutes(
 
   routes.post('/:id/segments/:segmentId/split', async (c) => {
     const repo = makeStore(c.env);
+    const projectId = c.req.param('id');
+    const segmentId = c.req.param('segmentId');
+    const userId = getCurrentUserId();
     try {
+      const request = readSplitRequest(await c.req.json());
       const result = await repo.splitSegment(
-        c.req.param('id'),
-        c.req.param('segmentId'),
-        getCurrentUserId(),
-        readSplitPoint(await c.req.json()),
+        projectId,
+        segmentId,
+        userId,
+        request.expectedVersion,
+        request.playheadMs,
       );
       return c.json(result);
     } catch (error) {
       if (error instanceof SegmentInputError) return c.json(errorBody(error.code, error.message), 400);
+      if (error instanceof SegmentPersistenceError && error.code === 'SEGMENT_VERSION_CONFLICT') {
+        return versionConflictResponse(c, repo, projectId, segmentId, userId, error);
+      }
       if (error instanceof SegmentPersistenceError) return persistenceErrorResponse(c, error);
       return c.json(errorBody('SEGMENT_SPLIT_FAILED', 'Unable to split segment.'), 500);
     }
@@ -124,18 +159,26 @@ export function createSegmentRoutes(
 
   routes.post('/:id/segments/:segmentId/restore-split', async (c) => {
     const repo = makeStore(c.env);
+    const projectId = c.req.param('id');
+    const segmentId = c.req.param('segmentId');
+    const userId = getCurrentUserId();
     try {
       const payload = readRestorePayload(await c.req.json());
       const restored = await repo.restoreSplit(
-        c.req.param('id'),
-        c.req.param('segmentId'),
+        projectId,
+        segmentId,
+        userId,
+        payload.expectedVersion,
         payload.childSegmentId,
-        getCurrentUserId(),
+        payload.expectedChildVersion,
         payload.original,
       );
       return c.json(restored);
     } catch (error) {
       if (error instanceof SegmentInputError) return c.json(errorBody(error.code, error.message), 400);
+      if (error instanceof SegmentPersistenceError && error.code === 'SEGMENT_VERSION_CONFLICT') {
+        return versionConflictResponse(c, repo, projectId, segmentId, userId, error);
+      }
       if (error instanceof SegmentPersistenceError) return persistenceErrorResponse(c, error);
       return c.json(errorBody('SEGMENT_RESTORE_FAILED', 'Unable to restore segment split.'), 500);
     }
