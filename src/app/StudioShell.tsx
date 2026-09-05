@@ -53,6 +53,10 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+export function isStudioMutationLocked(editorBusy: boolean, hasActiveJob: boolean): boolean {
+  return editorBusy || hasActiveJob;
+}
+
 export function createStudioEditorActions({
   state,
   dispatch,
@@ -177,6 +181,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorError, setEditorError] = useState('');
 
   const cloudEditable = state.project.id !== 'demo';
+  const mutationLocked = isStudioMutationLocked(editorBusy, Boolean(activeJob));
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -198,7 +203,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const startFinalExport = async () => {
-    if (!cloudEditable || activeJob || editorBusy) return;
+    if (!cloudEditable || mutationLocked) return;
     setCloudError('');
     try {
       const job = await startExport(state.project.id);
@@ -260,7 +265,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     state,
     dispatch,
     cloudEditable,
-    busy: editorBusy,
+    busy: mutationLocked,
     setBusy: setEditorBusy,
     setError: setEditorError,
     restoreCloudProject,
@@ -269,7 +274,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   useEffect(() => {
     const handleEditorHistoryShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'z') return;
-      if (isNativeTextUndoTarget(event.target) || editorBusy) return;
+      if (isNativeTextUndoTarget(event.target) || mutationLocked) return;
       if (event.shiftKey) {
         if (state.history.future.length === 0 || !cloudEditable) return;
         event.preventDefault();
@@ -282,10 +287,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     };
     window.addEventListener('keydown', handleEditorHistoryShortcut);
     return () => window.removeEventListener('keydown', handleEditorHistoryShortcut);
-  }, [cloudEditable, editorBusy, editorActions, state.history.future.length, state.history.past.length]);
+  }, [cloudEditable, mutationLocked, editorActions, state.history.future.length, state.history.past.length]);
 
   const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
-    if (!cloudEditable) return;
+    if (!cloudEditable || mutationLocked) return;
     setEditorError('');
     try {
       const updated = await persistEditorPatch(state.project.id, segmentId, patch);
@@ -306,7 +311,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const retranslate = async (segmentId: string) => {
-    if (!cloudEditable || editorBusy) return;
+    if (!cloudEditable || mutationLocked) return;
     setEditorBusy(true);
     setEditorError('');
     setTranslationComparison(null);
@@ -326,7 +331,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const applyTranslation = async (text: string) => {
-    if (!selectedSegment || !cloudEditable || editorBusy) return;
+    if (!selectedSegment || !cloudEditable || mutationLocked) return;
     setEditorBusy(true);
     setEditorError('');
     try {
@@ -345,12 +350,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
   const cloudDetail = cloudError || cloudJob?.currentStep || (cloudJob ? cloudJob.status : undefined);
   const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
-  const canUndo = cloudEditable && !editorBusy && state.history.past.length > 0;
-  const canRedo = cloudEditable && !editorBusy && state.history.future.length > 0;
+  const canUndo = cloudEditable && !mutationLocked && state.history.past.length > 0;
+  const canRedo = cloudEditable && !mutationLocked && state.history.future.length > 0;
   const exportBusy = Boolean(activeJob && cloudJob?.type === 'export');
   const canExport = cloudEditable
-    && !activeJob
-    && !editorBusy
+    && !mutationLocked
     && !state.project.exportObjectKey
     && (state.project.status === 'needs_review' || state.project.status === 'completed');
   const exportHref = state.project.exportObjectKey
@@ -418,7 +422,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           onRetranslate={retranslate}
           comparison={translationComparison}
           onApplyTranslation={applyTranslation}
-          busy={editorBusy}
+          busy={mutationLocked}
           error={editorError}
         />
       </main>
