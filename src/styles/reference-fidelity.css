@@ -181,6 +181,11 @@
     line-height: 1.5;
   }
 
+  .studio-pro-shell.reference-fidelity .subtitle-source,
+  .studio-pro-shell.reference-fidelity .language-card--source textarea {
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  }
+
   .studio-pro-shell.reference-fidelity .reference-translation-tools {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -262,4 +267,71 @@
     color: #8a8292;
     font-size: 9px;
   }
+}
+
+@media (min-width: 1280px) and (max-height: 820px) {
+  .studio-pro-shell.reference-fidelity {
+    min-height: 0;
+    grid-template-rows: 64px minmax(0, 1fr) 46px;
+  }
+
+  .studio-pro-shell.reference-fidelity .topbar {
+    height: 64px;
+    min-height: 64px;
+  }
+
+  .studio-pro-shell.reference-fidelity .center-stage {
+    grid-template-rows: minmax(0, 58%) minmax(0, 42%);
+  }
+
+  .studio-pro-shell.reference-fidelity .studio-capability-strip,
+  .studio-pro-shell.reference-fidelity .reference-feature-strip {
+    min-height: 46px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-feature-strip {
+    padding-inline: 16px;
+    gap: 8px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-feature-strip > span { font-size: 9px; }
+  .studio-pro-shell.reference-fidelity .reference-feature-strip small { font-size: 8px; }
+
+  .studio-pro-shell.reference-fidelity .video-stage { padding-top: 8px; }
+  .studio-pro-shell.reference-fidelity .reference-transport-row { min-height: 42px; }
+  .studio-pro-shell.reference-fidelity .reference-timeline { margin-bottom: 6px; }
+  .studio-pro-shell.reference-fidelity .timeline-label-spacer { min-height: 22px; }
+  .studio-pro-shell.reference-fidelity .ruler-content.timeline-content-row { min-height: 22px; }
+  .studio-pro-shell.reference-fidelity .track-label,
+  .studio-pro-shell.reference-fidelity .timeline-content-row { min-height: 32px; }
+
+  .studio-pro-shell.reference-fidelity .left-rail,
+  .studio-pro-shell.reference-fidelity .script-inspector {
+    padding-top: 10px;
+    padding-bottom: 8px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-drop-zone {
+    min-height: 96px;
+    margin-top: 8px;
+  }
+
+  .studio-pro-shell.reference-fidelity .speaker-card { min-height: 46px; }
+
+  .studio-pro-shell.reference-fidelity .left-rail .panel + .panel,
+  .studio-pro-shell.reference-fidelity .left-rail .speaker-panel {
+    margin-top: 10px;
+    padding-top: 9px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-inspector-header { margin-bottom: 8px; }
+  .studio-pro-shell.reference-fidelity .reference-script-card { padding: 8px 9px 7px; }
+  .studio-pro-shell.reference-fidelity .reference-script-card textarea { min-height: 34px; }
+
+  .studio-pro-shell.reference-fidelity .reference-voice-assignment {
+    margin-top: 9px;
+    padding-top: 8px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-voice-assignment select { min-height: 36px; }
 }
