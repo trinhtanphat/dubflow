@@ -1,11 +1,15 @@
 import type { CloudJob } from './jobApi';
 import type { CloudProject } from './projectApi';
+import type { UsageKind, UsageSummary } from './usageApi';
 
 export type ProjectDashboardProps = {
   projects: CloudProject[];
   jobsByProject: Record<string, CloudJob[]>;
   loading: boolean;
   error: string;
+  usageSummary: UsageSummary | null;
+  usageLoading: boolean;
+  usageError: string;
   onOpenProject(projectId: string): void;
   onRetryJob(projectId: string, jobId: string): void;
   onCancelJob(projectId: string, jobId: string): void;
@@ -13,6 +17,7 @@ export type ProjectDashboardProps = {
 };
 
 const activeStatuses = new Set<CloudJob['status']>(['queued', 'running', 'retrying']);
+const numberFormatter = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
 
 function progressLabel(progress: number): string {
   if (!Number.isFinite(progress)) return '0%';
@@ -32,11 +37,28 @@ function updatedLabel(value?: string): string {
   });
 }
 
+function usageKindLabel(kind: UsageKind): string {
+  switch (kind) {
+    case 'asr_audio_seconds': return 'ASR';
+    case 'translation_characters': return 'Dịch';
+    case 'tts_characters': return 'TTS';
+    case 'render_seconds': return 'Render';
+  }
+}
+
+function usageUnitLabel(kind: UsageKind, units: number): string {
+  const unit = kind === 'asr_audio_seconds' || kind === 'render_seconds' ? 'giây' : 'ký tự';
+  return `${numberFormatter.format(units)} ${unit}`;
+}
+
 export function ProjectDashboard({
   projects,
   jobsByProject,
   loading,
   error,
+  usageSummary,
+  usageLoading,
+  usageError,
   onOpenProject,
   onRetryJob,
   onCancelJob,
@@ -52,6 +74,59 @@ export function ProjectDashboard({
         </div>
         <button className="project-dashboard__create" type="button" onClick={onCreateProject}>Tạo dự án</button>
       </header>
+
+      <section className="project-usage" aria-label="Mức sử dụng và tín dụng">
+        {usageLoading ? (
+          <div className="project-usage__state" role="status">Đang tải mức sử dụng…</div>
+        ) : null}
+        {usageError ? (
+          <div className="project-usage__state project-usage__state--error" role="alert">{usageError}</div>
+        ) : null}
+        {usageSummary ? (
+          <>
+            <div className="project-usage__credits">
+              <article className="usage-credit-card">
+                <span>Tín dụng còn lại</span>
+                <strong>{numberFormatter.format(usageSummary.remainingCredits)}</strong>
+                <small>Trong {numberFormatter.format(usageSummary.allocatedCredits)} tín dụng được phân bổ</small>
+              </article>
+              <article className="usage-credit-card">
+                <span>Đã sử dụng</span>
+                <strong>{numberFormatter.format(usageSummary.usedCredits)}</strong>
+                <small>{usageSummary.overageCredits > 0 ? `Vượt ${numberFormatter.format(usageSummary.overageCredits)} tín dụng` : 'Chưa phát sinh vượt mức'}</small>
+              </article>
+            </div>
+
+            <div className="project-usage__details">
+              <section className="usage-panel" aria-label="Đơn vị tính phí">
+                <h2>Đơn vị tính phí</h2>
+                <div className="usage-list">
+                  {usageSummary.totals.map((total) => (
+                    <div className="usage-row" key={total.kind}>
+                      <span>{usageKindLabel(total.kind)}</span>
+                      <strong>{usageUnitLabel(total.kind, total.units)}</strong>
+                      <small>{numberFormatter.format(total.credits)} tín dụng</small>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="usage-panel" aria-label="Mức sử dụng theo provider">
+                <h2>Provider</h2>
+                <div className="usage-list">
+                  {usageSummary.providers.map((provider) => (
+                    <div className="usage-row" key={`${provider.provider}:${provider.kind}`}>
+                      <span>{provider.provider}</span>
+                      <strong>{usageKindLabel(provider.kind)}</strong>
+                      <small>{usageUnitLabel(provider.kind, provider.units)} · {numberFormatter.format(provider.credits)} tín dụng</small>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </>
+        ) : null}
+      </section>
 
       {error ? <div className="project-dashboard__error" role="alert">{error}</div> : null}
       {loading ? <div className="project-dashboard__loading" role="status">Đang tải dự án…</div> : null}
