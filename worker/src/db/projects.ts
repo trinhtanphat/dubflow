@@ -39,6 +39,7 @@ export interface D1StatementLike {
 
 export interface D1DatabaseLike {
   prepare(sql: string): D1StatementLike;
+  batch?(statements: D1StatementLike[]): Promise<unknown[]>;
 }
 
 type ProjectRow = {
