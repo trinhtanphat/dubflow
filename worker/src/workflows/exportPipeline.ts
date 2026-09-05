@@ -21,6 +21,7 @@ type ExportProject = {
 
 type ExportSegment = {
   id: string;
+  speakerId?: string | null;
   startMs: number;
   endMs: number;
   translatedText: string;
@@ -28,7 +29,11 @@ type ExportSegment = {
   dubbedObjectKey?: string | null;
 };
 
-type VoiceResult = Response;
+type ExportSpeaker = {
+  id: string;
+  voiceProvider?: string | null;
+  voiceId?: string | null;
+};
 
 export type ExportPipelineDeps = {
   projects: {
@@ -44,6 +49,9 @@ export type ExportPipelineDeps = {
   segments: {
     list(projectId: string, userId: string): Promise<ExportSegment[]>;
     setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
+  };
+  speakers?: {
+    list(projectId: string, userId: string): Promise<ExportSpeaker[]>;
   };
   bucket: {
     put?(key: string, value: ArrayBuffer): Promise<unknown>;
@@ -62,6 +70,17 @@ function errorMessage(error: unknown): string {
 
 function audioObjectKey(projectId: string, segmentId: string): string {
   return `projects/${projectId}/dubbed/${segmentId}.mp3`;
+}
+
+function speakerVoiceId(segment: ExportSegment, speakers: Map<string, ExportSpeaker>): string | undefined {
+  const speakerId = segment.speakerId?.trim();
+  if (!speakerId) return undefined;
+  const speaker = speakers.get(speakerId);
+  if (!speaker?.voiceId?.trim()) return undefined;
+  if (speaker.voiceProvider && speaker.voiceProvider !== 'elevenlabs') {
+    throw new Error(`Speaker ${speakerId} uses unsupported voice provider ${speaker.voiceProvider}.`);
+  }
+  return speaker.voiceId.trim();
 }
 
 export async function runExportPipeline(
@@ -83,6 +102,11 @@ export async function runExportPipeline(
     const emptyTranslation = segments.find((segment) => !segment.translatedText.trim());
     if (emptyTranslation) throw new Error(`Segment ${emptyTranslation.id} has no translated text.`);
 
+    const speakerRows = deps.speakers
+      ? await step.do('load export speaker voices', async () => deps.speakers!.list(params.projectId, params.userId))
+      : [];
+    const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
+
     await step.do('mark export processing', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'processing');
       await deps.jobs.setProgress(params.jobId, 0.05, 'generating_voice');
@@ -99,7 +123,12 @@ export async function runExportPipeline(
         objectKey = audioObjectKey(params.projectId, segment.id);
         await step.do(`generate voice ${segment.id}`, async () => {
           if (!deps.bucket.put) throw new Error('R2 put is unavailable for voice generation.');
-          const generated = await deps.voice.generate({ text: segment.translatedText.trim(), language: 'vi' });
+          const text = segment.translatedText.trim();
+          const voice = speakerVoiceId(segment, speakers);
+          const input: VoiceGenerateInput = voice
+            ? { text, language: 'vi', voice }
+            : { text, language: 'vi' };
+          const generated = await deps.voice.generate(input);
           if (!(generated instanceof Response)) throw new Error('Voice provider returned an unsupported response.');
           if (!generated.ok) throw new Error(`Voice provider failed (${generated.status}).`);
           const audio = await generated.arrayBuffer();
