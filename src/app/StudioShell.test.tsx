@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer, type StudioAction } from './studioState';
-import { createStudioEditorActions, createVoicePreviewAction } from './StudioShell';
+import { createStudioEditorActions } from './StudioShell';
+import { createVoicePreviewAction } from './voicePreviewAction';
 import type { SplitMutation, TimingMutation } from './editorHistory';
 
 describe('StudioShell mobile controls', () => {
