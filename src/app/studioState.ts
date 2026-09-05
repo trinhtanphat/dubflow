@@ -1,3 +1,4 @@
+import { clampPixelsPerSecond } from '../features/timeline/math';
 import type { StudioProject } from '../features/timeline/types';
 
 export type PlaybackRate = 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2;
@@ -13,6 +14,11 @@ export type StudioState = {
     volume: number;
     muted: boolean;
   };
+  timelineView: {
+    pixelsPerSecond: number;
+    scrollLeft: number;
+    viewportWidth: number;
+  };
 };
 
 export type StudioAction =
@@ -25,7 +31,10 @@ export type StudioAction =
   | { type: 'setPlaying'; playing: boolean }
   | { type: 'setPlaybackRate'; rate: PlaybackRate }
   | { type: 'setVolume'; volume: number }
-  | { type: 'toggleMuted' };
+  | { type: 'toggleMuted' }
+  | { type: 'setTimelineZoom'; pixelsPerSecond: number }
+  | { type: 'setTimelineScroll'; scrollLeft: number }
+  | { type: 'setTimelineViewport'; viewportWidth: number };
 
 export function createInitialStudioState(project: StudioProject): StudioState {
   const firstSegment = project.segments[0];
@@ -35,6 +44,7 @@ export function createInitialStudioState(project: StudioProject): StudioState {
     playheadMs: firstSegment?.startMs ?? 0,
     lipSyncEnabled: true,
     playback: { playing: false, rate: 1, volume: 1, muted: false },
+    timelineView: { pixelsPerSecond: 1, scrollLeft: 0, viewportWidth: 0 },
   };
 }
 
@@ -68,6 +78,24 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
       return { ...state, playback: { ...state.playback, volume: Math.max(0, Math.min(1, action.volume)) } };
     case 'toggleMuted':
       return { ...state, playback: { ...state.playback, muted: !state.playback.muted } };
+    case 'setTimelineZoom':
+      return { ...state, timelineView: { ...state.timelineView, pixelsPerSecond: clampPixelsPerSecond(action.pixelsPerSecond) } };
+    case 'setTimelineScroll':
+      return {
+        ...state,
+        timelineView: {
+          ...state.timelineView,
+          scrollLeft: Number.isFinite(action.scrollLeft) ? Math.max(0, action.scrollLeft) : 0,
+        },
+      };
+    case 'setTimelineViewport':
+      return {
+        ...state,
+        timelineView: {
+          ...state.timelineView,
+          viewportWidth: Number.isFinite(action.viewportWidth) ? Math.max(0, action.viewportWidth) : 0,
+        },
+      };
     default:
       return state;
   }
