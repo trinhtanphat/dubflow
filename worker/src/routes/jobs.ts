@@ -6,19 +6,26 @@ import { errorBody } from '../http/json';
 
 export type JobStoreFactory = (env: Env) => JobStore;
 
+type RetryWorkflowParams = {
+  projectId: string;
+  userId: string;
+  jobId: string;
+  usageAttempt: number;
+};
+
 export type JobRouteDeps = {
   makeStore?: JobStoreFactory;
   startWorkflow?: (
     env: Env,
     job: DubbingJob,
-    params: { projectId: string; userId: string; jobId: string },
+    params: RetryWorkflowParams,
   ) => Promise<{ id: string }>;
 };
 
 async function defaultStartWorkflow(
   env: Env,
   job: DubbingJob,
-  params: { projectId: string; userId: string; jobId: string },
+  params: RetryWorkflowParams,
 ): Promise<{ id: string }> {
   const binding = job.type === 'dubbing'
     ? env.DUBBING_WORKFLOW
@@ -83,7 +90,12 @@ export function createJobRoutes(
 
       const retrying = await jobs.markRetrying(projectId, jobId, userId);
       try {
-        const instance = await startWorkflow(c.env, retrying, { projectId, userId, jobId });
+        const instance = await startWorkflow(c.env, retrying, {
+          projectId,
+          userId,
+          jobId,
+          usageAttempt: retrying.retryCount,
+        });
         return c.json({ jobId, workflowId: instance.id, status: 'retrying' as const }, 202);
       } catch (error) {
         if (error instanceof JobStateError && error.code === 'JOB_TYPE_UNSUPPORTED') throw error;
