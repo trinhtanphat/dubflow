@@ -16,4 +16,11 @@ describe('StudioShell command surface wiring', () => {
     expect(source).toContain("case 'seek-back-small'");
     expect(source).toContain("case 'seek-forward-large'");
   });
+
+  it('keeps command palette lifecycle callbacks stable across playhead rerenders', () => {
+    expect(source).toContain('const openCommandPalette = useCallback');
+    expect(source).toContain('const closeCommandPalette = useCallback');
+    expect(source).toContain('onOpenCommands={openCommandPalette}');
+    expect(source).toContain('onClose={closeCommandPalette}');
+  });
 });
