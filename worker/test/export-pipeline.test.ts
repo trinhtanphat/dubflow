@@ -49,6 +49,9 @@ function deps() {
     media: {
       renderExport: vi.fn(async () => ({ exportObjectKey: 'projects/p1/export/dubbed.mp4' })),
     },
+    usage: {
+      record: vi.fn(async (input: unknown) => ({ inserted: true, event: input })),
+    },
   };
 }
 
