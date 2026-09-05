@@ -2,13 +2,13 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { ProjectStore } from '../db/projects';
 import { ProjectRepository } from '../db/projects';
-import type { R2BucketLike } from '../cloudflare/r2';
+import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { errorBody } from '../http/json';
 import { getCurrentUserId } from '../security/current-user';
 import { parseByteRange } from '../services/media';
 
 export type MediaStoreFactory = (env: Env) => ProjectStore;
-export type MediaBucketFactory = (env: Env) => R2BucketLike;
+export type MediaBucketFactory = (env: Env) => R2ReadableBucketLike;
 
 export function createMediaRoutes(
   makeStore: MediaStoreFactory = (env) => new ProjectRepository(env.DB),
@@ -31,8 +31,7 @@ export function createMediaRoutes(
       });
     }
 
-    const bucket = makeBucket(c.env);
-    const object = await bucket.get(
+    const object = await makeBucket(c.env).get(
       project.sourceObjectKey,
       parsedRange ? { range: { offset: parsedRange.offset, length: parsedRange.length } } : undefined,
     );
