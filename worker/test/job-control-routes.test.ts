@@ -92,7 +92,7 @@ describe('durable job control routes', () => {
     expect(await response.json()).toEqual({ jobId: 'j1', workflowId: 'wf-j1-2', status: 'retrying' });
     expect(creates).toEqual([{
       id: 'retry-j1-2',
-      params: { projectId: 'p1', userId: 'dev-user', jobId: 'j1' },
+      params: { projectId: 'p1', userId: 'dev-user', jobId: 'j1', usageAttempt: 2 },
     }]);
   });
 
