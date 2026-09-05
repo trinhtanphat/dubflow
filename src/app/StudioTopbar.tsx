@@ -60,12 +60,12 @@ export function StudioTopbar({
   return (
     <header className="topbar studio-topbar">
       <div className="brand">
-        <div className="brand-mark" aria-hidden="true">Y</div>
-        <div className="brand-copy"><strong>YupVox</strong><span>Studio Pro</span></div>
+        <div className="brand-wave" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></div>
+        <div className="brand-copy"><strong>YupVox.Com</strong><span>AI Studio Dubbing</span></div>
       </div>
 
-      <div className="project-title studio-project-title">
-        <span>Dự án</span>
+      <div className="project-title studio-project-title reference-project-name">
+        <span>Dự án:</span>
         <strong>{projectTitle}</strong>
         <IconButton label="Đổi tên dự án" icon="✎" />
       </div>
@@ -75,11 +75,11 @@ export function StudioTopbar({
           <IconButton label="Mở nguồn media" icon="☰" onClick={onOpenSources} />
           <IconButton label="Mở inspector" icon="☷" onClick={onOpenInspector} />
         </div>
-        <div className="studio-statuses">
+        <div className="studio-statuses reference-cloud-status">
           <StatusBadge label={save.label} detail={save.detail} tone={save.tone} />
           <StatusBadge label={cloud.label} detail={cloudStatusDetail} tone={cloud.tone} />
         </div>
-        <div className="studio-history-actions" aria-label="Lịch sử chỉnh sửa">
+        <div className="studio-history-actions reference-secondary-actions" aria-label="Lịch sử chỉnh sửa">
           <Tooltip text={canUndo ? 'Hoàn tác' : 'Chưa có thay đổi để hoàn tác'}>
             <IconButton label="Hoàn tác" icon="↶" disabled={!canUndo} onClick={onUndo} />
           </Tooltip>
@@ -93,7 +93,7 @@ export function StudioTopbar({
         <div className="credits studio-credits"><span>✦</span><div><strong>50,000</strong><small>Credits</small></div></div>
         <div className="avatar" aria-label="Tài khoản YupVox">YV</div>
         <Tooltip text="Export sẽ bật khi media processor được cấu hình và capability pass">
-          <button className="export-button" type="button" disabled>Xuất bản</button>
+          <button className="export-button reference-export-button" type="button" disabled>Xuất bản Dubbing</button>
         </Tooltip>
       </div>
     </header>
