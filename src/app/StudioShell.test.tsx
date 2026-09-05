@@ -49,7 +49,7 @@ describe('StudioShell live voice preview wiring', () => {
     expect(services.createObjectURL).toHaveBeenCalledWith(blob);
     expect(services.playAudio).toHaveBeenCalledWith('blob:yupvox-preview');
     expect(services.revokeObjectURL).toHaveBeenCalledWith('blob:yupvox-preview');
-    expect(setBusy.mock.calls).toEqual([[true], [false]]);
+    expect(setBusy.mock.calls).toEqual([[true], [false]]]);
     expect(setError).toHaveBeenCalledWith('');
   });
 
@@ -81,7 +81,7 @@ describe('StudioShell autosave integration', () => {
         state={state}
         dispatch={() => {}}
         selectedSegment={state.project.segments[0]}
-        selectedSpeaker={state.project.speakers.find((speaker) => speaker.id === canonical.speakerId)}
+        selectedSpeaker={state.project.speakers.find((speaker) => speaker.id === canonical.speakerId)!}
       />,
     );
 
