@@ -38,3 +38,7 @@ test('orders the live left rail as upload, speakers, languages, then dubbing act
   assert.match(studioShell, /speakerSection=\{<SpeakerList/);
   assert.doesNotMatch(studioShell, /<UploadPanel[^>]*\/>\s*<SpeakerList/);
 });
+
+test('activates reference fidelity on the production studio shell', () => {
+  assert.match(studioShell, /app-shell studio-pro-shell reference-fidelity mobile-panel--/);
+});
