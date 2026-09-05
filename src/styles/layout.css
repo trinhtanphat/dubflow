@@ -1,0 +1,65 @@
+.studio-pro-shell {
+  min-height: 100vh;
+  color: var(--yv-text);
+  background:
+    radial-gradient(circle at 50% -18%, rgba(150, 85, 255, .12), transparent 32%),
+    var(--yv-bg-canvas);
+}
+
+.studio-pro-shell .topbar {
+  min-height: var(--yv-topbar-height);
+  border-bottom-color: var(--yv-border);
+  background: rgba(8, 9, 13, .92);
+  backdrop-filter: blur(18px) saturate(1.15);
+}
+
+.studio-pro-shell .left-rail,
+.studio-pro-shell .script-inspector {
+  background: color-mix(in srgb, var(--yv-bg-panel) 96%, black);
+}
+
+.studio-pro-shell .center-stage {
+  background: var(--yv-bg-canvas);
+}
+
+.studio-pro-shell .panel,
+.studio-pro-shell .script-inspector,
+.studio-pro-shell .video-stage,
+.studio-pro-shell .timeline-panel {
+  border-color: var(--yv-border);
+}
+
+.studio-pro-shell .panel__header h2,
+.studio-pro-shell .inspector-title h2 {
+  letter-spacing: -.01em;
+}
+
+.studio-pro-shell .primary-button,
+.studio-pro-shell .export-button {
+  border-color: rgba(181, 121, 255, .52);
+  background: linear-gradient(135deg, var(--yv-accent), var(--yv-accent-strong));
+  box-shadow: var(--yv-shadow-accent);
+}
+
+@media (max-width: 1279px) {
+  .studio-pro-shell .topbar {
+    grid-template-columns: 220px minmax(180px, 1fr) auto;
+    gap: 14px;
+    padding-inline: 16px;
+  }
+  .studio-pro-shell .studio-grid {
+    grid-template-columns: 244px minmax(0, 1fr) 292px;
+  }
+}
+
+@media (max-width: 899px) {
+  .studio-pro-shell .topbar {
+    grid-template-columns: 1fr auto;
+  }
+  .studio-pro-shell .project-title {
+    display: none;
+  }
+  .studio-pro-shell .studio-grid {
+    grid-template-columns: 1fr;
+  }
+}
