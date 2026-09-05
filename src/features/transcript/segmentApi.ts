@@ -44,51 +44,66 @@ function isCloudSegment(value: unknown): value is CloudSegment {
     && (segment.version as number) > 0;
 }
 
-export function listSegments(projectId: string) {
-  return apiFetch<CloudSegment[]>(`/api/projects/${encodeURIComponent(projectId)}/segments`);
+export function segmentVersionConflictFrom(error: unknown): SegmentVersionConflictError | null {
+  if (error instanceof ApiError
+    && error.status === 409
+    && error.code === 'SEGMENT_VERSION_CONFLICT'
+    && error.payload
+    && typeof error.payload === 'object'
+    && !Array.isArray(error.payload)) {
+    const canonical = (error.payload as Record<string, unknown>).segment;
+    if (isCloudSegment(canonical)) return new SegmentVersionConflictError(canonical);
+  }
+  return null;
 }
 
-export async function patchSegment(projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) {
+async function withSegmentConflict<T>(operation: () => Promise<T>): Promise<T> {
   try {
-    return await apiFetch<CloudSegment>(`/api/projects/${encodeURIComponent(projectId)}/segments/${encodeURIComponent(segmentId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ expectedVersion, patch }),
-    });
+    return await operation();
   } catch (error) {
-    if (error instanceof ApiError
-      && error.status === 409
-      && error.code === 'SEGMENT_VERSION_CONFLICT'
-      && error.payload
-      && typeof error.payload === 'object'
-      && !Array.isArray(error.payload)) {
-      const canonical = (error.payload as Record<string, unknown>).segment;
-      if (isCloudSegment(canonical)) throw new SegmentVersionConflictError(canonical);
-    }
+    const conflict = segmentVersionConflictFrom(error);
+    if (conflict) throw conflict;
     throw error;
   }
 }
 
-export function splitSegment(projectId: string, segmentId: string, playheadMs: number) {
-  return apiFetch<{ left: CloudSegment; right: CloudSegment }>(
+export function listSegments(projectId: string) {
+  return apiFetch<CloudSegment[]>(`/api/projects/${encodeURIComponent(projectId)}/segments`);
+}
+
+export function patchSegment(projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) {
+  return withSegmentConflict(() => apiFetch<CloudSegment>(
+    `/api/projects/${encodeURIComponent(projectId)}/segments/${encodeURIComponent(segmentId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ expectedVersion, patch }),
+    },
+  ));
+}
+
+export function splitSegment(projectId: string, segmentId: string, expectedVersion: number, playheadMs: number) {
+  return withSegmentConflict(() => apiFetch<{ left: CloudSegment; right: CloudSegment }>(
     `/api/projects/${encodeURIComponent(projectId)}/segments/${encodeURIComponent(segmentId)}/split`,
     {
       method: 'POST',
-      body: JSON.stringify({ playheadMs }),
+      body: JSON.stringify({ expectedVersion, playheadMs }),
     },
-  );
+  ));
 }
 
 export function restoreSplit(
   projectId: string,
   segmentId: string,
+  expectedVersion: number,
   childSegmentId: string,
+  expectedChildVersion: number,
   original: RestoreSegmentInput,
 ) {
-  return apiFetch<CloudSegment>(
+  return withSegmentConflict(() => apiFetch<CloudSegment>(
     `/api/projects/${encodeURIComponent(projectId)}/segments/${encodeURIComponent(segmentId)}/restore-split`,
     {
       method: 'POST',
-      body: JSON.stringify({ childSegmentId, original }),
+      body: JSON.stringify({ expectedVersion, childSegmentId, expectedChildVersion, original }),
     },
-  );
+  ));
 }
