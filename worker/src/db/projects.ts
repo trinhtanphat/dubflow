@@ -21,6 +21,8 @@ export type Project = {
   exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export interface ProjectStore {
@@ -60,6 +62,8 @@ type ProjectRow = {
   export_object_key?: string | null;
   duration_ms?: number | null;
   size_bytes?: number | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 function fromRow(row: ProjectRow): Project {
@@ -74,10 +78,12 @@ function fromRow(row: ProjectRow): Project {
     exportObjectKey: row.export_object_key,
     durationMs: row.duration_ms,
     sizeBytes: row.size_bytes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, status, source_object_key, export_object_key, duration_ms, size_bytes`;
+const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
 
 export class ProjectRepository implements ProjectStore {
   constructor(private readonly db: D1DatabaseLike) {}
