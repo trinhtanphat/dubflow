@@ -15,7 +15,7 @@ function statefulDb() {
       let values: unknown[] = [];
       return {
         bind(...next: unknown[]) { values = next; return this; },
-        async run() { calls.push({ sql, values }); return {}; },
+        async run() { calls.push({ sql, values }); return { meta: { changes: 1 } }; },
         async all<T>() { return { results: [segmentRow] as T[] }; },
         async first<T>() {
           if (sql.includes('FROM segments s JOIN projects p')) return segmentRow as T;
@@ -35,22 +35,22 @@ function statefulDb() {
 }
 
 describe('final export invalidation', () => {
-  it('invalidates a published export when translated text changes', async () => {
+  it('invalidates a published export when translated text changes using the canonical revision', async () => {
     const { db, calls } = statefulDb();
     const repo = new SegmentRepository(db);
 
-    await repo.setTranslationResult('p1', 's1', 'dev-user', 'moi', 'workers-ai');
+    await repo.setTranslationResult('p1', 's1', 'dev-user', 2, 'moi', 'workers-ai');
 
     expect(calls.some((call) => /UPDATE projects/i.test(call.sql)
       && /export_object_key\s*=\s*NULL/i.test(call.sql)
       && /status\s*=\s*'needs_review'/i.test(call.sql))).toBe(true);
   });
 
-  it('invalidates a published export when segment timing changes', async () => {
+  it('invalidates a published export when segment timing changes using the canonical revision', async () => {
     const { db, calls } = statefulDb();
     const repo = new SegmentRepository(db);
 
-    await repo.updateSegment('p1', 's1', 'dev-user', { startMs: 1200, endMs: 3200 });
+    await repo.updateSegment('p1', 's1', 'dev-user', 2, { startMs: 1200, endMs: 3200 });
 
     expect(calls.some((call) => /UPDATE projects/i.test(call.sql)
       && /export_object_key\s*=\s*NULL/i.test(call.sql)
