@@ -23,11 +23,21 @@ describe('cloud speaker metadata adapter', () => {
     const studio = buildCloudStudioProject(project, segments, speakers);
     expect(studio.speakers).toContainEqual({
       id: 'speaker-1',
+      projectId: 'project-1',
       name: 'Nữ chính',
       label: 'SPEAKER_00',
       share: 100,
       voiceProvider: 'elevenlabs',
       voiceId: 'voice-heroine',
     });
+  });
+
+  it('does not surface stale persisted speakers that have no segment in the current transcript', () => {
+    const stale: CloudSpeaker = {
+      id: 'speaker-old', projectId: 'project-1', label: 'SPEAKER_OLD', displayName: 'Nhân vật cũ',
+      voiceProvider: 'elevenlabs', voiceId: 'voice-old', avatarObjectKey: null,
+    };
+    const studio = buildCloudStudioProject(project, segments, [...speakers, stale]);
+    expect(studio.speakers.map((speaker) => speaker.id)).toEqual(['speaker-1']);
   });
 });
