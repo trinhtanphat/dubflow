@@ -6,7 +6,7 @@ export type EditorPatchDeps = {
 };
 
 export type EditorRetranslateDeps = {
-  retranslateSegment: (projectId: string, segmentId: string, mode: TranslationMode) => Promise<RetranslateResult>;
+  retranslateSegment: (projectId: string, segmentId: string, expectedVersion: number, mode: TranslationMode) => Promise<RetranslateResult>;
 };
 
 export type EditorRetranslateResult =
@@ -36,10 +36,11 @@ export function persistEditorPatch(
 export async function retranslateEditorSegment(
   projectId: string,
   segmentId: string,
+  expectedVersion: number,
   mode: TranslationMode,
   deps: EditorRetranslateDeps = defaultRetranslateDeps,
 ): Promise<EditorRetranslateResult> {
-  const result = await deps.retranslateSegment(projectId, segmentId, mode);
+  const result = await deps.retranslateSegment(projectId, segmentId, expectedVersion, mode);
   if (result.mode === 'compare') {
     const workersAI = result.workersAI[0]?.text;
     const google = result.google[0]?.text;
