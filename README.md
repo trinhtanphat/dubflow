@@ -43,13 +43,13 @@ Wrangler 4.45+ supports automatic provisioning for draft D1/R2 bindings. This re
 
 `.github/workflows/ci.yml` runs on pushes and pull requests and performs a real dependency install, test suite, TypeScript/Vite production build, and Wrangler dry-run.
 
-`.github/workflows/deploy-cloudflare.yml` runs on pushes to `main` and can also be launched manually with `workflow_dispatch`. Production deployment is fail-closed and requires this GitHub Actions secret:
+`.github/workflows/deploy-cloudflare.yml` is currently **manual-only** via `workflow_dispatch`. This prevents repeated partial production deploys while the Cloudflare Container credential is being qualified. Production deployment is fail-closed and requires this GitHub Actions secret:
 
 ```text
 CLOUDFLARE_API_TOKEN
 ```
 
-The Cloudflare account ID is non-secret and pinned both in `wrangler.jsonc` and the deploy workflow. Never commit the token itself.
+Because YupVox deploys an FFmpeg Cloudflare Container, the token must include **Containers Write** (or equivalent Containers Edit) in addition to the permissions needed for Workers and the bound D1/R2/AI resources. The Cloudflare account ID is non-secret and pinned both in `wrangler.jsonc` and the deploy workflow. Never commit the token itself.
 
 Optional Google translation support can use this GitHub Actions secret:
 

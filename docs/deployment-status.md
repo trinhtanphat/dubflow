@@ -6,7 +6,9 @@ Cloudflare account: `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`
 
 Deployment is fail-closed. `npm run deploy` verifies source, runs a Wrangler dry run, deploys the Worker and Static Assets, applies D1 migrations by binding, and only reports success after `/api/ready` confirms the production schema exists.
 
-GitHub Actions is enabled for this public repository. CI runs real dependency installation, tests, TypeScript/Vite build, and a Wrangler dry-run. Production deployment runs on pushes to `main` and can also be manually dispatched. It requires the `CLOUDFLARE_API_TOKEN` GitHub secret. The Cloudflare account ID is non-secret and pinned to the canonical account above.
+GitHub Actions is enabled for this public repository. CI runs real dependency installation, tests, TypeScript/Vite build, and a Wrangler dry-run. Production deployment is **manual-only** via `workflow_dispatch` while the Cloudflare Container credential is externally qualified. It requires the `CLOUDFLARE_API_TOKEN` GitHub secret. Because this deployment builds and pushes an FFmpeg Cloudflare Container, the token must include Cloudflare's **Containers Write** (or equivalent Containers Edit) permission in addition to the permissions needed for Workers and bound resources. The Cloudflare account ID is non-secret and pinned to the canonical account above.
+
+The first live Container deploy attempt on the reconciled source proved the existing token can reach the Worker deployment path but returned `Unauthorized` when Wrangler moved into the Container image deployment. Until the token is replaced or updated with the required Container permission, do not treat production runtime as qualified and do not repeatedly auto-deploy `main`.
 
 ## Reconciled live dubbing source path
 
