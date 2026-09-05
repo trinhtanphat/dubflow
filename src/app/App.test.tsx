@@ -6,5 +6,9 @@ describe('DubFlow studio shell', () => {
   it('renders the core dubbing workspace', () => {
     const html = renderToStaticMarkup(<App />);
     for (const label of ['DubFlow','Tải lên video','Nhân vật đã nhận diện','Ngôn ngữ gốc','Tiếng Việt','AI Dubbing Studio','Kịch bản','Đồng bộ khẩu hình','Timeline']) expect(html).toContain(label);
+    expect(html).toContain('studio-pro-shell');
+    expect(html).toContain('aria-label="Nguồn media và nhân vật"');
+    expect(html).toContain('aria-label="Không gian chỉnh sửa"');
+    expect(html).toContain('aria-label="Inspector dubbing"');
   });
 });

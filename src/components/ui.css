@@ -1,0 +1,69 @@
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--yv-text-muted);
+}
+.status-badge > i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+.status-badge > span { min-width: 0; }
+.status-badge strong,
+.status-badge small { display: block; white-space: nowrap; }
+.status-badge strong { color: var(--yv-text); font-size: 11px; line-height: 1.15; }
+.status-badge small { margin-top: 2px; color: var(--yv-text-subtle); font-size: 9px; }
+.status-badge--success { color: var(--yv-success); }
+.status-badge--warning { color: var(--yv-warning); }
+.status-badge--danger { color: var(--yv-danger); }
+.status-badge--accent { color: var(--yv-accent); }
+
+.ui-icon-button {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--yv-radius-sm);
+  color: #c8cbd6;
+  background: transparent;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+.ui-icon-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--yv-border);
+  background: var(--yv-bg-hover);
+}
+.ui-icon-button:active:not(:disabled) { transform: translateY(1px); }
+.ui-icon-button:disabled { color: #5d6271; opacity: .72; }
+
+.ui-tooltip { position: relative; display: inline-flex; }
+.ui-tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 120;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid var(--yv-border-strong);
+  border-radius: var(--yv-radius-sm);
+  color: var(--yv-text);
+  background: #171a23;
+  box-shadow: var(--yv-shadow-panel);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+.ui-tooltip:hover::after,
+.ui-tooltip:focus-within::after { opacity: 1; transform: translate(-50%, 0); }
