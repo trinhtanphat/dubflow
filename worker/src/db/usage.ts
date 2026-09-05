@@ -178,6 +178,7 @@ export class UsageRepository implements UsageStore {
       event.projectId !== projectId ||
       event.jobId !== jobId ||
       event.kind !== input.kind ||
+      event.units !== input.units ||
       event.provider !== provider
     ) {
       throw new Error('Usage operation key collision detected.');
