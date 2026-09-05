@@ -99,7 +99,7 @@ export function VideoStage({ project, segment, playheadMs, playback, dispatch }:
       <div className="video-stage__surface reference-video-frame">
         {stageContent}
         <div className="subtitle-overlay" aria-live="off">
-          <div className="subtitle-source">{segment?.sourceText ?? ''}</div>
+          <div className="subtitle-source" lang="zh-CN">{segment?.sourceText ?? ''}</div>
           <div className="subtitle-target">{segment?.translatedText ?? ''}</div>
         </div>
       </div>
