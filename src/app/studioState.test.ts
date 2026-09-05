@@ -49,6 +49,54 @@ describe('studioReducer', () => {
     expect(resized.project).toBe(initial.project);
   });
 
+  it('keeps drag preview transient and commits timing once into history', () => {
+    const initial = createInitialStudioState(mockProject);
+    const original = initial.project.segments[0]!;
+    const after = { ...original, startMs: original.startMs + 200, endMs: original.endMs + 200 };
+
+    const preview = studioReducer(initial, {
+      type: 'previewSegmentTiming',
+      segmentId: original.id,
+      startMs: after.startMs,
+      endMs: after.endMs,
+    });
+    expect(preview.segmentPreview).toEqual({ segmentId: original.id, startMs: after.startMs, endMs: after.endMs });
+    expect(preview.project).toBe(initial.project);
+    expect(preview.history.past).toHaveLength(0);
+
+    const committed = studioReducer(preview, { type: 'commitTimingMutation', before: original, after });
+    expect(committed.project.segments[0]).toEqual(after);
+    expect(committed.segmentPreview).toBeNull();
+    expect(committed.history.past).toHaveLength(1);
+    expect(committed.history.future).toHaveLength(0);
+  });
+
+  it('undoes and redoes a split locally while transient actions stay outside history', () => {
+    const initial = createInitialStudioState(mockProject);
+    const original = initial.project.segments[0]!;
+    const midpoint = original.startMs + Math.floor((original.endMs - original.startMs) / 2);
+    const leftAfter = { ...original, endMs: midpoint, sourceText: 'left', translatedText: 'trai' };
+    const rightAfter = { ...original, id: `${original.id}-right`, startMs: midpoint, sourceText: 'right', translatedText: 'phai' };
+
+    let state = studioReducer(initial, { type: 'commitSplitMutation', originalBefore: original, leftAfter, rightAfter });
+    expect(state.history.past).toHaveLength(1);
+    expect(state.project.segments.some((segment) => segment.id === rightAfter.id)).toBe(true);
+
+    state = studioReducer(state, { type: 'setPlaying', playing: true });
+    state = studioReducer(state, { type: 'setTimelineZoom', pixelsPerSecond: 2 });
+    expect(state.history.past).toHaveLength(1);
+
+    state = studioReducer(state, { type: 'applyUndoLocal' });
+    expect(state.project.segments.some((segment) => segment.id === rightAfter.id)).toBe(false);
+    expect(state.history.past).toHaveLength(0);
+    expect(state.history.future).toHaveLength(1);
+
+    state = studioReducer(state, { type: 'applyRedoLocal' });
+    expect(state.project.segments.some((segment) => segment.id === rightAfter.id)).toBe(true);
+    expect(state.history.past).toHaveLength(1);
+    expect(state.history.future).toHaveLength(0);
+  });
+
   it('hydrates a persisted cloud project while retaining a matching selection and stopping playback', () => {
     let state = createInitialStudioState(mockProject);
     state = studioReducer(state, { type: 'selectSegment', segmentId: 's2' });
