@@ -18,6 +18,7 @@ const baseSegment: Segment = {
   sourceText: 'hello world',
   translatedText: 'xin chao',
   translationEngine: 'workers-ai',
+  translationContextRevision: null,
   translationStatus: 'completed',
   voiceStatus: 'completed',
   dubbedObjectKey: 'projects/project-1/dubbed/s1.mp3',
