@@ -194,4 +194,45 @@
   }
 
   .studio-pro-shell.reference-fidelity .reference-voice-assignment select { min-height: 44px; }
+
+  .studio-pro-shell.reference-fidelity .video-stage {
+    padding: 14px var(--yv-ref-player-gutter) 0;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-video-frame {
+    border-radius: 8px 8px 0 0;
+    background: #050507;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, .48);
+  }
+
+  .studio-pro-shell.reference-fidelity .subtitle-source {
+    font-size: 22px;
+    font-weight: 650;
+  }
+
+  .studio-pro-shell.reference-fidelity .subtitle-target {
+    margin-top: 5px;
+    font-size: 13px;
+  }
+
+  .studio-pro-shell.reference-fidelity .progress-track { height: 4px; }
+  .studio-pro-shell.reference-fidelity .reference-transport-row { min-height: 55px; }
+
+  .studio-pro-shell.reference-fidelity .reference-timeline {
+    margin: 0 var(--yv-ref-player-gutter) 14px;
+    border-top-color: #1c1b22;
+  }
+
+  .studio-pro-shell.reference-fidelity .timeline-labels {
+    width: var(--yv-ref-track-label-width);
+    flex: 0 0 var(--yv-ref-track-label-width);
+  }
+
+  .studio-pro-shell.reference-fidelity .timeline-label-spacer { min-height: 29px; }
+  .studio-pro-shell.reference-fidelity .track-label,
+  .studio-pro-shell.reference-fidelity .timeline-content-row { min-height: 45px; }
+
+  .studio-pro-shell.reference-fidelity .ruler-content.timeline-content-row { min-height: 29px; }
+  .studio-pro-shell.reference-fidelity .reference-playhead { color: var(--yv-accent); }
 }
