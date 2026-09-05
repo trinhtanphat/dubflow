@@ -38,7 +38,13 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         </aside>
 
         <section className="center-stage" aria-label="Không gian chỉnh sửa">
-          <VideoStage segment={selectedSegment} playheadMs={state.playheadMs} durationMs={state.project.durationMs} />
+          <VideoStage
+            project={state.project}
+            segment={selectedSegment}
+            playheadMs={state.playheadMs}
+            playback={state.playback}
+            dispatch={dispatch}
+          />
           <Timeline project={state.project} playheadMs={state.playheadMs} selectedSegmentId={state.selectedSegmentId} dispatch={dispatch} />
         </section>
 
