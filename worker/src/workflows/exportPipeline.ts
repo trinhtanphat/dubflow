@@ -1,5 +1,6 @@
 import type { ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
+import type { UsageStore } from '../db/usage';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
@@ -19,6 +20,7 @@ export interface ExportWorkflowStepLike {
 type ExportProject = {
   id: string;
   sourceObjectKey?: string | null;
+  durationMs?: number | null;
 };
 
 type ExportSegment = {
@@ -60,6 +62,7 @@ export type ExportPipelineDeps = {
   media: {
     renderExport(projectId: string, sourceObjectKey: string, clips: ExportClip[]): Promise<{ exportObjectKey: string }>;
   };
+  usage: Pick<UsageStore, 'record'>;
 };
 
 function errorMessage(error: unknown): string {
@@ -87,12 +90,17 @@ export async function runExportPipeline(
   step: ExportWorkflowStepLike,
 ): Promise<{ status: 'completed'; exportObjectKey: string }> {
   const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
+  const usageAttempt = params.usageAttempt ?? 0;
   try {
     const project = await step.do('authorize export project', async () =>
       deps.projects.getByIdForUser(params.projectId, params.userId),
     );
     if (!project) throw new Error('Project not found.');
     if (!project.sourceObjectKey) throw new Error('Project source media is missing.');
+    if (!Number.isFinite(project.durationMs) || (project.durationMs ?? 0) <= 0) {
+      throw new Error('Project duration is missing or invalid for export metering.');
+    }
+    const renderDurationSeconds = project.durationMs! / 1000;
 
     const segments = await step.do('load translated export segments', async () =>
       deps.segments.list(params.projectId, params.userId),
@@ -134,6 +142,15 @@ export async function runExportPipeline(
           if (!generated.ok) throw new Error(`Voice provider failed (${generated.status}).`);
           const audio = await generated.arrayBuffer();
           if (audio.byteLength === 0) throw new Error('Voice provider returned empty audio.');
+          await deps.usage.record({
+            userId: params.userId,
+            projectId: params.projectId,
+            jobId: params.jobId,
+            kind: 'tts_characters',
+            units: text.length,
+            provider: 'elevenlabs',
+            idempotencyKey: `job:${params.jobId}:attempt:${usageAttempt}:tts:${segment.id}`,
+          });
           await deps.bucket.put(objectKey!, audio);
           await deps.segments.setVoiceResult(params.projectId, segment.id, params.userId, objectKey!);
         });
@@ -163,6 +180,15 @@ export async function runExportPipeline(
     if (!rendered.exportObjectKey?.startsWith(`projects/${params.projectId}/export/`)) {
       throw new Error('Media processor returned an invalid export object key.');
     }
+    await step.do('record render usage', async () => deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'render_seconds',
+      units: renderDurationSeconds,
+      provider: 'ffmpeg-container',
+      idempotencyKey: `job:${params.jobId}:attempt:${usageAttempt}:render`,
+    }));
 
     await step.do('check cancellation before export publish', ensureActive);
     await step.do('publish final export', async () => {
