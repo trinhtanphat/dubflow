@@ -28,6 +28,7 @@ export interface ProjectStore {
   listByUser(userId: string): Promise<Project[]>;
   getByIdForUser(id: string, userId: string): Promise<Project | null>;
   setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
+  setExportObject(id: string, userId: string, objectKey: string): Promise<void>;
   setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 }
 
