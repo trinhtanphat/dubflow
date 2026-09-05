@@ -89,7 +89,7 @@ function translationEnv(db: TranslationDb): Env {
     DB: db,
     AI: ai,
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-key',
-  } as Env;
+  } as unknown as Env;
 }
 
 describe('translation router', () => {
