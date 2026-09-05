@@ -42,6 +42,12 @@ const analytics = {
   writeDataPoint(_point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }) {},
 } satisfies Env['ANALYTICS'];
 
+const rateLimit = {
+  async limit(_input: { key: string }) {
+    return { success: true };
+  },
+} satisfies Env['RATE_LIMIT_PROCESS'];
+
 const ffmpegContainer = {
   getByName(_name: string) {
     return {
@@ -65,13 +71,18 @@ const exportWorkflow = {
 } satisfies Env['EXPORT_WORKFLOW'];
 
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI, R2, Analytics Engine, Container and both Workflow bindings plus provider secrets', () => {
+  it('accepts portable AI, R2, Analytics Engine, rate limits, Container and both Workflow bindings plus provider secrets', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
       AI: ai,
       ASSETS: { fetch: async () => new Response('asset') },
       ANALYTICS: analytics,
+      RATE_LIMIT_PROCESS: rateLimit,
+      RATE_LIMIT_EXPORT: rateLimit,
+      RATE_LIMIT_TRANSLATE: rateLimit,
+      RATE_LIMIT_VOICE: rateLimit,
+      RATE_LIMIT_UPLOAD: rateLimit,
       FFMPEG_CONTAINER: ffmpegContainer,
       DUBBING_WORKFLOW: dubbingWorkflow,
       EXPORT_WORKFLOW: exportWorkflow,
@@ -83,6 +94,11 @@ describe('Cloudflare provider contracts', () => {
     expect(env.MEDIA).toBe(bucket);
     expect(env.AI).toBe(ai);
     expect(env.ANALYTICS).toBe(analytics);
+    expect(env.RATE_LIMIT_PROCESS).toBe(rateLimit);
+    expect(env.RATE_LIMIT_EXPORT).toBe(rateLimit);
+    expect(env.RATE_LIMIT_TRANSLATE).toBe(rateLimit);
+    expect(env.RATE_LIMIT_VOICE).toBe(rateLimit);
+    expect(env.RATE_LIMIT_UPLOAD).toBe(rateLimit);
     expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
