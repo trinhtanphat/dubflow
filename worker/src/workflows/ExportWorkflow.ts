@@ -5,12 +5,14 @@ import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { SpeakerRepository } from '../db/speakers';
+import { UsageRepository } from '../db/usage';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
   async run(event: WorkflowEvent<ExportWorkflowParams>, step: WorkflowStep) {
+    const media = new ContainerMediaProcessor(this.env.FFMPEG_CONTAINER);
     return runExportPipeline(
       event.payload,
       {
@@ -23,7 +25,8 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
           this.env.ELEVENLABS_API_KEY ?? '',
           { defaultVoiceId: this.env.ELEVENLABS_DEFAULT_VOICE_ID },
         ),
-        media: new ContainerMediaProcessor(this.env.FFMPEG_CONTAINER),
+        media,
+        usage: new UsageRepository(this.env.DB),
       },
       step,
     );
