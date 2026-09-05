@@ -6,6 +6,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY server.mjs /app/server.mjs
+COPY render-export.mjs /app/render-export.mjs
 
 ENV PORT=8080
 EXPOSE 8080
