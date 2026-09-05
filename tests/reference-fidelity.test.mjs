@@ -22,8 +22,9 @@ test('loads reference fidelity CSS after the existing app styles', () => {
   assert.ok(main.indexOf(referenceImport) > main.indexOf("import './app/app.css';"));
 });
 
-test('uses canonical geometry variables in the desktop reference layer', () => {
-  assert.match(referenceCss, /@media\s*\(min-width:\s*1400px\)/);
+test('keeps reference fidelity active on common 1364px desktop screens', () => {
+  const desktopBreakpoints = [...referenceCss.matchAll(/@media\s*\(min-width:\s*(\d+)px\)/g)].map((match) => Number(match[1]));
+  assert.ok(desktopBreakpoints.some((value) => value <= 1280), 'reference layer must activate at or below 1280px so 1364px desktop does not fall back to the legacy shell');
   assert.match(referenceCss, /var\(--yv-ref-rail-width\)/);
   assert.match(referenceCss, /var\(--yv-ref-footer-height\)/);
 });
