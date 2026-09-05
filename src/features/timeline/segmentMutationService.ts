@@ -17,11 +17,13 @@ const UNASSIGNED_SPEAKER_ID = 'unassigned';
 
 export type SegmentMutationDeps = {
   patchSegment: (projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) => Promise<CloudSegment>;
-  splitSegment: (projectId: string, segmentId: string, playheadMs: number) => Promise<{ left: CloudSegment; right: CloudSegment }>;
+  splitSegment: (projectId: string, segmentId: string, expectedVersion: number, playheadMs: number) => Promise<{ left: CloudSegment; right: CloudSegment }>;
   restoreSplit: (
     projectId: string,
     segmentId: string,
+    expectedVersion: number,
     childSegmentId: string,
+    expectedChildVersion: number,
     original: RestoreSegmentInput,
   ) => Promise<CloudSegment>;
 };
@@ -71,7 +73,7 @@ export async function commitSegmentSplit(
   playheadMs: number,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<SplitMutation> {
-  const persisted = await deps.splitSegment(projectId, originalBefore.id, playheadMs);
+  const persisted = await deps.splitSegment(projectId, originalBefore.id, originalBefore.version, playheadMs);
   return {
     kind: 'split',
     originalBefore,
@@ -96,7 +98,9 @@ export async function persistUndo(
   await deps.restoreSplit(
     projectId,
     mutation.originalBefore.id,
+    mutation.leftAfter.version,
     mutation.rightAfter.id,
+    mutation.rightAfter.version,
     toRestoreInput(mutation.originalBefore),
   );
   return mutation;
