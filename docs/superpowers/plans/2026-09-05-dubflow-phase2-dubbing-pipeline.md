@@ -4,9 +4,9 @@
 
 **Goal:** Turn the Phase 1 editor into a working Cloudflare-first dubbing MVP: multipart R2 upload, ASR, translation, persisted editable segments, Vietnamese TTS, timing/export orchestration and truthful frontend controls.
 
-**Architecture:** The Hono Worker owns authorization, metadata and provider orchestration. Large media moves through R2 multipart APIs without buffering whole videos in Worker memory. Workers AI handles Whisper ASR and contextual translation; Google Cloud Translation v3 is the official fallback. TTS is isolated behind a provider adapter and uses Cloudflare AI Catalog `inworld/tts-2` for Vietnamese-capable synthesis; FFmpeg-heavy probe/mix/mux remains behind a narrow media-service interface so it can move to a Cloudflare Container without changing editor/API contracts.
+**Architecture:** The Hono Worker owns authorization, metadata and provider orchestration. Large media moves through R2 multipart APIs without buffering whole videos in Worker memory. Workers AI handles Whisper ASR and contextual translation; Google Cloud Translation Basic v2 is the official API-key fallback. TTS is isolated behind a provider adapter and uses Cloudflare AI Catalog `inworld/tts-2` for Vietnamese-capable synthesis; FFmpeg-heavy probe/mix/mux remains behind a narrow media-service interface so it can move to a Cloudflare Container without changing editor/API contracts.
 
-**Tech Stack:** TypeScript, Hono, Cloudflare Workers, D1, R2 multipart API, Workers AI / Cloudflare AI Catalog, Google Cloud Translation v3, React 19, Vitest.
+**Tech Stack:** TypeScript, Hono, Cloudflare Workers, D1, R2 multipart API, Workers AI / Cloudflare AI Catalog, Google Cloud Translation Basic v2, React 19, Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-09-05-dubflow-design.md`
 
@@ -19,7 +19,7 @@
 - No GitHub Actions and no `.github/workflows` directory.
 - The Worker must never buffer a multi-GB source video in memory.
 - R2 multipart parts are streamed from `Request.body`; each non-final part must respect R2 multipart minimum sizing.
-- Google translation uses the official Cloud Translation v3 `translateText` API; never scrape translate.google.com.
+- Google translation uses the official Cloud Translation Basic v2 endpoint with a Wrangler secret API key; never scrape translate.google.com. Cloud Translation Advanced v3 is not used here because v3 does not support API-key authentication.
 - ASR model is `@cf/openai/whisper-large-v3-turbo` behind an adapter.
 - Vietnamese TTS uses the Cloudflare AI Catalog adapter for `inworld/tts-2`; no voice-cloning claim or endpoint is enabled without explicit consent/rights and a configured cloning provider.
 - Every expensive provider step must be retry-safe and preserve stable project/segment IDs.
@@ -84,9 +84,9 @@
 - `TranslationProvider.translateBatch(inputs): Promise<Array<{id:string;text:string}>>`.
 - Modes: `workers-ai`, `google`, `quality`; quality performs Google draft then Workers AI contextual rewrite while preserving IDs.
 
-- [ ] **Step 1: Write failing tests** proving output IDs cannot be reordered/lost, Google uses only the official v3 endpoint, missing Google secret produces `TRANSLATION_PROVIDER_UNAVAILABLE`, and quality mode preserves cardinality.
+- [ ] **Step 1: Write failing tests** proving output IDs cannot be reordered/lost, Google uses only the official `https://translation.googleapis.com/language/translate/v2` endpoint, missing Google secret produces `TRANSLATION_PROVIDER_UNAVAILABLE`, and quality mode preserves cardinality.
 - [ ] **Step 2: Verify RED** with `npm test -- worker/test/translation.test.ts`.
-- [ ] **Step 3: Implement Google provider** using `POST https://translation.googleapis.com/v3/projects/{project}/locations/global:translateText` and bearer/API credential configuration defined in `Env`; do not use unofficial endpoints.
+- [ ] **Step 3: Implement Google provider** using `POST https://translation.googleapis.com/language/translate/v2?key=...` with `q`, `source`, `target`, and `format:'text'`; the API key comes only from `GOOGLE_CLOUD_TRANSLATE_API_KEY` Wrangler secret and is never returned/logged.
 - [ ] **Step 4: Implement Workers AI contextual provider** with strict JSON-shaped output validation and bounded context.
 - [ ] **Step 5: Implement router** with deterministic ID reconciliation.
 - [ ] **Step 6: Verify GREEN** and commit `feat: add translation provider router`.
@@ -182,7 +182,7 @@
 - Modify: `wrangler.jsonc` only for real required bindings/vars
 - Modify: `scripts/verify-no-github-actions.mjs` only if a stronger guard is needed
 
-- [ ] **Step 1: Document required secrets/vars** for Google Cloud Translation and any Cloudflare AI Catalog credentials/binding requirements without storing values.
+- [ ] **Step 1: Document `GOOGLE_CLOUD_TRANSLATE_API_KEY` as a Wrangler secret** for Cloud Translation Basic v2 and document Cloudflare AI Catalog/binding requirements without storing values.
 - [ ] **Step 2: Document R2/D1 migration and multipart client limits**, including 32 MiB recommended parts and the 5 GB/3 hour product cap.
 - [ ] **Step 3: Run `npm run verify`**; expected exit code `0` with tests, typecheck, build and no-actions guard all passing.
 - [ ] **Step 4: Run a local/miniflare smoke** for health, project create, upload initiation and one provider-mocked pipeline path.
