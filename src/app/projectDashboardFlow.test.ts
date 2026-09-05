@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CloudJob } from '../features/projects/jobApi';
 import type { CloudProject } from '../features/projects/projectApi';
-import { loadProjectDashboardSnapshot, openDashboardProject } from './projectDashboardFlow';
+import {
+  cancelDashboardJob,
+  createDashboardProject,
+  loadProjectDashboardSnapshot,
+  openDashboardProject,
+  retryDashboardJob,
+} from './projectDashboardFlow';
 
 const projects: CloudProject[] = [
   { id: 'p1', userId: 'u', title: 'One', sourceLanguage: 'zh', targetLanguage: 'vi', status: 'needs_review' },
@@ -40,5 +46,36 @@ describe('project dashboard flow', () => {
     const loadCloudStudioProject = vi.fn(async () => studio);
     await expect(openDashboardProject('p1', { loadCloudStudioProject })).resolves.toEqual(studio);
     expect(loadCloudStudioProject).toHaveBeenCalledWith('p1');
+  });
+
+  it('retries a durable failed job and reloads that project job history', async () => {
+    const retryProjectJob = vi.fn(async () => ({ jobId: 'j2', workflowId: 'wf-retry', status: 'retrying' as const }));
+    const refreshed: CloudJob[] = [{ ...jobs.p2[0]!, status: 'retrying', retryCount: 1, errorCode: null, errorMessage: null }];
+    const listProjectJobs = vi.fn(async () => refreshed);
+
+    await expect(retryDashboardJob('p2', 'j2', { retryProjectJob, listProjectJobs })).resolves.toEqual(refreshed);
+    expect(retryProjectJob).toHaveBeenCalledWith('p2', 'j2');
+    expect(listProjectJobs).toHaveBeenCalledWith('p2');
+  });
+
+  it('cancels an active durable job and reloads that project job history', async () => {
+    const cancelled = { ...jobs.p2[0]!, status: 'cancelled' as const, errorCode: null, errorMessage: null };
+    const cancelProjectJob = vi.fn(async () => cancelled);
+    const listProjectJobs = vi.fn(async () => [cancelled]);
+
+    await expect(cancelDashboardJob('p2', 'j2', { cancelProjectJob, listProjectJobs })).resolves.toEqual([cancelled]);
+    expect(cancelProjectJob).toHaveBeenCalledWith('p2', 'j2');
+    expect(listProjectJobs).toHaveBeenCalledWith('p2');
+  });
+
+  it('creates a durable project before hydrating its Studio state', async () => {
+    const created: CloudProject = { id: 'new-p', userId: 'u', title: 'Dự án mới', sourceLanguage: 'auto', targetLanguage: 'vi', status: 'draft' };
+    const studio = { id: 'new-p', title: 'Dự án mới', durationMs: 0, sourceLanguage: 'auto' as const, targetLanguage: 'vi' as const, speakers: [], segments: [] };
+    const createProject = vi.fn(async () => created);
+    const loadCloudStudioProject = vi.fn(async () => studio);
+
+    await expect(createDashboardProject(' Dự án mới ', { createProject, loadCloudStudioProject })).resolves.toEqual(studio);
+    expect(createProject).toHaveBeenCalledWith('Dự án mới', 'auto');
+    expect(loadCloudStudioProject).toHaveBeenCalledWith('new-p');
   });
 });
