@@ -18,7 +18,7 @@ type SegmentRow = {
   split_parent_id: string | null;
 };
 
-type ProjectRow = { id: string; user_id: string; duration_ms: number };
+type ProjectRow = { id: string; user_id: string; duration_ms: number; status: string };
 
 class Statement implements D1StatementLike {
   values: unknown[] = [];
@@ -66,7 +66,7 @@ class Statement implements D1StatementLike {
 }
 
 class RecordingDb implements D1DatabaseLike {
-  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000 }];
+  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000, status: 'needs_review' }];
   rows: SegmentRow[] = [
     {
       id: 's1', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 1_000, end_ms: 3_000,
@@ -124,6 +124,19 @@ describe('SegmentRepository durable timing mutations', () => {
       endMs: 4_500,
     })).rejects.toMatchObject({ code: 'SEGMENT_OVERLAP' });
     expect(db.runs).toHaveLength(0);
+  });
+
+  it('rejects user mutations while a processing/export workflow owns the project', async () => {
+    const db = new RecordingDb();
+    db.projects[0].status = 'processing';
+    const repository = new SegmentRepository(db);
+
+    await expect(repository.updateSegment('project-1', 's1', 'dev-user', { translatedText: 'locked' }))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    await expect(repository.splitSegment('project-1', 's1', 'dev-user', 2_000))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    expect(db.runs).toHaveLength(0);
+    expect(db.batches).toHaveLength(0);
   });
 
   it('atomically splits using a Worker-generated child id and invalidates the published export', async () => {
