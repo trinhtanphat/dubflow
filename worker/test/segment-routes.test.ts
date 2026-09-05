@@ -29,9 +29,7 @@ class MemorySegmentStore implements SegmentStore {
   updateError: Error | null = null;
   current: Segment = baseSegment;
 
-  async list() {
-    return [this.current];
-  }
+  async list() { return [this.current]; }
 
   async get(_projectId: string, segmentId: string, userId: string) {
     if (segmentId !== 's1' || userId !== 'dev-user') return null;
@@ -46,11 +44,9 @@ class MemorySegmentStore implements SegmentStore {
     projectId: string,
     segmentId: string,
     userId: string,
-    expectedVersionOrPatch: number | SegmentPatch,
-    maybePatch?: SegmentPatch,
+    expectedVersion: number,
+    patch: SegmentPatch,
   ) {
-    const expectedVersion = typeof expectedVersionOrPatch === 'number' ? expectedVersionOrPatch : null;
-    const patch = (maybePatch ?? expectedVersionOrPatch) as SegmentPatch;
     this.calls.push({ method: 'updateSegment', args: [projectId, segmentId, userId, expectedVersion, patch] });
     if (this.updateError) throw this.updateError;
     if (expectedVersion !== this.current.version) {
@@ -65,10 +61,16 @@ class MemorySegmentStore implements SegmentStore {
     return this.current;
   }
 
-  async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number) {
-    this.calls.push({ method: 'splitSegment', args: [projectId, segmentId, userId, playheadMs] });
+  async splitSegment(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    playheadMs: number,
+  ) {
+    this.calls.push({ method: 'splitSegment', args: [projectId, segmentId, userId, expectedVersion, playheadMs] });
     return {
-      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', version: 2 },
+      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', version: expectedVersion + 1 },
       right: {
         ...baseSegment,
         id: 'worker-child',
@@ -76,6 +78,7 @@ class MemorySegmentStore implements SegmentStore {
         sourceText: 'world',
         translatedText: 'chao',
         voiceStatus: 'pending',
+        version: 1,
         splitParentId: segmentId,
       },
     };
@@ -84,21 +87,21 @@ class MemorySegmentStore implements SegmentStore {
   async restoreSplit(
     projectId: string,
     segmentId: string,
-    childSegmentId: string,
     userId: string,
+    expectedVersion: number,
+    childSegmentId: string,
+    expectedChildVersion: number,
     original: SegmentRestoreInput,
   ) {
-    this.calls.push({ method: 'restoreSplit', args: [projectId, segmentId, childSegmentId, userId, original] });
-    return { ...baseSegment, ...original, voiceStatus: 'pending', version: 3 };
+    this.calls.push({
+      method: 'restoreSplit',
+      args: [projectId, segmentId, userId, expectedVersion, childSegmentId, expectedChildVersion, original],
+    });
+    return { ...baseSegment, ...original, voiceStatus: 'pending', version: expectedVersion + 1 };
   }
 
-  async setTranslationResult() {
-    return null;
-  }
-
-  async replaceFromAsr() {
-    return [];
-  }
+  async setTranslationResult() { return null; }
+  async replaceFromAsr() { return []; }
 }
 
 function makeApp(store: SegmentStore) {
@@ -153,22 +156,22 @@ describe('segment mutation routes', () => {
     });
   });
 
-  it('exposes the dedicated Worker split endpoint', async () => {
+  it('exposes the dedicated revision-aware Worker split endpoint', async () => {
     const store = new MemorySegmentStore();
     const response = await makeApp(store).request('/api/projects/project-1/segments/s1/split', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ playheadMs: 2_000 }),
+      body: JSON.stringify({ expectedVersion: 1, playheadMs: 2_000 }),
     });
 
     expect(response.status).toBe(200);
     const body = await response.json() as { left: Segment; right: Segment };
     expect(body.left.endMs).toBe(2_000);
     expect(body.right).toMatchObject({ id: 'worker-child', startMs: 2_000, splitParentId: 's1' });
-    expect(store.calls).toContainEqual({ method: 'splitSegment', args: ['project-1', 's1', 'dev-user', 2_000] });
+    expect(store.calls).toContainEqual({ method: 'splitSegment', args: ['project-1', 's1', 'dev-user', 1, 2_000] });
   });
 
-  it('exposes narrow restore-split with child id and original snapshot', async () => {
+  it('exposes revision-aware restore-split with parent and child revisions', async () => {
     const store = new MemorySegmentStore();
     const original: SegmentRestoreInput = {
       startMs: 1_000,
@@ -180,14 +183,19 @@ describe('segment mutation routes', () => {
     const response = await makeApp(store).request('/api/projects/project-1/segments/s1/restore-split', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ childSegmentId: 'worker-child', original }),
+      body: JSON.stringify({
+        expectedVersion: 1,
+        childSegmentId: 'worker-child',
+        expectedChildVersion: 1,
+        original,
+      }),
     });
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ id: 's1', voiceStatus: 'pending' });
     expect(store.calls).toContainEqual({
       method: 'restoreSplit',
-      args: ['project-1', 's1', 'worker-child', 'dev-user', original],
+      args: ['project-1', 's1', 'dev-user', 1, 'worker-child', 1, original],
     });
   });
 
