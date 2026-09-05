@@ -46,9 +46,9 @@ function makeDeps() {
       calls.push({ method: 'patchSegment', args: [projectId, segmentId, expectedVersion, patch] });
       return cloud({ ...before, ...patch, speakerId: before.speakerId } as Segment, { version: expectedVersion + 1 });
     },
-    async splitSegment(projectId: string, segmentId: string, playheadMs: number) {
-      calls.push({ method: 'splitSegment', args: [projectId, segmentId, playheadMs] });
-      const left = cloud({ ...before, endMs: playheadMs, sourceText: 'hello beautiful', translatedText: 'xin chao' }, { version: 3 });
+    async splitSegment(projectId: string, segmentId: string, expectedVersion: number, playheadMs: number) {
+      calls.push({ method: 'splitSegment', args: [projectId, segmentId, expectedVersion, playheadMs] });
+      const left = cloud({ ...before, endMs: playheadMs, sourceText: 'hello beautiful', translatedText: 'xin chao' }, { version: expectedVersion + 1 });
       const right = cloud(
         { ...before, id: splitChildId, startMs: playheadMs, sourceText: 'world', translatedText: 'the gioi', version: 1 },
         { splitParentId: segmentId, version: 1 },
@@ -58,10 +58,12 @@ function makeDeps() {
     async restoreSplit(
       projectId: string,
       segmentId: string,
+      expectedVersion: number,
       childSegmentId: string,
+      expectedChildVersion: number,
       original: RestoreSegmentInput,
     ) {
-      calls.push({ method: 'restoreSplit', args: [projectId, segmentId, childSegmentId, original] });
+      calls.push({ method: 'restoreSplit', args: [projectId, segmentId, expectedVersion, childSegmentId, expectedChildVersion, original] });
       return cloud({
         id: segmentId,
         speakerId: original.speakerId ?? 'unassigned',
@@ -69,8 +71,8 @@ function makeDeps() {
         endMs: original.endMs,
         sourceText: original.sourceText,
         translatedText: original.translatedText,
-        version: 4,
-      }, { version: 4 });
+        version: expectedVersion + 1,
+      }, { version: expectedVersion + 1 });
     },
   };
   return {
@@ -96,17 +98,20 @@ describe('segment mutation service', () => {
     });
   });
 
-  it('commits a split with canonical Worker-generated child id', async () => {
-    const { deps } = makeDeps();
+  it('commits a split with the parent revision and canonical Worker-generated child id', async () => {
+    const { deps, calls } = makeDeps();
     const mutation = await commitSegmentSplit('project-1', before, 2_000, deps);
 
+    expect(calls).toEqual([
+      { method: 'splitSegment', args: ['project-1', 's1', 2, 2_000] },
+    ]);
     expect(mutation.kind).toBe('split');
     expect(mutation.originalBefore).toEqual(before);
     expect(mutation.leftAfter).toMatchObject({ id: 's1', endMs: 2_000, speakerId: 'unassigned', version: 3 });
     expect(mutation.rightAfter).toMatchObject({ id: 'worker-child-1', startMs: 2_000, speakerId: 'unassigned', version: 1 });
   });
 
-  it('uses the last canonical timing revision for inverse persistence', async () => {
+  it('uses canonical parent and child revisions for inverse persistence', async () => {
     const { deps, calls } = makeDeps();
     const timing: TimingMutation = {
       kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
@@ -123,7 +128,7 @@ describe('segment mutation service', () => {
     });
     expect(calls[1]).toEqual({
       method: 'restoreSplit',
-      args: ['project-1', 's1', 'worker-child-1', {
+      args: ['project-1', 's1', 3, 'worker-child-1', 1, {
         startMs: 1_000,
         endMs: 3_000,
         sourceText: 'hello beautiful world',
@@ -133,7 +138,7 @@ describe('segment mutation service', () => {
     });
   });
 
-  it('refreshes split history with the new Worker child id on redo', async () => {
+  it('refreshes split history with the new Worker child id on redo while carrying the source revision', async () => {
     const fixture = makeDeps();
     const originalMutation = await commitSegmentSplit('project-1', before, 2_000, fixture.deps);
     fixture.setSplitChildId('worker-child-2');
@@ -142,7 +147,7 @@ describe('segment mutation service', () => {
     const replayed = await persistRedo('project-1', originalMutation, fixture.deps) as SplitMutation;
 
     expect(fixture.calls).toEqual([
-      { method: 'splitSegment', args: ['project-1', 's1', 2_000] },
+      { method: 'splitSegment', args: ['project-1', 's1', 2, 2_000] },
     ]);
     expect(replayed.rightAfter.id).toBe('worker-child-2');
     expect(replayed.originalBefore).toEqual(before);
