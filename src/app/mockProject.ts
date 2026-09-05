@@ -7,8 +7,8 @@ export const mockProject: StudioProject = {
     { id: 'mo', name: 'Mặc Vô Cực', label: 'Phản diện', share: 22 },
   ],
   segments: [
-    { id: 's1', speakerId: 'lin', startMs: 923000, endMs: 927500, sourceText: '你终于来了，我等你很久了。', translatedText: 'Cuối cùng chàng cũng đến, ta đã đợi chàng rất lâu rồi.' },
-    { id: 's2', speakerId: 'ye', startMs: 928000, endMs: 932000, sourceText: '发生了什么事？', translatedText: 'Chuyện gì đã xảy ra?' },
-    { id: 's3', speakerId: 'mo', startMs: 933000, endMs: 938000, sourceText: '我们必须尽快离开这里。', translatedText: 'Chúng ta phải rời khỏi đây thật nhanh.' },
+    { id: 's1', speakerId: 'lin', startMs: 923000, endMs: 927500, sourceText: '你终于来了，我等你很久了。', translatedText: 'Cuối cùng chàng cũng đến, ta đã đợi chàng rất lâu rồi.', version: 1 },
+    { id: 's2', speakerId: 'ye', startMs: 928000, endMs: 932000, sourceText: '发生了什么事？', translatedText: 'Chuyện gì đã xảy ra?', version: 1 },
+    { id: 's3', speakerId: 'mo', startMs: 933000, endMs: 938000, sourceText: '我们必须尽快离开这里。', translatedText: 'Chúng ta phải rời khỏi đây thật nhanh.', version: 1 },
   ],
 };
