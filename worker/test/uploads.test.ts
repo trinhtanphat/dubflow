@@ -20,6 +20,9 @@ class MemoryProjectStore implements ProjectStore {
     this.project.sizeBytes = sizeBytes;
     this.project.status = 'ready';
   }
+  async setExportObject(_id: string, _userId: string, objectKey: string) {
+    this.project.exportObjectKey = objectKey;
+  }
   async setStatus(_id: string, _userId: string, status: ProjectStatus, durationMs?: number) {
     this.project.status = status;
     if (durationMs !== undefined) this.project.durationMs = durationMs;
