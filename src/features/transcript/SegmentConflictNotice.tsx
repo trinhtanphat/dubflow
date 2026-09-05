@@ -1,5 +1,5 @@
+import type { SegmentField } from '../../app/autosaveDraft';
 import type { Segment } from '../timeline/types';
-import type { SegmentField } from '../../app/editorHistory';
 
 type SegmentConflictNoticeProps = {
   local: Segment;
