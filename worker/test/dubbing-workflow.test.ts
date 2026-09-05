@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { UsageRecordInput } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
+const noUsage = { async record(input: UsageRecordInput) { return input as never; } };
+
 describe('dubbing workflow pipeline', () => {
   it('runs media -> diarized bounded chunk ASR -> persist -> translate in order and meters real provider work', async () => {
     const calls: string[] = [];
@@ -157,6 +159,9 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { throw new Error('provider down'); } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noUsage,
+      asrProviderId: 'deepgram-nova-3',
+      translationProviderId: 'workers-ai',
     };
 
     await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step)).rejects.toThrow('provider down');
@@ -192,6 +197,9 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noUsage,
+      asrProviderId: 'workers-ai-whisper-large-v3-turbo',
+      translationProviderId: 'workers-ai',
     };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 
