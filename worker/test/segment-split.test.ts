@@ -13,11 +13,12 @@ type SegmentRow = {
   translation_engine: string;
   translation_status: string;
   voice_status: string;
+  dubbed_object_key?: string | null;
   version: number;
   split_parent_id: string | null;
 };
 
-type ProjectRow = { id: string; user_id: string; duration_ms: number };
+type ProjectRow = { id: string; user_id: string; duration_ms: number; status: string };
 
 class Statement implements D1StatementLike {
   values: unknown[] = [];
@@ -39,11 +40,12 @@ class Statement implements D1StatementLike {
         startMs,
         endMs,
         voiceStatus,
+        dubbedObjectKey,
         segmentId,
         projectId,
         userId,
         expectedVersion,
-      ] = this.values as [string, string, string | null, number, number, string, string, string, string, number | undefined];
+      ] = this.values as [string, string, string | null, number, number, string, string | null, string, string, string, number | undefined];
       const project = this.db.projects.find((item) => item.id === projectId && item.user_id === userId);
       const row = project ? this.db.rows.find((item) => item.id === segmentId && item.project_id === projectId) : undefined;
       if (!row || (expectedVersion !== undefined && row.version !== expectedVersion)) {
@@ -55,6 +57,7 @@ class Statement implements D1StatementLike {
       row.start_ms = startMs;
       row.end_ms = endMs;
       row.voice_status = voiceStatus;
+      row.dubbed_object_key = dubbedObjectKey;
       row.version += 1;
       return { meta: { changes: 1 } };
     }
@@ -69,6 +72,8 @@ class Statement implements D1StatementLike {
       row.translated_text = translatedText;
       row.translation_engine = engine;
       row.translation_status = 'completed';
+      row.voice_status = 'pending';
+      row.dubbed_object_key = null;
       row.version += 1;
       return { meta: { changes: 1 } };
     }
@@ -107,17 +112,17 @@ class Statement implements D1StatementLike {
 }
 
 class RecordingDb implements D1DatabaseLike {
-  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000 }];
+  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000, status: 'needs_review' }];
   rows: SegmentRow[] = [
     {
       id: 's1', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 1_000, end_ms: 3_000,
       source_text: 'hello beautiful world', translated_text: 'xin chao the gioi', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', version: 3, split_parent_id: null,
+      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s1.mp3', version: 3, split_parent_id: null,
     },
     {
       id: 's2', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 4_000, end_ms: 5_000,
       source_text: 'next', translated_text: 'tiep', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', version: 1, split_parent_id: null,
+      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s2.mp3', version: 1, split_parent_id: null,
     },
   ];
   runs: Statement[] = [];
@@ -133,8 +138,14 @@ class RecordingDb implements D1DatabaseLike {
   }
 }
 
+function expectExportInvalidation(statement: Statement) {
+  expect(statement.sql).toMatch(/UPDATE projects/i);
+  expect(statement.sql).toMatch(/export_object_key\s*=\s*NULL/i);
+  expect(statement.sql).toMatch(/status\s*=\s*'needs_review'/i);
+}
+
 describe('SegmentRepository durable revision-aware mutations', () => {
-  it('uses SQL compare-and-swap for a legal timing edit and returns the canonical revision', async () => {
+  it('uses SQL compare-and-swap for a legal timing edit and invalidates voice/export state', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
@@ -143,10 +154,13 @@ describe('SegmentRepository durable revision-aware mutations', () => {
       endMs: 3_200,
     });
 
-    expect(updated).toMatchObject({ id: 's1', startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', version: 4 });
-    expect(db.runs).toHaveLength(1);
+    expect(updated).toMatchObject({
+      id: 's1', startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+    });
+    expect(db.runs).toHaveLength(2);
     expect(db.runs[0]?.sql).toMatch(/version\s*=\s*\?/i);
     expect(db.runs[0]?.values.at(-1)).toBe(3);
+    expectExportInvalidation(db.runs[1]!);
   });
 
   it('rejects a stale timing revision without changing the canonical row', async () => {
@@ -172,24 +186,42 @@ describe('SegmentRepository durable revision-aware mutations', () => {
     expect(db.runs).toHaveLength(0);
   });
 
-  it('atomically splits only when the parent revision still matches', async () => {
+  it('rejects user mutations while a processing/export workflow owns the project', async () => {
+    const db = new RecordingDb();
+    db.projects[0]!.status = 'processing';
+    const repository = new SegmentRepository(db);
+
+    await expect(repository.updateSegment('project-1', 's1', 'dev-user', 3, { translatedText: 'locked' }))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    await expect(repository.splitSegment('project-1', 's1', 'dev-user', 3, 2_000))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    expect(db.runs).toHaveLength(0);
+    expect(db.batches).toHaveLength(0);
+  });
+
+  it('atomically splits only when the parent revision still matches and invalidates export', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
     const result = await repository.splitSegment('project-1', 's1', 'dev-user', 3, 2_000);
 
-    expect(result.left).toMatchObject({ id: 's1', startMs: 1_000, endMs: 2_000, voiceStatus: 'pending', version: 4 });
+    expect(result.left).toMatchObject({
+      id: 's1', startMs: 1_000, endMs: 2_000, voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+    });
     expect(result.right.id).toEqual(expect.any(String));
     expect(result.right.id).not.toBe('s1');
-    expect(result.right).toMatchObject({ projectId: 'project-1', startMs: 2_000, endMs: 3_000, voiceStatus: 'pending', version: 1 });
+    expect(result.right).toMatchObject({
+      projectId: 'project-1', startMs: 2_000, endMs: 3_000, voiceStatus: 'pending', dubbedObjectKey: null, version: 1,
+    });
     expect(result.right.splitParentId).toBe('s1');
     expect(result.left.sourceText).toBe('hello beautiful');
     expect(result.right.sourceText).toBe('world');
     expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]).toHaveLength(2);
+    expect(db.batches[0]).toHaveLength(3);
     expect(db.batches[0]?.[0]?.sql).toMatch(/version\s*=\s*\?/i);
     expect(db.batches[0]?.[1]?.sql).toMatch(/version\s*=\s*\?/i);
     expect(db.batches[0]?.flatMap((statement) => statement.values)).toContain(3);
+    expectExportInvalidation(db.batches[0]![2]!);
   });
 
   it('rejects a stale split revision before batching any write', async () => {
@@ -210,7 +242,7 @@ describe('SegmentRepository durable revision-aware mutations', () => {
     expect(db.batches).toHaveLength(0);
   });
 
-  it('restores only when parent and child revisions and lineage all match', async () => {
+  it('restores only when parent/child revisions and lineage match, then invalidates export', async () => {
     const db = new RecordingDb();
     db.rows.push({
       ...db.rows[0]!,
@@ -232,14 +264,17 @@ describe('SegmentRepository durable revision-aware mutations', () => {
       speakerId: 'speaker-1',
     });
 
-    expect(restored).toMatchObject({ id: 's1', startMs: 1_000, endMs: 3_000, voiceStatus: 'pending', version: 4 });
+    expect(restored).toMatchObject({
+      id: 's1', startMs: 1_000, endMs: 3_000, voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+    });
     expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]).toHaveLength(2);
+    expect(db.batches[0]).toHaveLength(3);
     expect(db.batches[0]?.[0]?.sql).toMatch(/version\s*=\s*\?/i);
     expect(db.batches[0]?.[1]?.sql).toMatch(/version\s*=\s*\?/i);
     const values = db.batches[0]?.flatMap((statement) => statement.values) ?? [];
     expect(values).toContain(3);
     expect(values).toContain(2);
+    expectExportInvalidation(db.batches[0]![2]!);
   });
 
   it('rejects stale parent or child revisions before restore mutation', async () => {
@@ -257,12 +292,15 @@ describe('SegmentRepository durable revision-aware mutations', () => {
     expect(db.batches).toHaveLength(0);
   });
 
-  it('persists translation results with compare-and-swap instead of overwriting a newer segment', async () => {
+  it('persists translation results with CAS and invalidates stale dubbed/export state', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
     const updated = await repository.setTranslationResult('project-1', 's1', 'dev-user', 3, 'ban dich moi', 'workers-ai');
-    expect(updated).toMatchObject({ translatedText: 'ban dich moi', translationEngine: 'workers-ai', version: 4 });
+    expect(updated).toMatchObject({
+      translatedText: 'ban dich moi', translationEngine: 'workers-ai', voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+    });
+    expectExportInvalidation(db.runs[1]!);
 
     await expect(repository.setTranslationResult('project-1', 's1', 'dev-user', 3, 'stale overwrite', 'workers-ai'))
       .rejects.toMatchObject({ code: 'SEGMENT_VERSION_CONFLICT' });
