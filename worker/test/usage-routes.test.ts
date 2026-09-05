@@ -75,7 +75,7 @@ describe('authorized usage summary routes', () => {
   it('hides cross-user or missing project usage behind a 404', async () => {
     const response = await appFor(store()).request('/api/projects/hidden/usage', {}, env);
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ code: 'PROJECT_NOT_FOUND', message: 'Project not found.' });
+    expect(await response.json()).toEqual({ error: true, code: 'PROJECT_NOT_FOUND', message: 'Project not found.' });
   });
 
   it('redacts internal usage failures', async () => {
@@ -83,8 +83,8 @@ describe('authorized usage summary routes', () => {
       async summarizeForUser() { throw new Error('SELECT secret FROM internal_table'); },
     })).request('/api/usage', {}, env);
     expect(response.status).toBe(500);
-    const body = await response.json() as { code: string; message: string };
-    expect(body).toEqual({ code: 'USAGE_SUMMARY_FAILED', message: 'Unable to load usage summary.' });
+    const body = await response.json() as { error: boolean; code: string; message: string };
+    expect(body).toEqual({ error: true, code: 'USAGE_SUMMARY_FAILED', message: 'Unable to load usage summary.' });
     expect(JSON.stringify(body)).not.toMatch(/SELECT|internal_table/);
   });
 });
