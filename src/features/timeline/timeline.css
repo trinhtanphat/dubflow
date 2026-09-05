@@ -108,12 +108,40 @@
 .timeline-canvas .timeline-playhead {
   top: 0;
   bottom: 0;
+  pointer-events: none;
 }
 
-.timeline-canvas .timeline-playhead i {
-  width: 10px;
-  height: 10px;
-  box-shadow: 0 0 0 3px rgba(139,54,244,.18);
+.timeline-playhead-handle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 16px;
+  height: 20px;
+  padding: 0;
+  transform: translate(-50%, -5px);
+  border: 0;
+  border-radius: 8px 8px 5px 5px;
+  background: #f4f1fb;
+  box-shadow: 0 0 0 3px rgba(139,54,244,.2);
+  cursor: ew-resize;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.timeline-playhead-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 7px;
+  height: 7px;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.timeline-playhead-handle:focus-visible {
+  outline: 2px solid #a45cff;
+  outline-offset: 3px;
 }
 
 @media (max-width: 640px) {
