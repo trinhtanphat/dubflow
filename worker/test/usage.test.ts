@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
+/// <reference types="vite/client" />
+
 import { describe, expect, it } from 'vitest';
+import migration from '../../migrations/0005_usage_ledger.sql?raw';
 import { creditsForUsage } from '../src/domain/usage';
 
 type UsageRow = {
@@ -87,7 +89,6 @@ describe('Phase 3B usage credits', () => {
   });
 
   it('persists the Phase 3B replay-safe ledger columns and unique idempotency index', () => {
-    const migration = readFileSync('migrations/0005_usage_ledger.sql', 'utf8');
     expect(migration).toContain('ADD COLUMN job_id TEXT');
     expect(migration).toContain('ADD COLUMN idempotency_key TEXT');
     expect(migration).toContain('ADD COLUMN credits INTEGER NOT NULL DEFAULT 0');
