@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { EditorMutation, SplitMutation, TimingMutation } from '../../app/editorHistory';
+import type { EditorMutation, FieldMutation, SplitMutation, TimingMutation } from '../../app/editorHistory';
 import type { CloudSegment, RestoreSegmentInput, SegmentPatch } from '../transcript/segmentApi';
-import type { Segment } from './types';
+import type { Segment, StudioProject } from './types';
 import {
   commitSegmentSplit,
   commitSegmentTiming,
@@ -19,6 +19,18 @@ const before: Segment = {
   translatedText: 'xin chao the gioi',
   version: 2,
 };
+
+function projectWith(...segments: Segment[]): StudioProject {
+  return {
+    id: 'project-1',
+    title: 'Project',
+    durationMs: 10_000,
+    sourceLanguage: 'en',
+    targetLanguage: 'vi',
+    speakers: [{ id: 'sp1', name: 'Speaker', label: 'SP', share: 1 }],
+    segments,
+  };
+}
 
 function cloud(segment: Segment, overrides: Partial<CloudSegment> = {}): CloudSegment {
   return {
@@ -44,7 +56,17 @@ function makeDeps() {
   const deps: SegmentMutationDeps = {
     async patchSegment(projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) {
       calls.push({ method: 'patchSegment', args: [projectId, segmentId, expectedVersion, patch] });
-      return cloud({ ...before, ...patch, speakerId: before.speakerId } as Segment, { version: expectedVersion + 1 });
+      const next: Segment = {
+        ...before,
+        id: segmentId,
+        sourceText: patch.sourceText ?? before.sourceText,
+        translatedText: patch.translatedText ?? before.translatedText,
+        speakerId: patch.speakerId === null ? 'unassigned' : patch.speakerId ?? before.speakerId,
+        startMs: patch.startMs ?? before.startMs,
+        endMs: patch.endMs ?? before.endMs,
+        version: expectedVersion + 1,
+      };
+      return cloud(next, { version: expectedVersion + 1 });
     },
     async splitSegment(projectId: string, segmentId: string, expectedVersion: number, playheadMs: number) {
       calls.push({ method: 'splitSegment', args: [projectId, segmentId, expectedVersion, playheadMs] });
@@ -111,59 +133,95 @@ describe('segment mutation service', () => {
     expect(mutation.rightAfter).toMatchObject({ id: 'worker-child-1', startMs: 2_000, speakerId: 'unassigned', version: 1 });
   });
 
-  it('uses canonical parent and child revisions for inverse persistence', async () => {
-    const { deps, calls } = makeDeps();
-    const timing: TimingMutation = {
-      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
+  it('undoes only the touched field using the current canonical version', async () => {
+    const fixture = makeDeps();
+    const mutation: FieldMutation = {
+      kind: 'fields',
+      segmentId: 's1',
+      fields: ['translatedText'],
+      before: { ...before, translatedText: 'ban cu', version: 2 },
+      after: { ...before, translatedText: 'ban moi', version: 3 },
     };
-    const split: SplitMutation = await commitSegmentSplit('project-1', before, 2_000, deps);
-    calls.length = 0;
+    const current = { ...mutation.after, sourceText: 'server-safe-source', version: 9 };
 
-    await persistUndo('project-1', timing, deps);
-    await persistUndo('project-1', split, deps);
+    const canonical = await persistUndo('project-1', mutation, projectWith(current), fixture.deps) as FieldMutation;
 
-    expect(calls[0]).toEqual({
+    expect(fixture.calls).toEqual([
+      { method: 'patchSegment', args: ['project-1', 's1', 9, { translatedText: 'ban cu' }] },
+    ]);
+    expect(canonical.kind).toBe('fields');
+    expect(canonical.before.version).toBe(10);
+    expect(canonical.after).toEqual(current);
+  });
+
+  it('uses the current canonical version for both timing undo and timing redo', async () => {
+    const fixture = makeDeps();
+    const mutation: TimingMutation = {
+      kind: 'timing',
+      segmentId: 's1',
+      before,
+      after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
+    };
+    const currentAfter = { ...mutation.after, version: 11 };
+
+    const undone = await persistUndo('project-1', mutation, projectWith(currentAfter), fixture.deps) as TimingMutation;
+    expect(fixture.calls[0]).toEqual({
       method: 'patchSegment',
-      args: ['project-1', 's1', 3, { startMs: 1_000, endMs: 3_000 }],
+      args: ['project-1', 's1', 11, { startMs: 1_000, endMs: 3_000 }],
     });
-    expect(calls[1]).toEqual({
+    expect(undone.before.version).toBe(12);
+    expect(undone.after).toEqual(currentAfter);
+
+    fixture.calls.length = 0;
+    const currentBefore = { ...before, version: 12 };
+    const redone = await persistRedo('project-1', mutation, projectWith(currentBefore), fixture.deps) as TimingMutation;
+    expect(fixture.calls[0]).toEqual({
+      method: 'patchSegment',
+      args: ['project-1', 's1', 12, { startMs: 1_200, endMs: 3_200 }],
+    });
+    expect(redone.before).toEqual(currentBefore);
+    expect(redone.after.version).toBe(13);
+  });
+
+  it('restores a split with the current parent and child versions', async () => {
+    const fixture = makeDeps();
+    const mutation: SplitMutation = await commitSegmentSplit('project-1', before, 2_000, fixture.deps);
+    fixture.calls.length = 0;
+    const currentLeft = { ...mutation.leftAfter, version: 8 };
+    const currentRight = { ...mutation.rightAfter, version: 4 };
+
+    const canonical = await persistUndo('project-1', mutation, projectWith(currentLeft, currentRight), fixture.deps) as SplitMutation;
+
+    expect(fixture.calls).toEqual([{
       method: 'restoreSplit',
-      args: ['project-1', 's1', 3, 'worker-child-1', 1, {
+      args: ['project-1', 's1', 8, 'worker-child-1', 4, {
         startMs: 1_000,
         endMs: 3_000,
         sourceText: 'hello beautiful world',
         translatedText: 'xin chao the gioi',
         speakerId: null,
       }],
-    });
+    }]);
+    expect(canonical.originalBefore.version).toBe(9);
+    expect(canonical.leftAfter).toEqual(currentLeft);
+    expect(canonical.rightAfter).toEqual(currentRight);
   });
 
-  it('refreshes split history with the new Worker child id on redo while carrying the source revision', async () => {
+  it('redoes a split from the current parent revision and returns the fresh Worker child lineage', async () => {
     const fixture = makeDeps();
     const originalMutation = await commitSegmentSplit('project-1', before, 2_000, fixture.deps);
     fixture.setSplitChildId('worker-child-2');
     fixture.calls.length = 0;
+    const currentRestored = { ...before, version: 12 };
 
-    const replayed = await persistRedo('project-1', originalMutation, fixture.deps) as SplitMutation;
+    const replayed = await persistRedo('project-1', originalMutation, projectWith(currentRestored), fixture.deps) as SplitMutation;
 
     expect(fixture.calls).toEqual([
-      { method: 'splitSegment', args: ['project-1', 's1', 2, 2_000] },
+      { method: 'splitSegment', args: ['project-1', 's1', 12, 2_000] },
     ]);
+    expect(replayed.originalBefore).toEqual(currentRestored);
+    expect(replayed.leftAfter.version).toBe(13);
     expect(replayed.rightAfter.id).toBe('worker-child-2');
-    expect(replayed.originalBefore).toEqual(before);
-  });
-
-  it('uses the stored pre-edit revision for the current timing redo contract', async () => {
-    const fixture = makeDeps();
-    const mutation: EditorMutation = {
-      kind: 'timing', segmentId: 's1', before, after: { ...before, startMs: 1_200, endMs: 3_200, version: 3 },
-    };
-
-    const replayed = await persistRedo('project-1', mutation, fixture.deps);
-
-    expect(fixture.calls).toEqual([
-      { method: 'patchSegment', args: ['project-1', 's1', 2, { startMs: 1_200, endMs: 3_200 }] },
-    ]);
-    expect(replayed).toEqual(mutation);
+    expect(replayed.rightAfter.version).toBe(1);
   });
 });
