@@ -1,6 +1,6 @@
 import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
 import type { Project, ProjectStatus } from '../db/projects';
-import type { JobStore } from '../db/jobs';
+import type { DubbingJob, JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
 import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
@@ -21,7 +21,13 @@ type PipelineProjects = {
   getByIdForUser(projectId: string, userId: string): Promise<PipelineProject | null>;
   setStatus(projectId: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 };
-type PipelineJobs = Pick<JobStore, 'getForProject' | 'setProgress' | 'fail' | 'complete'>;
+type PipelineJobs = {
+  getForProject(
+    projectId: string,
+    jobId: string,
+    userId: string,
+  ): Promise<Pick<DubbingJob, 'status' | 'retryCount'> | null>;
+} & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
 type UsageMeter = Pick<UsageStore, 'record'>;
 
