@@ -57,7 +57,9 @@ describe('Timeline interactive viewport', () => {
       />,
     );
     expect(html).toContain('data-segment-editing="true"');
-    expect(html.match(/left:100px/g)?.length).toBe(2);
+    expect(
+      html.match(/class="segment-block segment-block--(?:source|target)[^"]*is-previewing" style="left:100px/g)?.length,
+    ).toBe(2);
     expect(html.match(/is-previewing/g)?.length).toBe(2);
   });
 });
