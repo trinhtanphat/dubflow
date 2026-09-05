@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
+import type { UsageStore } from '../src/db/usage';
 import type { SourceLanguage } from '../src/domain/project';
 import type { Env } from '../src/env';
 import { createTranslationRoutes } from '../src/routes/translation';
@@ -92,8 +93,25 @@ function translationEnv(db: TranslationDb): Env {
   } as unknown as Env;
 }
 
-const noOpUsage = () => ({
-  async record(input: unknown) { return { inserted: true, event: input }; },
+const noOpUsage = (): Pick<UsageStore, 'record'> => ({
+  async record(input) {
+    return {
+      inserted: true,
+      event: {
+        id: 'fixture-usage',
+        userId: input.userId,
+        projectId: input.projectId,
+        jobId: input.jobId,
+        kind: input.kind,
+        units: input.units,
+        provider: input.provider,
+        creditRate: 0,
+        credits: 0,
+        idempotencyKey: input.idempotencyKey ?? null,
+        createdAt: '2026-09-05T17:47:00Z',
+      },
+    };
+  },
 });
 
 describe('translation router', () => {
