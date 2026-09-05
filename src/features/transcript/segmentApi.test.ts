@@ -11,7 +11,7 @@ const segment = {
 };
 
 describe('segment API', () => {
-  it('lists and patches persisted segments with encoded project/segment paths', async () => {
+  it('lists and patches persisted segments with encoded paths and revision preconditions', async () => {
     const calls: Array<{ input: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push({ input: String(input), init });
@@ -19,11 +19,14 @@ describe('segment API', () => {
     });
 
     await expect(segmentApi.listSegments('p / 1')).resolves.toEqual([segment]);
-    await expect(segmentApi.patchSegment('p / 1', 'seg / 1', { translatedText: 'Chào bạn' })).resolves.toMatchObject({ translatedText: 'Chào bạn', version: 3 });
+    await expect(segmentApi.patchSegment('p / 1', 'seg / 1', 2, { translatedText: 'Chào bạn' })).resolves.toMatchObject({ translatedText: 'Chào bạn', version: 3 });
     expect(calls[0].input).toBe('/api/projects/p%20%2F%201/segments');
     expect(calls[1].input).toBe('/api/projects/p%20%2F%201/segments/seg%20%2F%201');
     expect(calls[1].init?.method).toBe('PATCH');
-    expect(JSON.parse(String(calls[1].init?.body))).toEqual({ translatedText: 'Chào bạn' });
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      expectedVersion: 2,
+      patch: { translatedText: 'Chào bạn' },
+    });
   });
 
   it('calls dedicated split and restore-split endpoints with narrow payloads', async () => {
