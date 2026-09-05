@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
+import { buildAtempoChain, buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
 
 describe('FFmpeg final dubbing export', () => {
   const input = {
@@ -19,17 +19,28 @@ describe('FFmpeg final dubbing export', () => {
     })).toThrow(/project/i);
   });
 
-  it('builds deterministic MP4 render args with a silent base and delayed dubbed clips', () => {
+  it('builds deterministic atempo chains beyond the native 0.5x..2x range', () => {
+    expect(buildAtempoChain(3000, 1500)).toBe('atempo=2');
+    expect(buildAtempoChain(1000, 2000)).toBe('atempo=0.5');
+    expect(buildAtempoChain(4000, 1000)).toBe('atempo=2,atempo=2');
+    expect(buildAtempoChain(1000, 4000)).toBe('atempo=0.5,atempo=0.5');
+    expect(buildAtempoChain(1500, 1500)).toBe('');
+  });
+
+  it('fits each dubbed clip to its segment window before delay and final mix', () => {
     const args = buildRenderExportArgs({
       sourcePath: '/tmp/source',
       outputPath: '/tmp/dubbed.mp4',
       durationMs: 6000,
       clips: input.clips,
       clipPaths: ['/tmp/s1.mp3', '/tmp/s2.mp3'],
+      clipDurationsMs: [3000, 1000],
     });
 
     expect(args).toContain('-filter_complex');
     const graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain('atempo=2,atrim=duration=1.5');
+    expect(graph).toContain('atempo=0.5,atrim=duration=2');
     expect(graph).toContain('adelay=1000|1000');
     expect(graph).toContain('adelay=3000|3000');
     expect(graph).toContain('amix=inputs=3');
