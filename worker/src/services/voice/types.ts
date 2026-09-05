@@ -1,4 +1,4 @@
-export type VoiceCapabilities = { languages: string[] | 'unknown'; cloning: false };
+export type VoiceCapabilities = { languages: string[] | 'unknown'; cloning: boolean };
 export type VoiceGenerateInput = { text: string; language: string; voice?: string };
 
 export interface VoiceProvider {

@@ -19,6 +19,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       GOOGLE_CLOUD_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_CLOUD_TRANSLATE_API_KEY }}
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      ELEVENLABS_DEFAULT_VOICE_ID: ${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -46,6 +48,16 @@ jobs:
         if: ${{ env.GOOGLE_CLOUD_TRANSLATE_API_KEY != '' }}
         shell: bash
         run: printf '%s' "$GOOGLE_CLOUD_TRANSLATE_API_KEY" | npx wrangler secret put GOOGLE_CLOUD_TRANSLATE_API_KEY
+
+      - name: Sync optional ElevenLabs API key
+        if: ${{ env.ELEVENLABS_API_KEY != '' }}
+        shell: bash
+        run: printf '%s' "$ELEVENLABS_API_KEY" | npx wrangler secret put ELEVENLABS_API_KEY
+
+      - name: Sync optional ElevenLabs default voice
+        if: ${{ env.ELEVENLABS_DEFAULT_VOICE_ID != '' }}
+        shell: bash
+        run: printf '%s' "$ELEVENLABS_DEFAULT_VOICE_ID" | npx wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID
 
       - name: Verify production readiness after secret sync
         run: node scripts/verify-deployment.mjs
