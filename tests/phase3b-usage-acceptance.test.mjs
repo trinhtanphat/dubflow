@@ -71,7 +71,10 @@ test('Phase 3B acceptance: credits remain informational and never become a billi
 test('Phase 3B acceptance: usage summaries stay authorized and server-derived', () => {
   assert.match(usageRoutes, /getCurrentUserId\(\)/);
   assert.match(usageRoutes, /summarizeForUser\(userId\)/);
-  assert.match(usageRoutes, /summarizeForProject\(projectId, userId\)/);
+  assert.match(
+    usageRoutes,
+    /summarizeForProject\([\s\S]*c\.req\.param\('id'\)[\s\S]*getCurrentUserId\(\)[\s\S]*\)/,
+  );
   assert.match(usageRoutes, /PROJECT_NOT_FOUND/);
   assert.doesNotMatch(usageRoutes, /c\.req\.(query|json)[\s\S]*userId/);
 });
