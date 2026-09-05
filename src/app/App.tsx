@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ProjectDashboard } from '../features/projects/ProjectDashboard';
 import type { CloudJob } from '../features/projects/jobApi';
 import type { CloudProject } from '../features/projects/projectApi';
+import { fetchUsageSummary, type UsageSummary } from '../features/projects/usageApi';
 import { cancelDashboardJob, retryDashboardJob, type DashboardJobResult } from './dashboardJobControl';
 import { StudioShell } from './StudioShell';
 import {
@@ -24,10 +25,14 @@ export function App() {
   const [jobsByProject, setJobsByProject] = useState<Record<string, CloudJob[]>>({});
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState('');
+  const [usageSummary, setUsageSummary] = useState<UsageSummary | null>(null);
+  const [usageLoading, setUsageLoading] = useState(true);
+  const [usageError, setUsageError] = useState('');
 
   useEffect(() => {
     if (view !== 'dashboard') return;
     let active = true;
+
     setDashboardLoading(true);
     setDashboardError('');
     void loadProjectDashboardSnapshot()
@@ -43,6 +48,23 @@ export function App() {
       .finally(() => {
         if (active) setDashboardLoading(false);
       });
+
+    setUsageLoading(true);
+    setUsageError('');
+    void fetchUsageSummary()
+      .then((summary) => {
+        if (!active) return;
+        setUsageSummary(summary);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setUsageSummary(null);
+        setUsageError(errorMessage(error, 'Không thể tải mức sử dụng.'));
+      })
+      .finally(() => {
+        if (active) setUsageLoading(false);
+      });
+
     return () => { active = false; };
   }, [view]);
 
@@ -121,6 +143,9 @@ export function App() {
       jobsByProject={jobsByProject}
       loading={dashboardLoading}
       error={dashboardError}
+      usageSummary={usageSummary}
+      usageLoading={usageLoading}
+      usageError={usageError}
       onOpenProject={(projectId) => { void handleOpenProject(projectId); }}
       onRetryJob={(projectId, jobId) => { void handleRetryJob(projectId, jobId); }}
       onCancelJob={(projectId, jobId) => { void handleCancelJob(projectId, jobId); }}
