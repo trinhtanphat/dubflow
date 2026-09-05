@@ -27,6 +27,21 @@ describe('Timeline interactive viewport', () => {
     expect(html).toContain('aria-label="Phóng to timeline"');
     expect(html).toContain('aria-label="Vừa toàn dự án"');
     expect(html).toContain('data-timeline-canvas="true"');
+    expect(html).toContain('data-timeline-viewport="true"');
     expect(html).toContain('width:500px');
+  });
+
+  it('renders a dedicated accessible playhead drag handle', () => {
+    const html = renderToStaticMarkup(
+      <TestTimeline
+        project={project}
+        playheadMs={2_000}
+        selectedSegmentId="s1"
+        timelineView={timelineView}
+        dispatch={() => {}}
+      />,
+    );
+    expect(html).toContain('aria-label="Kéo playhead"');
+    expect(html).toContain('data-timeline-playhead-handle="true"');
   });
 });
