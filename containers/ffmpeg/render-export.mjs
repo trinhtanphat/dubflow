@@ -38,13 +38,45 @@ function seconds(ms) {
   return (ms / 1000).toFixed(3).replace(/\.?0+$/, '');
 }
 
-export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clips, clipPaths }) {
+function tempoValue(value) {
+  return String(Number(value.toFixed(6)));
+}
+
+export function buildAtempoChain(sourceDurationMs, targetDurationMs) {
+  if (!Number.isFinite(sourceDurationMs) || sourceDurationMs <= 0 || !Number.isFinite(targetDurationMs) || targetDurationMs <= 0) {
+    throw new Error('Voice and target durations must be positive finite values.');
+  }
+
+  let ratio = sourceDurationMs / targetDurationMs;
+  if (Math.abs(ratio - 1) < 0.001) return '';
+
+  const filters = [];
+  while (ratio > 2.000001) {
+    filters.push('atempo=2');
+    ratio /= 2;
+  }
+  while (ratio < 0.499999) {
+    filters.push('atempo=0.5');
+    ratio /= 0.5;
+  }
+  if (Math.abs(ratio - 1) >= 0.001) filters.push(`atempo=${tempoValue(ratio)}`);
+  return filters.join(',');
+}
+
+export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clips, clipPaths, clipDurationsMs }) {
   if (typeof sourcePath !== 'string' || !sourcePath || typeof outputPath !== 'string' || !outputPath) {
     throw new Error('Source and output paths are required.');
   }
   if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Source duration is invalid.');
   if (!Array.isArray(clips) || !Array.isArray(clipPaths) || clips.length === 0 || clips.length !== clipPaths.length) {
     throw new Error('Clip manifest and local clip files must align.');
+  }
+  if (clipDurationsMs !== undefined && (
+    !Array.isArray(clipDurationsMs) ||
+    clipDurationsMs.length !== clips.length ||
+    clipDurationsMs.some((value) => !Number.isFinite(value) || value <= 0)
+  )) {
+    throw new Error('Clip durations must align with local clip files.');
   }
 
   const durationSeconds = seconds(durationMs);
@@ -56,10 +88,14 @@ export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clip
   clips.forEach((clip, index) => {
     const inputIndex = index + 2;
     const label = `dub${index}`;
-    const clipDuration = seconds(clip.endMs - clip.startMs);
+    const targetDurationMs = clip.endMs - clip.startMs;
+    const clipDuration = seconds(targetDurationMs);
+    const sourceDurationMs = clipDurationsMs?.[index] ?? targetDurationMs;
+    const tempo = buildAtempoChain(sourceDurationMs, targetDurationMs);
+    const tempoFilter = tempo ? `${tempo},` : '';
     filters.push(
       `[${inputIndex}:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,` +
-      `atrim=duration=${clipDuration},apad=whole_dur=${clipDuration},asetpts=PTS-STARTPTS,` +
+      `${tempoFilter}atrim=duration=${clipDuration},apad=whole_dur=${clipDuration},asetpts=PTS-STARTPTS,` +
       `adelay=${clip.startMs}|${clip.startMs}[${label}]`,
     );
     labels.push(`[${label}]`);
