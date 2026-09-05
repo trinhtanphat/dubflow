@@ -1,0 +1,3 @@
+Spec coverage: PASS — geometry, topbar, left rail, player, timeline, inspector, footer, responsive/accessibility, CI and visual qualification are each mapped to a task.
+Placeholder scan: PASS — no TBD/TODO/implement-later placeholders remain in executable steps.
+Type/interface consistency: PASS — StudioTopbar props remain unchanged; UploadPanel adds only optional speakerSection; ScriptInspector callbacks remain unchanged; reference CSS is presentation-only.
