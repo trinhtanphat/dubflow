@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { CommandPalette } from '../components/CommandPalette/CommandPalette';
 import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
+import { MIN_SEGMENT_MS } from '../features/timeline/editing';
 import { Timeline, type SegmentEditIntent } from '../features/timeline/Timeline';
 import {
   commitSegmentSplit,
@@ -17,6 +19,8 @@ import { retranslateEditorSegment } from '../features/transcript/editorPersisten
 import { SegmentVersionConflictError, type CloudSegment } from '../features/transcript/segmentApi';
 import type { SegmentFieldPatch } from './autosaveDraft';
 import type { EditorMutation } from './editorHistory';
+import { resolveStudioShortcut } from './shortcuts';
+import { buildStudioCommands } from './studioCommands';
 import type { StudioAction, StudioState } from './studioState';
 import type { useStudioState } from './useStudioState';
 import { followCloudJob } from './cloudJobFlow';
@@ -227,6 +231,12 @@ function isNativeTextUndoTarget(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
 }
 
+function isTimelineShortcutTarget(target: EventTarget | null): boolean {
+  return typeof HTMLElement !== 'undefined'
+    && target instanceof HTMLElement
+    && Boolean(target.closest('.timeline-panel'));
+}
+
 export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker }: StudioShellProps) {
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>('none');
   const [activeJob, setActiveJob] = useState<{ projectId: string; jobId: string } | null>(null);
@@ -236,6 +246,9 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
+  const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
   const previousSelectedSegmentId = useRef(state.selectedSegmentId);
 
   const cloudEditable = state.project.id !== 'demo';
@@ -339,24 +352,6 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     restoreCloudProject,
   });
 
-  useEffect(() => {
-    const handleEditorHistoryShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'z') return;
-      if (isNativeTextUndoTarget(event.target) || mutationLocked) return;
-      if (event.shiftKey) {
-        if (state.history.future.length === 0 || !cloudEditable) return;
-        event.preventDefault();
-        void editorActions.redo();
-        return;
-      }
-      if (state.history.past.length === 0 || !cloudEditable) return;
-      event.preventDefault();
-      void editorActions.undo();
-    };
-    window.addEventListener('keydown', handleEditorHistoryShortcut);
-    return () => window.removeEventListener('keydown', handleEditorHistoryShortcut);
-  }, [cloudEditable, mutationLocked, editorActions, state.history.future.length, state.history.past.length]);
-
   const retranslate = async (segmentId: string) => {
     if (!cloudEditable || mutationLocked) return;
     const current = state.project.segments.find((segment) => segment.id === segmentId);
@@ -391,6 +386,13 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const saveState = deriveStudioSaveState(state, cloudEditable, editorError, editorBusy);
   const canUndo = cloudEditable && !mutationLocked && state.history.past.length > 0;
   const canRedo = cloudEditable && !mutationLocked && state.history.future.length > 0;
+  const canSplit = Boolean(
+    selectedSegment
+      && cloudEditable
+      && !mutationLocked
+      && state.playheadMs > selectedSegment.startMs + MIN_SEGMENT_MS
+      && state.playheadMs < selectedSegment.endMs - MIN_SEGMENT_MS,
+  );
   const exportBusy = Boolean(activeJob && cloudJob?.type === 'export');
   const canExport = cloudEditable
     && !mutationLocked
@@ -400,6 +402,96 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const exportHref = state.project.exportObjectKey
     ? `/api/projects/${encodeURIComponent(state.project.id)}/export/media`
     : undefined;
+
+  const studioCommands = buildStudioCommands({
+    canSplit,
+    canUndo,
+    canRedo,
+    split: () => { void editorActions.splitSelected(); },
+    undo: () => { void editorActions.undo(); },
+    redo: () => { void editorActions.redo(); },
+    zoomIn: () => dispatch({ type: 'setTimelineZoom', pixelsPerSecond: state.timelineView.pixelsPerSecond + 0.25 }),
+    zoomOut: () => dispatch({ type: 'setTimelineZoom', pixelsPerSecond: state.timelineView.pixelsPerSecond - 0.25 }),
+    openSources: () => setMobilePanel('sources'),
+    openInspector: () => setMobilePanel('inspector'),
+  });
+
+  useEffect(() => {
+    const handleStudioShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      const action = resolveStudioShortcut(
+        {
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+        },
+        {
+          typing: isNativeTextUndoTarget(event.target),
+          timelineFocused: isTimelineShortcutTarget(event.target),
+          canUndo,
+          canRedo,
+          canSplit,
+        },
+      );
+      if (!action) return;
+      event.preventDefault();
+
+      switch (action) {
+        case 'open-commands':
+          openCommandPalette();
+          return;
+        case 'undo':
+          void editorActions.undo();
+          return;
+        case 'redo':
+          void editorActions.redo();
+          return;
+        case 'split':
+          void editorActions.splitSelected();
+          return;
+        case 'zoom-in':
+          dispatch({ type: 'setTimelineZoom', pixelsPerSecond: state.timelineView.pixelsPerSecond + 0.25 });
+          return;
+        case 'zoom-out':
+          dispatch({ type: 'setTimelineZoom', pixelsPerSecond: state.timelineView.pixelsPerSecond - 0.25 });
+          return;
+        case 'toggle-playback':
+          dispatch({ type: 'setPlaying', playing: !state.playback.playing });
+          return;
+        case 'seek-back-small':
+          dispatch({ type: 'setPlayhead', playheadMs: state.playheadMs - 1000 });
+          return;
+        case 'seek-forward-small':
+          dispatch({ type: 'setPlayhead', playheadMs: state.playheadMs + 1000 });
+          return;
+        case 'seek-back-large':
+          dispatch({ type: 'setPlayhead', playheadMs: state.playheadMs - 5000 });
+          return;
+        case 'seek-forward-large':
+          dispatch({ type: 'setPlayhead', playheadMs: state.playheadMs + 5000 });
+          return;
+        case 'escape':
+          closeCommandPalette();
+          setMobilePanel('none');
+          return;
+      }
+    };
+    window.addEventListener('keydown', handleStudioShortcut);
+    return () => window.removeEventListener('keydown', handleStudioShortcut);
+  }, [
+    canRedo,
+    canSplit,
+    canUndo,
+    closeCommandPalette,
+    dispatch,
+    editorActions,
+    openCommandPalette,
+    state.playback.playing,
+    state.playheadMs,
+    state.timelineView.pixelsPerSecond,
+  ]);
 
   return (
     <div className={`app-shell studio-pro-shell reference-fidelity mobile-panel--${mobilePanel}`}>
@@ -417,9 +509,15 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
-        onOpenCommands={() => {}}
+        onOpenCommands={openCommandPalette}
         onOpenSources={() => toggleMobilePanel('sources')}
         onOpenInspector={() => toggleMobilePanel('inspector')}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        commands={studioCommands}
+        onClose={closeCommandPalette}
       />
 
       {cloudError && <div className="error-banner" role="alert">{cloudError}</div>}
