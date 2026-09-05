@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Cloud, Coins, Edit3, Globe2, Languages, Mic2, Sparkles, Upload, UserRound, Waves } from 'lucide-react';
+import { Cloud, Coins, Edit3, Globe2, Mic2, Sparkles, Upload, UserRound, Waves } from 'lucide-react';
 import { UploadPanel } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
@@ -32,8 +32,8 @@ export default function App() {
             <label><span>Ngôn ngữ gốc</span><button type="button"><span className="flag flag-cn">★</span><strong>中文 (普通话)</strong><b>⌄</b></button></label>
             <label><span>Ngôn ngữ dịch</span><button type="button"><span className="flag flag-vi">★</span><strong>Tiếng Việt</strong><b>⌄</b></button></label>
           </div>
-          <button className="dub-button" type="button"><Sparkles size={16}/> Bắt đầu Dubbing AI</button>
-          <p className="dub-help">AI sẽ tự động dịch & lồng tiếng<br/>giữ nguyên cảm xúc & giọng nhân vật</p>
+          <button className="dub-button" type="button" disabled title="Pipeline AI sẽ được bật ở Phase 2"><Sparkles size={16}/> Bắt đầu Dubbing AI <small>Phase 2</small></button>
+          <p className="dub-help">UI Phase 1 đã sẵn sàng · chưa giả lập kết quả AI<br/>Phase 2 sẽ nối Workers AI + Google Translation</p>
         </aside>
 
         <section className="center-stage" aria-label="Không gian biên tập chính">
@@ -47,9 +47,9 @@ export default function App() {
       <footer className="feature-strip">
         <div><Globe2/><span><strong>Dub mọi ngôn ngữ</strong><small>Tiếng Trung, Anh, Việt...</small></span></div>
         <div><UserRound/><span><strong>Tự nhận diện nhân vật</strong><small>AI phân tích giọng nói</small></span></div>
-        <div><Waves/><span><strong>Tự clone voice nhân vật</strong><small>Sẵn sàng khi provider hỗ trợ</small></span></div>
+        <div><Waves/><span><strong>Clone voice khi hỗ trợ</strong><small>Chỉ bật với provider + consent phù hợp</small></span></div>
         <div><Cloud/><span><strong>Chạy trên Cloud 24/7</strong><small>Không cần GPU, CPU</small></span></div>
-        <div><Mic2/><span><strong>3,500+ voices</strong><small>Kiến trúc mở rộng giọng nói</small></span></div>
+        <div><Mic2/><span><strong>Voice provider mở rộng</strong><small>Sẵn sàng tích hợp nhiều giọng nói</small></span></div>
       </footer>
     </div>
   );

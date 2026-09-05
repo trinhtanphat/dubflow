@@ -33,8 +33,8 @@ export function ScriptInspector({ segment, speakers, lipSync, onLipSync, onSourc
       <div className="voice-assignment">
         <div className="rail-heading">Gán giọng cho nhân vật</div>
         <button className="voice-select" type="button"><span className={`avatar small avatar-${speaker.accent}`}>{speaker.initials}</span><span>{speaker.name} ({speaker.gender})</span><span>⌄</span></button>
-        <button className="voice-preview" type="button" title="Sẽ bật ở Phase 2"><Play size={15} fill="currentColor"/> Nghe thử giọng</button>
-        <div className="phase-note"><WandSparkles size={14}/> Tạo giọng AI sẽ được kích hoạt ở Phase 2</div>
+        <button className="voice-preview" type="button" disabled title="Sẽ bật ở Phase 2"><Play size={15} fill="currentColor"/> Nghe thử giọng <small>Phase 2</small></button>
+        <div className="phase-note"><WandSparkles size={14}/> Chưa tạo giọng giả: provider AI sẽ được kích hoạt ở Phase 2</div>
       </div>
       <div className="lip-row"><div><strong>Đồng bộ khẩu hình</strong><span>Tự động khớp môi với giọng lồng tiếng</span></div><button className={`toggle ${lipSync ? 'on' : ''}`} type="button" onClick={onLipSync} aria-pressed={lipSync}><i /></button></div>
     </aside>
