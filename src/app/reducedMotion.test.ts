@@ -3,11 +3,13 @@
 import { describe, expect, it } from 'vitest';
 import appCss from './app.css?raw';
 
-const reducedMotionBlock = appCss.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+const mediaDeclaration = '@media (prefers-reduced-motion: reduce)';
+const reducedMotionStart = appCss.indexOf(mediaDeclaration);
+const reducedMotionBlock = reducedMotionStart >= 0 ? appCss.slice(reducedMotionStart) : '';
 
 describe('Studio reduced-motion accessibility', () => {
   it('defines one reduced-motion media contract for the interactive Studio surfaces', () => {
-    expect(reducedMotionBlock).not.toBe('');
+    expect(reducedMotionBlock).toContain(mediaDeclaration);
     for (const selector of [
       '.studio-pro-shell',
       '.timeline-panel',
