@@ -1,4 +1,4 @@
-import type { JobStore } from '../db/jobs';
+import type { JobStatus } from '../db/jobs';
 
 export class JobCancelledError extends Error {
   readonly code = 'JOB_CANCELLED';
@@ -9,8 +9,12 @@ export class JobCancelledError extends Error {
   }
 }
 
+export type JobStatusReader = {
+  getForProject(projectId: string, jobId: string, userId: string): Promise<{ status: JobStatus } | null>;
+};
+
 export async function assertJobActive(
-  jobs: Pick<JobStore, 'getForProject'>,
+  jobs: JobStatusReader,
   projectId: string,
   jobId: string,
   userId: string,
