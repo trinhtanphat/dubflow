@@ -16,9 +16,6 @@ function buildSpeakers(segments: CloudSegment[], metadata: CloudSpeaker[]): Spea
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   const metadataById = new Map(metadata.map((speaker) => [speaker.id, speaker]));
-  for (const speaker of metadata) {
-    if (!counts.has(speaker.id)) counts.set(speaker.id, 0);
-  }
   if (counts.size === 0) counts.set(UNASSIGNED_SPEAKER_ID, 0);
   const total = Math.max(1, segments.length);
 
