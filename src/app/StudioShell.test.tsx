@@ -5,7 +5,8 @@ import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer, type StudioAction } from './studioState';
 import { createStudioEditorActions, StudioShell } from './StudioShell';
 import { createVoicePreviewAction } from './voicePreviewAction';
-import type { SplitMutation, TimingMutation } from './editorHistory';
+import type { FieldMutation, SplitMutation, TimingMutation } from './editorHistory';
+import { SegmentVersionConflictError } from '../features/transcript/segmentApi';
 
 describe('StudioShell mobile controls', () => {
   it('exposes accessible source and inspector panel controls', () => {
@@ -160,7 +161,7 @@ describe('StudioShell durable editor wiring', () => {
     }]);
   });
 
-  it('applies undo locally first and restores the local history pointer when persistence fails', async () => {
+  it('passes the current canonical project to undo persistence and rolls the local pointer back on ordinary failure', async () => {
     const state = cloudState();
     const before = state.project.segments[0]!;
     const after = { ...before, startMs: before.startMs + 200, endMs: before.endMs + 200 };
@@ -170,12 +171,59 @@ describe('StudioShell durable editor wiring', () => {
 
     await h.actions.undo();
 
-    expect(h.services.persistUndo).toHaveBeenCalledWith(committed.project.id, committed.history.past[0]);
+    expect(h.services.persistUndo).toHaveBeenCalledWith(committed.project.id, committed.history.past[0], committed.project);
     expect(h.dispatched).toEqual([{ type: 'applyUndoLocal' }, { type: 'applyRedoLocal' }]);
     expect(h.errors.at(-1)).toBe('SEGMENT_OVERLAP');
   });
 
-  it('reconciles a redone split to the fresh Worker child id', async () => {
+  it('turns a field-history version conflict into the same V2.5 conflict draft after rolling back optimistic undo', async () => {
+    const state = cloudState();
+    const current = state.project.segments[0]!;
+    const mutation: FieldMutation = {
+      kind: 'fields',
+      segmentId: current.id,
+      fields: ['translatedText'],
+      before: { ...current, translatedText: 'Bản trước', version: current.version },
+      after: { ...current, translatedText: 'Bản đã lưu', version: current.version + 1 },
+    };
+    const committed = {
+      ...state,
+      project: {
+        ...state.project,
+        segments: state.project.segments.map((segment) => segment.id === current.id ? mutation.after : segment),
+      },
+      history: { past: [mutation], future: [] },
+    };
+    const canonical = { ...mutation.after, translatedText: 'Bản mới trên server', version: mutation.after.version + 4 };
+    const h = harness(committed);
+    h.services.persistUndo.mockRejectedValue(new SegmentVersionConflictError({
+      id: canonical.id,
+      projectId: committed.project.id,
+      speakerId: canonical.speakerId === 'unassigned' ? null : canonical.speakerId,
+      startMs: canonical.startMs,
+      endMs: canonical.endMs,
+      sourceText: canonical.sourceText,
+      translatedText: canonical.translatedText,
+      translationEngine: 'workers-ai',
+      translationStatus: 'completed',
+      voiceStatus: 'pending',
+      version: canonical.version,
+      splitParentId: null,
+    }));
+
+    await h.actions.undo();
+
+    expect(h.services.persistUndo).toHaveBeenCalledWith(committed.project.id, mutation, committed.project);
+    expect(h.dispatched).toEqual([
+      { type: 'applyUndoLocal' },
+      { type: 'applyRedoLocal' },
+      { type: 'editDraft', segmentId: current.id, patch: { translatedText: 'Bản trước' } },
+      { type: 'conflictDraftSave', segmentId: current.id, canonical },
+    ]);
+    expect(h.errors).toEqual(['']);
+  });
+
+  it('passes current canonical state to redo and reconciles a redone split to the fresh Worker child id', async () => {
     const state = cloudState();
     const originalBefore = state.project.segments[0]!;
     const playheadMs = originalBefore.startMs + Math.floor((originalBefore.endMs - originalBefore.startMs) / 2);
@@ -194,18 +242,19 @@ describe('StudioShell durable editor wiring', () => {
     undone = studioReducer(undone, { type: 'applyUndoLocal' });
     const canonical: SplitMutation = {
       ...oldMutation,
-      leftAfter: { ...oldMutation.leftAfter, sourceText: 'left canonical' },
-      rightAfter: { ...oldMutation.rightAfter, id: 'child-new', sourceText: 'right canonical' },
+      originalBefore: undone.project.segments.find((segment) => segment.id === originalBefore.id)!,
+      leftAfter: { ...oldMutation.leftAfter, sourceText: 'left canonical', version: oldMutation.leftAfter.version + 5 },
+      rightAfter: { ...oldMutation.rightAfter, id: 'child-new', sourceText: 'right canonical', version: oldMutation.rightAfter.version + 2 },
     };
     const h = harness(undone);
     h.services.persistRedo.mockResolvedValue(canonical);
 
     await h.actions.redo();
 
-    expect(h.services.persistRedo).toHaveBeenCalledWith(undone.project.id, oldMutation);
+    expect(h.services.persistRedo).toHaveBeenCalledWith(undone.project.id, oldMutation, undone.project);
     expect(h.dispatched).toEqual([
       { type: 'applyRedoLocal' },
-      { type: 'reconcileLatestSplitMutation', previousRightId: oldMutation.rightAfter.id, mutation: canonical },
+      { type: 'reconcileHistoryMutation', direction: 'redo', previous: oldMutation, mutation: canonical },
     ]);
   });
 
