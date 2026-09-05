@@ -43,4 +43,12 @@ describe('VideoStage media states', () => {
     const html = render({ ...baseProject, sourceObjectKey: null, status: 'processing' });
     expect(html).toContain('Media đang được xử lý');
   });
+
+  it('keeps reference framing hooks around the real V2.2 player controls', () => {
+    const html = render({ ...baseProject, sourceObjectKey: 'projects/p1/source/a.mp4', status: 'ready' });
+    expect(html).toContain('reference-video-frame');
+    expect(html).toContain('reference-transport-row');
+    expect(html).toContain('aria-label="Video source"');
+    expect(html).toContain('aria-label="Phát video"');
+  });
 });

@@ -41,4 +41,35 @@ describe('StudioTopbar', () => {
     expect(html).toContain('47%');
     expect(html).toContain('transcribing');
   });
+
+  it('prioritizes the supplied YupVox reference branding and export copy without hiding live progress', () => {
+    const html = renderToStaticMarkup(
+      <StudioTopbar
+        projectTitle="Thiên Nhai Khách"
+        saveState="saved"
+        cloudState="processing"
+        cloudProgress={0.42}
+        cloudDetail="translating"
+        canUndo={false}
+        canRedo={false}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onOpenCommands={() => {}}
+        onOpenSources={() => {}}
+        onOpenInspector={() => {}}
+      />,
+    );
+
+    expect(html).toContain('YupVox.Com');
+    expect(html).toContain('AI Studio Dubbing');
+    expect(html).toContain('Dự án:');
+    expect(html).toContain('reference-project-name');
+    expect(html).toContain('brand-wave');
+    expect(html).toContain('reference-cloud-status');
+    expect(html).toContain('Processing');
+    expect(html).toContain('42%');
+    expect(html).toContain('Xuất bản Dubbing');
+    expect(html).toContain('aria-label="Mở nguồn media"');
+    expect(html).toContain('aria-label="Mở inspector"');
+  });
 });

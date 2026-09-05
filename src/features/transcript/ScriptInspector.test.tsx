@@ -47,4 +47,30 @@ describe('ScriptInspector', () => {
     expect(html).toMatch(/<button[^>]*disabled[^>]*>▷ Nghe thử giọng · Chưa cấu hình<\/button>/);
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Tạo lại giọng · Chưa cấu hình<\/button>/);
   });
+
+  it('keeps reference-density hooks around the existing persisted editor flow', () => {
+    const html = renderToStaticMarkup(
+      <ScriptInspector
+        segment={segment}
+        speakers={speakers}
+        lipSyncEnabled
+        dispatch={vi.fn()}
+        cloudEditable
+        translationMode="compare"
+        onTranslationModeChange={vi.fn()}
+        onCommitPatch={vi.fn()}
+        onRetranslate={vi.fn()}
+        comparison={{ workersAI: 'Bản AI', google: 'Bản Google' }}
+        onApplyTranslation={vi.fn()}
+      />,
+    );
+    expect(html).toContain('reference-inspector-header');
+    expect((html.match(/reference-script-card/g) ?? []).length).toBe(2);
+    expect(html).toContain('reference-translation-tools');
+    expect(html).toContain('reference-voice-assignment');
+    expect(html).toContain('aria-label="Lời thoại gốc"');
+    expect(html).toContain('aria-label="Lời thoại dubbing tiếng Việt"');
+    expect(html).toContain('Gán giọng cho nhân vật');
+    expect(html).toContain('Đồng bộ khẩu hình');
+  });
 });

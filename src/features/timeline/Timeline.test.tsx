@@ -45,6 +45,21 @@ describe('Timeline interactive viewport', () => {
     expect(html).toContain('data-timeline-playhead-handle="true"');
   });
 
+  it('keeps reference density hooks around the interactive V2.2 timeline', () => {
+    const html = renderToStaticMarkup(
+      <TestTimeline
+        project={project}
+        playheadMs={2_000}
+        selectedSegmentId="s1"
+        timelineView={timelineView}
+        dispatch={() => {}}
+      />,
+    );
+    expect(html).toContain('reference-timeline');
+    expect(html).toContain('reference-playhead');
+    expect(html).toContain('data-timeline-playhead-handle="true"');
+  });
+
   it('renders one transient timing preview consistently on both subtitle lanes', () => {
     const html = renderToStaticMarkup(
       <TestTimeline

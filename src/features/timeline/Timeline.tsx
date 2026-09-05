@@ -326,7 +326,7 @@ export function Timeline({
 
   return (
     <section
-      className="timeline-panel"
+      className="timeline-panel reference-timeline"
       aria-label="Timeline"
       data-segment-editing="true"
       onKeyDown={handleTimelineKeyDown}
@@ -366,7 +366,7 @@ export function Timeline({
                 <span key={mark.timeMs} style={{ left: timeToPixels(mark.timeMs, pixelsPerSecond) }}>{mark.label}</span>
               ))}
             </div>
-            <div className="timeline-playhead" style={{ left: playheadLeft }}>
+            <div className="timeline-playhead reference-playhead" style={{ left: playheadLeft }}>
               <button
                 type="button"
                 className="timeline-playhead-handle"
