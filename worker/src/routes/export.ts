@@ -49,6 +49,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       }
 
       const job = await jobs.create(projectId, 'export');
+      await projects.setStatus(projectId, userId, 'processing');
       try {
         const instance = await c.env.EXPORT_WORKFLOW.create({ params: { projectId, userId, jobId: job.id } });
         return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
