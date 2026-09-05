@@ -8,4 +8,6 @@ test('deployment status pins production hostname and GitHub Actions contract', (
   assert.match(status, /yupvox\.qs3d\.site/);
   assert.match(status, /GitHub Actions is enabled/);
   assert.match(status, /CLOUDFLARE_API_TOKEN/);
+  assert.match(status, /manual-only/i);
+  assert.match(status, /Containers (?:Write|Edit)/);
 });
