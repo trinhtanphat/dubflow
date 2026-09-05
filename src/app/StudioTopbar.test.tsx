@@ -16,7 +16,7 @@ describe('StudioTopbar', () => {
         onOpenCommands={() => {}}
       />,
     );
-    expect(html).toContain('Saved');
+    expect(html).toContain('Đã lưu');
     expect(html).toContain('Cloud ready');
     expect(html).toContain('aria-label="Mở bảng lệnh"');
     expect(html).toContain('Tập 01');
