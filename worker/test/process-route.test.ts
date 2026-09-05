@@ -3,6 +3,9 @@ import { Hono } from 'hono';
 import type { Env } from '../src/env';
 import { createProcessRoutes } from '../src/routes/process';
 
+const allowProcess = { async limit() { return { success: true }; } };
+const analytics = { writeDataPoint() {} };
+
 describe('process route', () => {
   it('creates a dubbing job and Workflow instance for an owned ready project', async () => {
     const workflowCalls: unknown[] = [];
@@ -25,6 +28,8 @@ describe('process route', () => {
       makeJobs: () => jobs as never,
     }));
     const env = {
+      ANALYTICS: analytics,
+      RATE_LIMIT_PROCESS: allowProcess,
       DUBBING_WORKFLOW: {
         async create(input: unknown) { workflowCalls.push(input); return { id: 'workflow-1' }; },
       },
