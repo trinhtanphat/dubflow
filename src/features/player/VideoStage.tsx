@@ -5,6 +5,7 @@ import type { StudioAction, StudioState } from '../../app/studioState';
 import type { Segment, StudioProject } from '../timeline/types';
 import { frameStepMs, mediaUrlForProject } from './playback';
 import { formatTimestamp } from './time';
+import { syncVideoPlayback } from './videoPlaybackSync';
 
 type VideoStageProps = {
   project: StudioProject;
@@ -36,6 +37,14 @@ export function VideoStage({ project, segment, playheadMs, playback, dispatch }:
       video.currentTime = Math.max(0, playheadMs) / 1000;
     }
   }, [playheadMs, mediaUrl]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!mediaUrl || !video) return;
+    void syncVideoPlayback(video, playback.playing, () => {
+      dispatch({ type: 'setPlaying', playing: false });
+    });
+  }, [dispatch, mediaUrl, playback.playing]);
 
   const seekToMs = (ms: number) => {
     const target = Math.max(0, Math.min(project.durationMs, ms));
