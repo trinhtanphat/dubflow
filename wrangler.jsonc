@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dubflow",
-  "account_id": "6c5207813df3d5b83b9508125e0e9e12",
+  "account_id": "50afb4fd3c4c7a1f3e1bdb7f22d4af7f",
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-09-05",
   "compatibility_flags": ["nodejs_compat"],
