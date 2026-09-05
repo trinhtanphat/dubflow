@@ -152,7 +152,7 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
   };
 
   return (
-    <section className="timeline-panel" aria-label="Timeline">
+    <section className="timeline-panel reference-timeline" aria-label="Timeline">
       <div className="timeline-title">
         <strong>Timeline</strong>
         <div className="timeline-toolbar" aria-label="Điều khiển timeline">
@@ -188,7 +188,7 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
                 <span key={mark.timeMs} style={{ left: timeToPixels(mark.timeMs, pixelsPerSecond) }}>{mark.label}</span>
               ))}
             </div>
-            <div className="timeline-playhead" style={{ left: playheadLeft }}>
+            <div className="timeline-playhead reference-playhead" style={{ left: playheadLeft }}>
               <button
                 type="button"
                 className="timeline-playhead-handle"
