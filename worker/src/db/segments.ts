@@ -1,4 +1,4 @@
-import type { D1DatabaseLike } from './projects';
+import type { D1DatabaseLike, D1RunResultLike } from './projects';
 import {
   MIN_SEGMENT_MS,
   normalizeAsrSegments,
@@ -43,8 +43,8 @@ function fromRow(row: SegmentRow): Segment {
 export interface SegmentStore {
   list(projectId: string, userId: string): Promise<Segment[]>;
   get(projectId: string, segmentId: string, userId: string): Promise<Segment | null>;
-  updateText(projectId: string, segmentId: string, userId: string, patch: SegmentPatch): Promise<Segment | null>;
-  updateSegment(projectId: string, segmentId: string, userId: string, patch: SegmentPatch): Promise<Segment | null>;
+  updateText(projectId: string, segmentId: string, userId: string, expectedVersion: number, patch: SegmentPatch): Promise<Segment | null>;
+  updateSegment(projectId: string, segmentId: string, userId: string, expectedVersion: number, patch: SegmentPatch): Promise<Segment | null>;
   splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }>;
   restoreSplit(projectId: string, segmentId: string, childSegmentId: string, userId: string, original: SegmentRestoreInput): Promise<Segment>;
   setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null>;
@@ -63,6 +63,11 @@ const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s
  FROM segments s JOIN projects p ON p.id = s.project_id`;
 
 type AuthorizedProject = { id: string; duration_ms: number | null };
+
+function affectedRows(result: D1RunResultLike): number {
+  const changes = result.meta?.changes ?? result.changes ?? 0;
+  return Number.isFinite(changes) ? Math.max(0, Number(changes)) : 0;
+}
 
 export class SegmentRepository implements SegmentStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -112,9 +117,21 @@ export class SegmentRepository implements SegmentStore {
     }
   }
 
-  async updateSegment(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
+  async updateSegment(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    rawPatch: SegmentPatch,
+  ): Promise<Segment | null> {
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+      throw new SegmentPersistenceError('INVALID_SEGMENT_VERSION', 'expectedVersion must be a positive integer.');
+    }
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
+    if (current.version !== expectedVersion) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
     const patch = normalizeSegmentPatch(rawPatch, current);
     const next = {
       sourceText: patch.sourceText ?? current.sourceText,
@@ -128,20 +145,41 @@ export class SegmentRepository implements SegmentStore {
       await this.assertLegalTiming(projectId, userId, next.startMs, next.endMs, [segmentId]);
     }
     const voiceStatus = timingChanged ? 'pending' : current.voiceStatus;
-    await this.db.prepare(`UPDATE segments
+    const result = await this.db.prepare(`UPDATE segments
       SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, version = version + 1
-      WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-      .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, voiceStatus, segmentId, projectId, userId).run();
-    return {
-      ...current,
-      ...next,
-      voiceStatus,
-      version: current.version + 1,
-    };
+      WHERE id = ? AND project_id = ?
+      AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
+      AND version = ?`)
+      .bind(
+        next.sourceText,
+        next.translatedText,
+        next.speakerId,
+        next.startMs,
+        next.endMs,
+        voiceStatus,
+        segmentId,
+        projectId,
+        userId,
+        expectedVersion,
+      ).run();
+    if (affectedRows(result) === 0) {
+      const canonical = await this.get(projectId, segmentId, userId);
+      if (!canonical) return null;
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
+    const canonical = await this.get(projectId, segmentId, userId);
+    if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after update.');
+    return canonical;
   }
 
-  async updateText(projectId: string, segmentId: string, userId: string, rawPatch: SegmentPatch): Promise<Segment | null> {
-    return this.updateSegment(projectId, segmentId, userId, rawPatch);
+  async updateText(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    rawPatch: SegmentPatch,
+  ): Promise<Segment | null> {
+    return this.updateSegment(projectId, segmentId, userId, expectedVersion, rawPatch);
   }
 
   async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }> {
