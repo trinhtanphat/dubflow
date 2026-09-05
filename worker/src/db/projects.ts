@@ -18,6 +18,7 @@ export type Project = {
   targetLanguage: 'vi';
   status: ProjectStatus;
   sourceObjectKey?: string | null;
+  exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
 };
@@ -27,6 +28,7 @@ export interface ProjectStore {
   listByUser(userId: string): Promise<Project[]>;
   getByIdForUser(id: string, userId: string): Promise<Project | null>;
   setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
+  setExportObject(id: string, userId: string, objectKey: string): Promise<void>;
   setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 }
 
@@ -55,6 +57,7 @@ type ProjectRow = {
   target_language: 'vi';
   status: ProjectStatus;
   source_object_key?: string | null;
+  export_object_key?: string | null;
   duration_ms?: number | null;
   size_bytes?: number | null;
 };
@@ -68,10 +71,13 @@ function fromRow(row: ProjectRow): Project {
     targetLanguage: row.target_language,
     status: row.status,
     sourceObjectKey: row.source_object_key,
+    exportObjectKey: row.export_object_key,
     durationMs: row.duration_ms,
     sizeBytes: row.size_bytes,
   };
 }
+
+const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, status, source_object_key, export_object_key, duration_ms, size_bytes`;
 
 export class ProjectRepository implements ProjectStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -102,16 +108,14 @@ export class ProjectRepository implements ProjectStore {
 
   async listByUser(userId: string): Promise<Project[]> {
     const result = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, duration_ms, size_bytes
-       FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
+      `SELECT ${PROJECT_COLUMNS} FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
     ).bind(userId).all<ProjectRow>();
     return (result.results ?? []).map(fromRow);
   }
 
   async getByIdForUser(id: string, userId: string): Promise<Project | null> {
     const row = await this.db.prepare(
-      `SELECT id, user_id, title, source_language, target_language, status, source_object_key, duration_ms, size_bytes
-       FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
+      `SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
     ).bind(id, userId).first<ProjectRow>();
     return row ? fromRow(row) : null;
   }
@@ -122,6 +126,16 @@ export class ProjectRepository implements ProjectStore {
        SET source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
     ).bind(objectKey, sizeBytes, id, userId).run();
+  }
+
+  async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
+    const prefix = `projects/${id}/export/`;
+    if (!objectKey.startsWith(prefix)) {
+      throw new Error('Export object key must belong to the project export prefix.');
+    }
+    await this.db.prepare(
+      `UPDATE projects SET export_object_key = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
+    ).bind(objectKey, id, userId).run();
   }
 
   async setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void> {
