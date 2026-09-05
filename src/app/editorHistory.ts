@@ -89,10 +89,12 @@ export function applyMutation(
   }
 
   if (mutation.kind === 'timing') {
-    const replacement = direction === 'forward' ? mutation.after : mutation.before;
+    const source = direction === 'forward' ? mutation.after : mutation.before;
     return {
       ...project,
-      segments: project.segments.map((segment) => segment.id === mutation.segmentId ? replacement : segment),
+      segments: project.segments.map((segment) => segment.id === mutation.segmentId
+        ? { ...segment, startMs: source.startMs, endMs: source.endMs }
+        : segment),
     };
   }
 
