@@ -25,4 +25,99 @@
   .studio-pro-shell.reference-fidelity .studio-capability-strip {
     min-height: var(--yv-ref-footer-height);
   }
+
+  .studio-pro-shell.reference-fidelity .studio-topbar {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    padding: 0 20px;
+    background: #0a0a0e;
+    border-bottom: 1px solid #1c1b22;
+  }
+
+  .studio-pro-shell.reference-fidelity .brand {
+    min-width: 240px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .studio-pro-shell.reference-fidelity .brand-wave {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+
+  .studio-pro-shell.reference-fidelity .brand-wave i {
+    display: block;
+    width: 3px;
+    border-radius: 4px;
+    background: linear-gradient(#dd59ff, #8738ef);
+  }
+
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(1),
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(7) { height: 10px; }
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(2),
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(6) { height: 21px; }
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(3),
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(5) { height: 31px; }
+  .studio-pro-shell.reference-fidelity .brand-wave i:nth-child(4) { height: 38px; }
+
+  .studio-pro-shell.reference-fidelity .brand-copy strong { font-size: 18px; }
+  .studio-pro-shell.reference-fidelity .brand-copy span {
+    margin-top: 3px;
+    color: #756f80;
+    font-size: 10px;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-project-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    white-space: nowrap;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-project-name > span {
+    color: #c0bbc8;
+    font-size: 14px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-project-name > strong { font-size: 16px; }
+
+  .studio-pro-shell.reference-fidelity .studio-topbar-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-cloud-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-secondary-actions {
+    display: flex;
+    align-items: center;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-export-button {
+    min-height: 42px;
+    padding-inline: 18px;
+    border-radius: 8px;
+    white-space: nowrap;
+  }
 }
