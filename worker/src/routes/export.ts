@@ -4,6 +4,7 @@ import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
 import { parseByteRange } from '../services/media';
 
@@ -52,6 +53,9 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       if (!voiceConfigured(c.env)) {
         return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'ElevenLabs voice credentials are required before export.'), 503);
       }
+
+      const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
+      if (rateLimited) return rateLimited;
 
       const job = await jobs.create(projectId, 'export');
       await projects.setStatus(projectId, userId, 'processing');
