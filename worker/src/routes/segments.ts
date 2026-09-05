@@ -19,13 +19,27 @@ function persistenceErrorResponse(c: any, error: SegmentPersistenceError) {
   if (error.code === 'SEGMENT_NOT_FOUND' || error.code === 'PROJECT_NOT_FOUND') {
     return c.json(errorBody(error.code, error.message), 404);
   }
-  if (error.code === 'SEGMENT_OVERLAP' || error.code === 'SPLIT_LINEAGE_MISMATCH') {
+  if (error.code === 'SEGMENT_OVERLAP' || error.code === 'SPLIT_LINEAGE_MISMATCH' || error.code === 'SEGMENT_VERSION_CONFLICT') {
     return c.json(errorBody(error.code, error.message), 409);
   }
   if (error.code === 'D1_BATCH_UNAVAILABLE') {
     return c.json(errorBody(error.code, error.message), 503);
   }
   return c.json(errorBody(error.code, error.message), 400);
+}
+
+function readSegmentPatchRequest(input: unknown): { expectedVersion: number; patch: unknown } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new SegmentInputError('Segment patch request must be an object.');
+  }
+  const record = input as Record<string, unknown>;
+  if (!Number.isInteger(record.expectedVersion) || (record.expectedVersion as number) < 1) {
+    throw new SegmentInputError('expectedVersion must be a positive integer.');
+  }
+  if (!record.patch || typeof record.patch !== 'object' || Array.isArray(record.patch)) {
+    throw new SegmentInputError('patch must be an object.');
+  }
+  return { expectedVersion: record.expectedVersion as number, patch: record.patch };
 }
 
 function readSplitPoint(input: unknown): number {
@@ -72,14 +86,20 @@ export function createSegmentRoutes(
     const segmentId = c.req.param('segmentId');
     const userId = getCurrentUserId();
     try {
+      const request = readSegmentPatchRequest(await c.req.json());
       const current = await repo.get(projectId, segmentId, userId);
       if (!current) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
-      const patch = normalizeSegmentPatch(await c.req.json(), current);
-      const updated = await repo.updateSegment(projectId, segmentId, userId, patch);
+      const patch = normalizeSegmentPatch(request.patch, current);
+      const updated = await repo.updateSegment(projectId, segmentId, userId, request.expectedVersion, patch);
       if (!updated) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
       return c.json(updated);
     } catch (error) {
       if (error instanceof SegmentInputError) return c.json(errorBody(error.code, error.message), 400);
+      if (error instanceof SegmentPersistenceError && error.code === 'SEGMENT_VERSION_CONFLICT') {
+        const canonical = await repo.get(projectId, segmentId, userId);
+        if (!canonical) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
+        return c.json({ ...errorBody(error.code, error.message), segment: canonical }, 409);
+      }
       if (error instanceof SegmentPersistenceError) return persistenceErrorResponse(c, error);
       return c.json(errorBody('SEGMENT_UPDATE_FAILED', 'Unable to update segment.'), 500);
     }
