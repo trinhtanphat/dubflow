@@ -1,4 +1,24 @@
 /* Pixel contract measured from the supplied 1448×1086 reference. */
+.center-stage {
+  position: relative;
+}
+
+.api-error-banner {
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+  max-width: calc(100% - 64px);
+  padding: 8px 12px;
+  border: 1px solid #653247;
+  border-radius: 7px;
+  background: rgba(45, 18, 29, .94);
+  box-shadow: 0 8px 28px #0008;
+  color: #ffb9c7;
+  font-size: 11px;
+}
+
 @media (min-width: 1181px) {
   .studio-shell {
     grid-template-rows: 76px minmax(0, 1fr) 66px;

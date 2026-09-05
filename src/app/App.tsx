@@ -5,6 +5,7 @@ import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
 import { Timeline } from '../features/timeline/Timeline';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
+import { useProjects } from '../features/projects/useProject';
 import { useStudioState } from './useStudioState';
 import './app.css';
 import './reference-fidelity.css';
@@ -12,12 +13,14 @@ import './reference-fidelity.css';
 export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const { state, selectedSegment, dispatch } = useStudioState();
+  const { projects, error: projectError } = useProjects();
+  const projectTitle = projects[0]?.title ?? state.project.title;
 
   return (
     <div className="studio-shell">
       <header className="topbar">
         <div className="brand"><div className="brand-wave"><i/><i/><i/><i/><i/><i/><i/></div><div><strong>YupVox.Com</strong><span>AI Studio Dubbing</span></div></div>
-        <div className="project-name"><span>Dự án:</span><strong>{state.project.title}</strong><Edit3 size={14}/></div>
+        <div className="project-name"><span>Dự án:</span><strong>{projectTitle}</strong><Edit3 size={14}/></div>
         <div className="topbar-spacer"/>
         <div className="cloud-mode"><Cloud size={19}/><div><strong>Cloud Mode</strong><span>24/7 Running</span></div></div>
         <div className="credits"><Coins size={20}/><div><strong>50,000 Credits</strong><span>Dùng thử miễn phí</span></div></div>
@@ -38,6 +41,7 @@ export default function App() {
         </aside>
 
         <section className="center-stage" aria-label="Không gian biên tập chính">
+          {projectError ? <div className="api-error-banner" role="alert">{projectError}</div> : null}
           <VideoStage file={file} segment={selectedSegment} currentMs={state.playheadMs} durationMs={state.project.durationMs} playing={state.isPlaying} onTogglePlay={() => dispatch({ type: 'toggle-play' })}/>
           <Timeline durationMs={state.project.durationMs} playheadMs={state.playheadMs} speakers={state.project.speakers} segments={state.project.segments} selectedId={state.selectedSegmentId} onSelect={(id) => dispatch({ type: 'select', id })}/>
         </section>
