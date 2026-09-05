@@ -31,4 +31,9 @@
   --yv-shadow-panel: 0 18px 60px rgba(0, 0, 0, .28);
   --yv-shadow-accent: 0 12px 36px rgba(126, 53, 242, .22);
   --yv-topbar-height: 68px;
+  --yv-ref-topbar-height: 76px;
+  --yv-ref-footer-height: 66px;
+  --yv-ref-rail-width: 304px;
+  --yv-ref-player-gutter: 16px;
+  --yv-ref-track-label-width: 116px;
 }
