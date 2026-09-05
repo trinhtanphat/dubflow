@@ -47,7 +47,7 @@ export function ScriptInspector({
 
   return (
     <aside className="script-inspector" aria-label="Inspector dubbing">
-      <div className="inspector-title">
+      <div className="inspector-title reference-inspector-header">
         <div><span className="eyebrow">EDITOR</span><h2>AI Dubbing Studio</h2></div>
         <span className="status-dot" title="Editor sẵn sàng">●</span>
       </div>
@@ -57,7 +57,7 @@ export function ScriptInspector({
         <button type="button" disabled title="Chế độ Nhân vật sẽ được kích hoạt trong Studio Pro V2.4">Nhân vật</button>
       </div>
 
-      <div className="language-card language-card--source">
+      <div className="language-card language-card--source reference-script-card">
         <div className="language-card__head"><span>🇨🇳 中文 (原声)</span><time>00:15:23</time></div>
         <textarea
           aria-label="Lời thoại gốc"
@@ -70,7 +70,7 @@ export function ScriptInspector({
 
       <div className="swap-marker" aria-hidden="true">↻</div>
 
-      <div className="language-card language-card--target">
+      <div className="language-card language-card--target reference-script-card">
         <div className="language-card__head"><span>🇻🇳 Tiếng Việt (Dubbing)</span><time>00:15:23</time></div>
         <textarea
           aria-label="Lời thoại dubbing tiếng Việt"
@@ -80,7 +80,7 @@ export function ScriptInspector({
         />
 
         {cloudEditable && (
-          <div className="translation-controls">
+          <div className="translation-controls reference-translation-tools">
             <select
               aria-label="Nhà cung cấp dịch"
               value={translationMode}
@@ -117,7 +117,7 @@ export function ScriptInspector({
         {error && <p className="error-banner" role="alert">{error}</p>}
       </div>
 
-      <div className="voice-section">
+      <div className="voice-section reference-voice-assignment">
         <label htmlFor="speaker-assignment">Gán giọng cho nhân vật</label>
         <select
           id="speaker-assignment"
