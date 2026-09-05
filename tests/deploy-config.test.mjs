@@ -4,6 +4,9 @@ import fs from 'node:fs';
 
 const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const deployWorkflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
+
+const productionAccountId = '50afb4fd3c4c7a1f3e1bdb7f22d4af7f';
 
 test('deployment config contains no fake resource placeholder', () => {
   const d1 = config.d1_databases?.find((item) => item.binding === 'DB');
@@ -22,4 +25,9 @@ test('deployment uses Wrangler with automatic resource provisioning support', ()
 
 test('production custom domain stays pinned to yupvox.qs3d.site', () => {
   assert.deepEqual(config.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
+});
+
+test('production deploy targets the account that owns qs3d.site', () => {
+  assert.equal(config.account_id, productionAccountId);
+  assert.ok(deployWorkflow.includes('CLOUDFLARE_ACCOUNT_ID: ' + productionAccountId));
 });
