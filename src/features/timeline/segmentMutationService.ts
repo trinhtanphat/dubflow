@@ -16,7 +16,7 @@ import type { Segment } from './types';
 const UNASSIGNED_SPEAKER_ID = 'unassigned';
 
 export type SegmentMutationDeps = {
-  patchSegment: (projectId: string, segmentId: string, patch: SegmentPatch) => Promise<CloudSegment>;
+  patchSegment: (projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) => Promise<CloudSegment>;
   splitSegment: (projectId: string, segmentId: string, playheadMs: number) => Promise<{ left: CloudSegment; right: CloudSegment }>;
   restoreSplit: (
     projectId: string,
@@ -36,6 +36,7 @@ function toStudioSegment(segment: CloudSegment, fallbackSpeakerId = UNASSIGNED_S
     endMs: segment.endMs,
     sourceText: segment.sourceText,
     translatedText: segment.translatedText,
+    version: segment.version,
   };
 }
 
@@ -55,7 +56,7 @@ export async function commitSegmentTiming(
   timing: Pick<Segment, 'startMs' | 'endMs'>,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<TimingMutation> {
-  const persisted = await deps.patchSegment(projectId, before.id, timing);
+  const persisted = await deps.patchSegment(projectId, before.id, before.version, timing);
   return {
     kind: 'timing',
     segmentId: before.id,
@@ -85,7 +86,7 @@ export async function persistUndo(
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
   if (mutation.kind === 'timing') {
-    await deps.patchSegment(projectId, mutation.segmentId, {
+    await deps.patchSegment(projectId, mutation.segmentId, mutation.after.version, {
       startMs: mutation.before.startMs,
       endMs: mutation.before.endMs,
     });
@@ -107,7 +108,7 @@ export async function persistRedo(
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
   if (mutation.kind === 'timing') {
-    await deps.patchSegment(projectId, mutation.segmentId, {
+    await deps.patchSegment(projectId, mutation.segmentId, mutation.before.version, {
       startMs: mutation.after.startMs,
       endMs: mutation.after.endMs,
     });
