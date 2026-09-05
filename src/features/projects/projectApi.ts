@@ -13,6 +13,8 @@ export type CloudProject = {
   exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export function createProject(title: string, sourceLanguage: CloudProject['sourceLanguage']) {
