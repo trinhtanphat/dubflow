@@ -18,6 +18,7 @@ import {
   redoHistory,
   undoHistory,
   type EditorHistory,
+  type EditorMutation,
   type FieldMutation,
   type SplitMutation,
   type TimingMutation,
@@ -79,6 +80,7 @@ export type StudioAction =
   | { type: 'commitTimingMutation'; before: Segment; after: Segment }
   | { type: 'commitSplitMutation'; originalBefore: Segment; leftAfter: Segment; rightAfter: Segment }
   | { type: 'reconcileLatestSplitMutation'; previousRightId: string; mutation: SplitMutation }
+  | { type: 'reconcileHistoryMutation'; direction: 'undo' | 'redo'; previous: EditorMutation; mutation: EditorMutation }
   | { type: 'applyUndoLocal' }
   | { type: 'applyRedoLocal' };
 
@@ -106,6 +108,13 @@ function replaceProjectSegment(project: StudioProject, segmentId: string, replac
   return {
     ...project,
     segments: project.segments.map((segment) => segment.id === segmentId ? replacement : segment),
+  };
+}
+
+function sortProjectSegments(project: StudioProject, segments: Segment[]): StudioProject {
+  return {
+    ...project,
+    segments: [...segments].sort((left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id)),
   };
 }
 
@@ -137,6 +146,65 @@ function hydrateWithoutOverwritingDraftBases(state: StudioState, incoming: Studi
   }
   segments.sort((left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id));
   return { ...incoming, segments };
+}
+
+function sameMutationLineage(left: EditorMutation | undefined, right: EditorMutation): boolean {
+  if (!left || left.kind !== right.kind) return false;
+  if (left.kind === 'split' && right.kind === 'split') {
+    return left.originalBefore.id === right.originalBefore.id && left.rightAfter.id === right.rightAfter.id;
+  }
+  if (left.kind !== 'split' && right.kind !== 'split') return left.segmentId === right.segmentId;
+  return false;
+}
+
+function reconcileHistoryEntry(
+  history: EditorHistory,
+  direction: 'undo' | 'redo',
+  previous: EditorMutation,
+  mutation: EditorMutation,
+): EditorHistory | null {
+  if (direction === 'undo') {
+    if (!sameMutationLineage(history.future[0], previous)) return null;
+    return { ...history, future: [mutation, ...history.future.slice(1)] };
+  }
+  const latestIndex = history.past.length - 1;
+  if (!sameMutationLineage(history.past[latestIndex], previous)) return null;
+  const past = history.past.slice();
+  past[latestIndex] = mutation;
+  return { ...history, past };
+}
+
+function reconcileHistoryProject(
+  project: StudioProject,
+  direction: 'undo' | 'redo',
+  previous: EditorMutation,
+  mutation: EditorMutation,
+): StudioProject | null {
+  if (previous.kind !== mutation.kind) return null;
+  if (mutation.kind === 'fields' || mutation.kind === 'timing') {
+    if (previous.kind === 'split' || previous.segmentId !== mutation.segmentId) return null;
+    const canonical = direction === 'undo' ? mutation.before : mutation.after;
+    if (!project.segments.some((segment) => segment.id === mutation.segmentId)) return null;
+    return replaceProjectSegment(project, mutation.segmentId, canonical);
+  }
+
+  if (previous.kind !== 'split'
+    || previous.originalBefore.id !== mutation.originalBefore.id
+    || previous.leftAfter.id !== mutation.leftAfter.id) return null;
+
+  if (direction === 'undo') {
+    const segments = project.segments
+      .filter((segment) => segment.id !== previous.rightAfter.id && segment.id !== mutation.rightAfter.id)
+      .map((segment) => segment.id === mutation.originalBefore.id ? mutation.originalBefore : segment);
+    if (!segments.some((segment) => segment.id === mutation.originalBefore.id)) return null;
+    return sortProjectSegments(project, segments);
+  }
+
+  if (!project.segments.some((segment) => segment.id === mutation.leftAfter.id)) return null;
+  const segments = project.segments
+    .filter((segment) => segment.id !== previous.rightAfter.id && segment.id !== mutation.rightAfter.id)
+    .map((segment) => segment.id === mutation.leftAfter.id ? mutation.leftAfter : segment);
+  return sortProjectSegments(project, [...segments, mutation.rightAfter]);
 }
 
 export function studioReducer(state: StudioState, action: StudioAction): StudioState {
@@ -324,6 +392,31 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedSegmentId: state.selectedSegmentId === action.previousRightId
           ? action.mutation.rightAfter.id
           : state.selectedSegmentId,
+      };
+    }
+    case 'reconcileHistoryMutation': {
+      const history = reconcileHistoryEntry(state.history, action.direction, action.previous, action.mutation);
+      if (!history) return state;
+      const project = reconcileHistoryProject(state.project, action.direction, action.previous, action.mutation);
+      if (!project) return state;
+      let preferredId: string;
+      if (action.mutation.kind === 'split') {
+        preferredId = action.direction === 'undo' ? action.mutation.originalBefore.id : action.mutation.leftAfter.id;
+      } else {
+        preferredId = action.mutation.segmentId;
+      }
+      const remappedSelection = action.direction === 'redo'
+        && action.previous.kind === 'split'
+        && action.mutation.kind === 'split'
+        && state.selectedSegmentId === action.previous.rightAfter.id
+        ? action.mutation.rightAfter.id
+        : state.selectedSegmentId;
+      const selectionState = { ...state, selectedSegmentId: remappedSelection };
+      return {
+        ...state,
+        project,
+        history,
+        selectedSegmentId: selectionAfterMutation(selectionState, project, preferredId),
       };
     }
     case 'applyUndoLocal': {
