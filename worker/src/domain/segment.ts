@@ -6,6 +6,13 @@ export type SegmentPatch = {
   endMs?: number;
 };
 
+export type PersistedAsrSegment = {
+  id: string;
+  startMs: number;
+  endMs: number;
+  sourceText: string;
+};
+
 export class SegmentInputError extends Error {
   readonly code = 'INVALID_SEGMENT_PATCH';
   constructor(message: string) {
@@ -45,4 +52,38 @@ export function normalizeSegmentPatch(input: unknown, current: { startMs: number
   const endMs = patch.endMs ?? current.endMs;
   if (endMs <= startMs) throw new SegmentInputError('endMs must be greater than startMs.');
   return patch;
+}
+
+export function normalizeAsrSegments(input: unknown): PersistedAsrSegment[] {
+  if (!Array.isArray(input)) throw new SegmentInputError('ASR segments must be an array.');
+  const seen = new Set<string>();
+  const normalized = input.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new SegmentInputError(`ASR segment ${index} must be an object.`);
+    }
+    const record = raw as Record<string, unknown>;
+    if (typeof record.id !== 'string' || record.id.trim().length === 0) {
+      throw new SegmentInputError(`ASR segment ${index} requires a non-empty id.`);
+    }
+    const id = record.id.trim();
+    if (seen.has(id)) throw new SegmentInputError(`Duplicate ASR segment id: ${id}.`);
+    seen.add(id);
+    if (!Number.isInteger(record.startMs) || (record.startMs as number) < 0) {
+      throw new SegmentInputError(`ASR segment ${id} startMs must be a non-negative integer.`);
+    }
+    if (!Number.isInteger(record.endMs) || (record.endMs as number) <= (record.startMs as number)) {
+      throw new SegmentInputError(`ASR segment ${id} endMs must be greater than startMs.`);
+    }
+    if (typeof record.sourceText !== 'string') {
+      throw new SegmentInputError(`ASR segment ${id} sourceText must be a string.`);
+    }
+    return {
+      id,
+      startMs: record.startMs as number,
+      endMs: record.endMs as number,
+      sourceText: record.sourceText,
+    };
+  });
+  normalized.sort((left, right) => left.startMs - right.startMs || left.id.localeCompare(right.id));
+  return normalized;
 }

@@ -31,3 +31,10 @@ test('production deploy targets the account that owns qs3d.site', () => {
   assert.equal(config.account_id, productionAccountId);
   assert.ok(deployWorkflow.includes('CLOUDFLARE_ACCOUNT_ID: ' + productionAccountId));
 });
+
+test('live dubbing runtime is declared without changing the production account', () => {
+  assert.equal(config.account_id, productionAccountId);
+  assert.ok(config.containers?.some((entry) => entry.class_name === 'FfmpegContainer'));
+  assert.ok(config.durable_objects?.bindings?.some((entry) => entry.name === 'FFMPEG_CONTAINER' && entry.class_name === 'FfmpegContainer'));
+  assert.ok(config.workflows?.some((entry) => entry.binding === 'DUBBING_WORKFLOW' && entry.class_name === 'DubbingWorkflow'));
+});

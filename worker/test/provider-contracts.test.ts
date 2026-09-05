@@ -38,18 +38,38 @@ const bucket = {
   },
 } satisfies R2BucketLike;
 
+const ffmpegContainer = {
+  getByName(_name: string) {
+    return {
+      async fetch(_request: Request) {
+        return Response.json({ ok: true });
+      },
+    };
+  },
+} satisfies Env['FFMPEG_CONTAINER'];
+
+const dubbingWorkflow = {
+  async create(_input: { id?: string; params?: unknown }) {
+    return { id: 'workflow-1' };
+  },
+} satisfies Env['DUBBING_WORKFLOW'];
+
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI and R2 bindings plus the Google secret', () => {
+  it('accepts portable AI, R2, Container and Workflow bindings plus the Google secret', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
       AI: ai,
       ASSETS: { fetch: async () => new Response('asset') },
+      FFMPEG_CONTAINER: ffmpegContainer,
+      DUBBING_WORKFLOW: dubbingWorkflow,
       GOOGLE_CLOUD_TRANSLATE_API_KEY: 'secret',
     } satisfies Env;
 
     expect(env.MEDIA).toBe(bucket);
     expect(env.AI).toBe(ai);
+    expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
+    expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.GOOGLE_CLOUD_TRANSLATE_API_KEY).toBe('secret');
   });
 });

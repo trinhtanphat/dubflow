@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env } from '../src/env';
 import type { CreateProjectInput } from '../src/domain/project';
 import { createProjectsRoutes } from '../src/routes/projects';
-import type { Project, ProjectStore } from '../src/db/projects';
+import type { Project, ProjectStatus, ProjectStore } from '../src/db/projects';
 
 class MemoryProjectStore implements ProjectStore {
   private projects: Project[] = [];
@@ -35,6 +35,13 @@ class MemoryProjectStore implements ProjectStore {
     project.sourceObjectKey = objectKey;
     project.sizeBytes = sizeBytes;
     project.status = 'ready';
+  }
+
+  async setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void> {
+    const project = this.projects.find((candidate) => candidate.id === id && candidate.userId === userId);
+    if (!project) return;
+    project.status = status;
+    if (durationMs !== undefined) project.durationMs = durationMs;
   }
 }
 

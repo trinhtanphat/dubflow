@@ -1,5 +1,10 @@
 import type { D1DatabaseLike } from './projects';
-import { normalizeSegmentPatch, type SegmentPatch } from '../domain/segment';
+import {
+  normalizeAsrSegments,
+  normalizeSegmentPatch,
+  type PersistedAsrSegment,
+  type SegmentPatch,
+} from '../domain/segment';
 
 export type Segment = {
   id: string;
@@ -34,6 +39,14 @@ export interface SegmentStore {
   get(projectId: string, segmentId: string, userId: string): Promise<Segment | null>;
   updateText(projectId: string, segmentId: string, userId: string, patch: SegmentPatch): Promise<Segment | null>;
   setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null>;
+  replaceFromAsr(projectId: string, userId: string, segments: PersistedAsrSegment[]): Promise<Segment[]>;
+}
+
+export class SegmentPersistenceError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = 'SegmentPersistenceError';
+  }
 }
 
 const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s.source_text, s.translated_text,
@@ -79,5 +92,30 @@ export class SegmentRepository implements SegmentStore {
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(translatedText, engine, segmentId, projectId, userId).run();
     return this.get(projectId, segmentId, userId);
+  }
+
+  async replaceFromAsr(projectId: string, userId: string, rawSegments: PersistedAsrSegment[]): Promise<Segment[]> {
+    const segments = normalizeAsrSegments(rawSegments);
+    const project = await this.db.prepare(
+      `SELECT id FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
+    ).bind(projectId, userId).first<{ id: string }>();
+    if (!project) {
+      throw new SegmentPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
+    }
+    if (!this.db.batch) {
+      throw new SegmentPersistenceError('D1_BATCH_UNAVAILABLE', 'Atomic D1 batch support is required for ASR replacement.');
+    }
+
+    const statements = [
+      this.db.prepare(`DELETE FROM segments WHERE project_id = ?`).bind(projectId),
+      ...segments.map((segment) => this.db.prepare(
+        `INSERT INTO segments (
+          id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
+          translation_engine, translation_status, voice_status, version
+        ) VALUES (?, ?, NULL, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', 1)`,
+      ).bind(segment.id, projectId, segment.startMs, segment.endMs, segment.sourceText)),
+    ];
+    await this.db.batch(statements);
+    return this.list(projectId, userId);
   }
 }
