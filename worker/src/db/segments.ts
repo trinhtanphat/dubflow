@@ -45,9 +45,24 @@ export interface SegmentStore {
   get(projectId: string, segmentId: string, userId: string): Promise<Segment | null>;
   updateText(projectId: string, segmentId: string, userId: string, expectedVersion: number, patch: SegmentPatch): Promise<Segment | null>;
   updateSegment(projectId: string, segmentId: string, userId: string, expectedVersion: number, patch: SegmentPatch): Promise<Segment | null>;
-  splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }>;
-  restoreSplit(projectId: string, segmentId: string, childSegmentId: string, userId: string, original: SegmentRestoreInput): Promise<Segment>;
-  setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null>;
+  splitSegment(projectId: string, segmentId: string, userId: string, expectedVersion: number, playheadMs: number): Promise<{ left: Segment; right: Segment }>;
+  restoreSplit(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    childSegmentId: string,
+    expectedChildVersion: number,
+    original: SegmentRestoreInput,
+  ): Promise<Segment>;
+  setTranslationResult(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    translatedText: string,
+    engine: 'workers-ai' | 'google',
+  ): Promise<Segment | null>;
   replaceFromAsr(projectId: string, userId: string, segments: PersistedAsrSegment[]): Promise<Segment[]>;
 }
 
@@ -67,6 +82,12 @@ type AuthorizedProject = { id: string; duration_ms: number | null };
 function affectedRows(result: D1RunResultLike): number {
   const changes = result.meta?.changes ?? result.changes ?? 0;
   return Number.isFinite(changes) ? Math.max(0, Number(changes)) : 0;
+}
+
+function requireExpectedVersion(expectedVersion: number): void {
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    throw new SegmentPersistenceError('INVALID_SEGMENT_VERSION', 'expectedVersion must be a positive integer.');
+  }
 }
 
 export class SegmentRepository implements SegmentStore {
@@ -124,9 +145,7 @@ export class SegmentRepository implements SegmentStore {
     expectedVersion: number,
     rawPatch: SegmentPatch,
   ): Promise<Segment | null> {
-    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
-      throw new SegmentPersistenceError('INVALID_SEGMENT_VERSION', 'expectedVersion must be a positive integer.');
-    }
+    requireExpectedVersion(expectedVersion);
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
     if (current.version !== expectedVersion) {
@@ -182,9 +201,19 @@ export class SegmentRepository implements SegmentStore {
     return this.updateSegment(projectId, segmentId, userId, expectedVersion, rawPatch);
   }
 
-  async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }> {
+  async splitSegment(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    playheadMs: number,
+  ): Promise<{ left: Segment; right: Segment }> {
+    requireExpectedVersion(expectedVersion);
     const current = await this.get(projectId, segmentId, userId);
     if (!current) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    if (current.version !== expectedVersion) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
     if (!Number.isInteger(playheadMs)
       || playheadMs - current.startMs < MIN_SEGMENT_MS
       || current.endMs - playheadMs < MIN_SEGMENT_MS) {
@@ -204,7 +233,7 @@ export class SegmentRepository implements SegmentStore {
       sourceText: source.left,
       translatedText: translated.left,
       voiceStatus: 'pending',
-      version: current.version + 1,
+      version: expectedVersion + 1,
     };
     const right: Segment = {
       ...current,
@@ -217,15 +246,21 @@ export class SegmentRepository implements SegmentStore {
       splitParentId: current.id,
     };
 
-    await this.db.batch([
+    const results = await this.db.batch([
       this.db.prepare(`UPDATE segments
         SET end_ms = ?, source_text = ?, translated_text = ?, voice_status = 'pending', version = version + 1
-        WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-        .bind(left.endMs, left.sourceText, left.translatedText, segmentId, projectId, userId),
+        WHERE id = ? AND project_id = ?
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
+        AND version = ?`)
+        .bind(left.endMs, left.sourceText, left.translatedText, segmentId, projectId, userId, expectedVersion),
       this.db.prepare(`INSERT INTO segments (
         id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
         translation_engine, translation_status, voice_status, version, split_parent_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?)`)
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?
+        WHERE EXISTS (
+          SELECT 1 FROM segments s JOIN projects p ON p.id = s.project_id
+          WHERE s.id = ? AND s.project_id = ? AND p.user_id = ? AND s.version = ?
+        )`)
         .bind(
           right.id,
           right.projectId,
@@ -237,21 +272,35 @@ export class SegmentRepository implements SegmentStore {
           right.translationEngine,
           right.translationStatus,
           current.id,
+          current.id,
+          projectId,
+          userId,
+          expectedVersion + 1,
         ),
-    ]);
+    ]) as D1RunResultLike[];
+    if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
     return { left, right };
   }
 
   async restoreSplit(
     projectId: string,
     segmentId: string,
-    childSegmentId: string,
     userId: string,
+    expectedVersion: number,
+    childSegmentId: string,
+    expectedChildVersion: number,
     rawOriginal: SegmentRestoreInput,
   ): Promise<Segment> {
+    requireExpectedVersion(expectedVersion);
+    requireExpectedVersion(expectedChildVersion);
     const current = await this.get(projectId, segmentId, userId);
     const child = await this.get(projectId, childSegmentId, userId);
     if (!current || !child) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found.');
+    if (current.version !== expectedVersion || child.version !== expectedChildVersion) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
     if (child.splitParentId !== segmentId) {
       throw new SegmentPersistenceError('SPLIT_LINEAGE_MISMATCH', 'Child segment does not belong to this split lineage.');
     }
@@ -265,17 +314,20 @@ export class SegmentRepository implements SegmentStore {
       ...current,
       ...original,
       voiceStatus: 'pending',
-      version: current.version + 1,
+      version: expectedVersion + 1,
     };
 
-    await this.db.batch([
-      this.db.prepare(`DELETE FROM segments
-        WHERE id = ? AND project_id = ? AND split_parent_id = ?
-        AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-        .bind(childSegmentId, projectId, segmentId, userId),
+    const results = await this.db.batch([
       this.db.prepare(`UPDATE segments
         SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = 'pending', version = version + 1
-        WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+        WHERE id = ? AND project_id = ?
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
+        AND version = ?
+        AND EXISTS (
+          SELECT 1 FROM segments child
+          WHERE child.id = ? AND child.project_id = project_id
+          AND child.split_parent_id = id AND child.version = ?
+        )`)
         .bind(
           restored.sourceText,
           restored.translatedText,
@@ -285,24 +337,61 @@ export class SegmentRepository implements SegmentStore {
           segmentId,
           projectId,
           userId,
+          expectedVersion,
+          childSegmentId,
+          expectedChildVersion,
         ),
-    ]);
+      this.db.prepare(`DELETE FROM segments
+        WHERE id = ? AND project_id = ? AND split_parent_id = ? AND version = ?
+        AND EXISTS (
+          SELECT 1 FROM segments parent JOIN projects p ON p.id = parent.project_id
+          WHERE parent.id = ? AND parent.project_id = ? AND p.user_id = ? AND parent.version = ?
+        )`)
+        .bind(
+          childSegmentId,
+          projectId,
+          segmentId,
+          expectedChildVersion,
+          segmentId,
+          projectId,
+          userId,
+          expectedVersion + 1,
+        ),
+    ]) as D1RunResultLike[];
+    if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
     return restored;
   }
 
-  async setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null> {
+  async setTranslationResult(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersion: number,
+    translatedText: string,
+    engine: 'workers-ai' | 'google',
+  ): Promise<Segment | null> {
+    requireExpectedVersion(expectedVersion);
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
-    await this.db.prepare(`UPDATE segments SET translated_text = ?, translation_engine = ?, translation_status = 'completed', version = version + 1
-      WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
-      .bind(translatedText, engine, segmentId, projectId, userId).run();
-    return {
-      ...current,
-      translatedText,
-      translationEngine: engine,
-      translationStatus: 'completed',
-      version: current.version + 1,
-    };
+    if (current.version !== expectedVersion) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
+    const result = await this.db.prepare(`UPDATE segments
+      SET translated_text = ?, translation_engine = ?, translation_status = 'completed', version = version + 1
+      WHERE id = ? AND project_id = ?
+      AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
+      AND version = ?`)
+      .bind(translatedText, engine, segmentId, projectId, userId, expectedVersion).run();
+    if (affectedRows(result) === 0) {
+      const canonical = await this.get(projectId, segmentId, userId);
+      if (!canonical) return null;
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
+    const canonical = await this.get(projectId, segmentId, userId);
+    if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after translation update.');
+    return canonical;
   }
 
   async replaceFromAsr(projectId: string, userId: string, rawSegments: PersistedAsrSegment[]): Promise<Segment[]> {
