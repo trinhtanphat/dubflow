@@ -1,5 +1,5 @@
 import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
-import type { ProjectStore } from '../db/projects';
+import type { Project, ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
 import type { R2BucketLike } from '../cloudflare/r2';
@@ -15,7 +15,11 @@ export interface WorkflowStepLike {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
 }
 
-type PipelineProjects = Pick<ProjectStore, 'getByIdForUser' | 'setStatus'>;
+type PipelineProject = Pick<Project, 'id' | 'sourceObjectKey' | 'sourceLanguage'>;
+type PipelineProjects = {
+  getByIdForUser(projectId: string, userId: string): Promise<PipelineProject | null>;
+  setStatus(projectId: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
+};
 type PipelineJobs = JobStatusReader & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
 
