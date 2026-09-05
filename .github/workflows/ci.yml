@@ -38,7 +38,15 @@ jobs:
       - name: Wrangler dry-run
         run: npx wrangler deploy --dry-run
 
-      - name: Capture 1448x1086 reference screenshot
+      - name: Install CJK screenshot font
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+          fc-cache -f
+
+      - name: Capture reference screenshots
         shell: bash
         run: |
           set -euo pipefail
@@ -68,12 +76,23 @@ jobs:
             --window-size=1448,1086 \
             --screenshot="$RUNNER_TEMP/yupvox-v2-2-reference.png" \
             http://127.0.0.1:5173/
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=1364,767 \
+            --screenshot="$RUNNER_TEMP/yupvox-1364x767-reference.png" \
+            http://127.0.0.1:5173/
           test -s "$RUNNER_TEMP/yupvox-v2-2-reference.png"
+          test -s "$RUNNER_TEMP/yupvox-1364x767-reference.png"
 
       - name: Upload reference screenshot
         uses: actions/upload-artifact@v4
         with:
           name: yupvox-reference-${{ github.sha }}
-          path: ${{ runner.temp }}/yupvox-v2-2-reference.png
+          path: |
+            ${{ runner.temp }}/yupvox-v2-2-reference.png
+            ${{ runner.temp }}/yupvox-1364x767-reference.png
           if-no-files-found: error
           retention-days: 14
