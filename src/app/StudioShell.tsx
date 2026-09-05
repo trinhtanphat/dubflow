@@ -10,7 +10,7 @@ import {
   persistRedo,
   persistUndo,
 } from '../features/timeline/segmentMutationService';
-import type { CloudJob } from '../features/projects/jobApi';
+import { startExport, type CloudJob } from '../features/projects/jobApi';
 import type { SegmentPatch } from '../features/transcript/segmentApi';
 import type { TranslationMode } from '../features/translation/translationApi';
 import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
@@ -51,6 +51,10 @@ const defaultStudioEditorServices: StudioEditorServices = {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
+}
+
+export function isStudioMutationLocked(editorBusy: boolean, hasActiveJob: boolean): boolean {
+  return editorBusy || hasActiveJob;
 }
 
 export function createStudioEditorActions({
@@ -177,6 +181,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorError, setEditorError] = useState('');
 
   const cloudEditable = state.project.id !== 'demo';
+  const mutationLocked = isStudioMutationLocked(editorBusy, Boolean(activeJob));
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -195,6 +200,27 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       errorMessage: null,
     });
     setActiveJob({ projectId: project.id, jobId: job.jobId });
+  };
+
+  const startFinalExport = async () => {
+    if (!cloudEditable || mutationLocked) return;
+    setCloudError('');
+    try {
+      const job = await startExport(state.project.id);
+      setCloudJob({
+        id: job.jobId,
+        projectId: state.project.id,
+        type: 'export',
+        status: 'queued',
+        progress: 0,
+        currentStep: 'queued',
+        errorCode: null,
+        errorMessage: null,
+      });
+      setActiveJob({ projectId: state.project.id, jobId: job.jobId });
+    } catch (error) {
+      setCloudError(error instanceof Error ? error.message : 'Không thể bắt đầu xuất bản Dubbing.');
+    }
   };
 
   useEffect(() => {
@@ -239,7 +265,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     state,
     dispatch,
     cloudEditable,
-    busy: editorBusy,
+    busy: mutationLocked,
     setBusy: setEditorBusy,
     setError: setEditorError,
     restoreCloudProject,
@@ -248,7 +274,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   useEffect(() => {
     const handleEditorHistoryShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'z') return;
-      if (isNativeTextUndoTarget(event.target) || editorBusy) return;
+      if (isNativeTextUndoTarget(event.target) || mutationLocked) return;
       if (event.shiftKey) {
         if (state.history.future.length === 0 || !cloudEditable) return;
         event.preventDefault();
@@ -261,10 +287,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     };
     window.addEventListener('keydown', handleEditorHistoryShortcut);
     return () => window.removeEventListener('keydown', handleEditorHistoryShortcut);
-  }, [cloudEditable, editorBusy, editorActions, state.history.future.length, state.history.past.length]);
+  }, [cloudEditable, mutationLocked, editorActions, state.history.future.length, state.history.past.length]);
 
   const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
-    if (!cloudEditable) return;
+    if (!cloudEditable || mutationLocked) return;
     setEditorError('');
     try {
       const updated = await persistEditorPatch(state.project.id, segmentId, patch);
@@ -277,6 +303,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       if (patch.speakerId !== undefined && updated.speakerId && state.project.speakers.some((speaker) => speaker.id === updated.speakerId)) {
         dispatch({ type: 'assignSpeaker', segmentId, speakerId: updated.speakerId });
       }
+      if (patch.translatedText !== undefined || patch.speakerId !== undefined) await restoreCloudProject();
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
       await restoreCloudProject();
@@ -284,7 +311,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const retranslate = async (segmentId: string) => {
-    if (!cloudEditable || editorBusy) return;
+    if (!cloudEditable || mutationLocked) return;
     setEditorBusy(true);
     setEditorError('');
     setTranslationComparison(null);
@@ -294,6 +321,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         setTranslationComparison({ workersAI: result.workersAI, google: result.google });
       } else {
         dispatch({ type: 'editTranslation', segmentId, text: result.segment.translatedText });
+        await restoreCloudProject();
       }
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Dịch lại thất bại.');
@@ -303,13 +331,14 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   };
 
   const applyTranslation = async (text: string) => {
-    if (!selectedSegment || !cloudEditable || editorBusy) return;
+    if (!selectedSegment || !cloudEditable || mutationLocked) return;
     setEditorBusy(true);
     setEditorError('');
     try {
       const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
       dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
       setTranslationComparison(null);
+      await restoreCloudProject();
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
       await restoreCloudProject();
@@ -321,8 +350,16 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
   const cloudDetail = cloudError || cloudJob?.currentStep || (cloudJob ? cloudJob.status : undefined);
   const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
-  const canUndo = cloudEditable && !editorBusy && state.history.past.length > 0;
-  const canRedo = cloudEditable && !editorBusy && state.history.future.length > 0;
+  const canUndo = cloudEditable && !mutationLocked && state.history.past.length > 0;
+  const canRedo = cloudEditable && !mutationLocked && state.history.future.length > 0;
+  const exportBusy = Boolean(activeJob && cloudJob?.type === 'export');
+  const canExport = cloudEditable
+    && !mutationLocked
+    && !state.project.exportObjectKey
+    && (state.project.status === 'needs_review' || state.project.status === 'completed');
+  const exportHref = state.project.exportObjectKey
+    ? `/api/projects/${encodeURIComponent(state.project.id)}/export/media`
+    : undefined;
 
   return (
     <div className={`app-shell studio-pro-shell reference-fidelity mobile-panel--${mobilePanel}`}>
@@ -334,6 +371,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         cloudDetail={cloudDetail}
         canUndo={canUndo}
         canRedo={canRedo}
+        canExport={canExport}
+        exportBusy={exportBusy}
+        exportHref={exportHref}
+        onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
         onOpenCommands={() => {}}
@@ -381,7 +422,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           onRetranslate={retranslate}
           comparison={translationComparison}
           onApplyTranslation={applyTranslation}
-          busy={editorBusy}
+          busy={mutationLocked}
           error={editorError}
         />
       </main>

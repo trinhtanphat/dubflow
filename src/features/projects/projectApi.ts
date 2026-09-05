@@ -10,6 +10,7 @@ export type CloudProject = {
   targetLanguage: 'vi';
   status: CloudProjectStatus;
   sourceObjectKey?: string | null;
+  exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
 };

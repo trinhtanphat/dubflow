@@ -23,6 +23,10 @@ export function startProcessing(projectId: string) {
   return apiFetch<StartProcessingResult>(`/api/projects/${encodeURIComponent(projectId)}/process`, { method: 'POST' });
 }
 
+export function startExport(projectId: string) {
+  return apiFetch<StartProcessingResult>(`/api/projects/${encodeURIComponent(projectId)}/export`, { method: 'POST' });
+}
+
 export function getJob(projectId: string, jobId: string) {
   return apiFetch<CloudJob>(`/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}`);
 }

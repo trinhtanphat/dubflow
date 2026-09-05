@@ -13,11 +13,12 @@ type SegmentRow = {
   translation_engine: string;
   translation_status: string;
   voice_status: string;
+  dubbed_object_key?: string | null;
   version: number;
   split_parent_id: string | null;
 };
 
-type ProjectRow = { id: string; user_id: string; duration_ms: number };
+type ProjectRow = { id: string; user_id: string; duration_ms: number; status: string };
 
 class Statement implements D1StatementLike {
   values: unknown[] = [];
@@ -65,17 +66,17 @@ class Statement implements D1StatementLike {
 }
 
 class RecordingDb implements D1DatabaseLike {
-  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000 }];
+  projects: ProjectRow[] = [{ id: 'project-1', user_id: 'dev-user', duration_ms: 10_000, status: 'needs_review' }];
   rows: SegmentRow[] = [
     {
       id: 's1', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 1_000, end_ms: 3_000,
       source_text: 'hello beautiful world', translated_text: 'xin chao the gioi', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', version: 3, split_parent_id: null,
+      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s1.mp3', version: 3, split_parent_id: null,
     },
     {
       id: 's2', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 4_000, end_ms: 5_000,
       source_text: 'next', translated_text: 'tiep', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', version: 1, split_parent_id: null,
+      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s2.mp3', version: 1, split_parent_id: null,
     },
   ];
   runs: Statement[] = [];
@@ -91,58 +92,81 @@ class RecordingDb implements D1DatabaseLike {
   }
 }
 
+function expectExportInvalidation(statement: Statement) {
+  expect(statement.sql).toMatch(/UPDATE projects/i);
+  expect(statement.sql).toMatch(/export_object_key\s*=\s*NULL/i);
+  expect(statement.sql).toMatch(/status\s*=\s*'needs_review'/i);
+}
+
 describe('SegmentRepository durable timing mutations', () => {
-  it('accepts a legal timing edit and invalidates voice state', async () => {
+  it('accepts a legal timing edit and invalidates voice state and any published export', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    const updated = await (repository as any).updateSegment('project-1', 's1', 'dev-user', {
+    const updated = await repository.updateSegment('project-1', 's1', 'dev-user', {
       startMs: 1_200,
       endMs: 3_200,
     });
 
-    expect(updated).toMatchObject({ id: 's1', startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', version: 4 });
-    expect(db.runs).toHaveLength(1);
+    expect(updated).toMatchObject({
+      id: 's1', startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+    });
+    expect(db.runs).toHaveLength(2);
+    expectExportInvalidation(db.runs[1]);
   });
 
   it('rejects overlap against current project state without writing', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    await expect((repository as any).updateSegment('project-1', 's1', 'dev-user', {
+    await expect(repository.updateSegment('project-1', 's1', 'dev-user', {
       startMs: 2_500,
       endMs: 4_500,
     })).rejects.toMatchObject({ code: 'SEGMENT_OVERLAP' });
     expect(db.runs).toHaveLength(0);
   });
 
-  it('atomically splits using a Worker-generated child id and pending voice state', async () => {
+  it('rejects user mutations while a processing/export workflow owns the project', async () => {
+    const db = new RecordingDb();
+    db.projects[0].status = 'processing';
+    const repository = new SegmentRepository(db);
+
+    await expect(repository.updateSegment('project-1', 's1', 'dev-user', { translatedText: 'locked' }))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    await expect(repository.splitSegment('project-1', 's1', 'dev-user', 2_000))
+      .rejects.toMatchObject({ code: 'PROJECT_BUSY' });
+    expect(db.runs).toHaveLength(0);
+    expect(db.batches).toHaveLength(0);
+  });
+
+  it('atomically splits using a Worker-generated child id and invalidates the published export', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    const result = await (repository as any).splitSegment('project-1', 's1', 'dev-user', 2_000);
+    const result = await repository.splitSegment('project-1', 's1', 'dev-user', 2_000);
 
-    expect(result.left).toMatchObject({ id: 's1', startMs: 1_000, endMs: 2_000, voiceStatus: 'pending' });
+    expect(result.left).toMatchObject({ id: 's1', startMs: 1_000, endMs: 2_000, voiceStatus: 'pending', dubbedObjectKey: null });
     expect(result.right.id).toEqual(expect.any(String));
     expect(result.right.id).not.toBe('s1');
-    expect(result.right).toMatchObject({ projectId: 'project-1', startMs: 2_000, endMs: 3_000, voiceStatus: 'pending' });
+    expect(result.right).toMatchObject({ projectId: 'project-1', startMs: 2_000, endMs: 3_000, voiceStatus: 'pending', dubbedObjectKey: null });
     expect(result.right.splitParentId).toBe('s1');
     expect(result.left.sourceText).toBe('hello beautiful');
     expect(result.right.sourceText).toBe('world');
     expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]).toHaveLength(2);
+    expect(db.batches[0]).toHaveLength(3);
+    expectExportInvalidation(db.batches[0][2]);
   });
 
   it('rejects an invalid split point without batching any write', async () => {
     const db = new RecordingDb();
     const repository = new SegmentRepository(db);
 
-    await expect((repository as any).splitSegment('project-1', 's1', 'dev-user', 1_050))
+    await expect(repository.splitSegment('project-1', 's1', 'dev-user', 1_050))
       .rejects.toMatchObject({ code: 'INVALID_SPLIT_POINT' });
     expect(db.batches).toHaveLength(0);
   });
 
-  it('restores only a child that belongs to the original split lineage', async () => {
+  it('restores only a child that belongs to the original split lineage and invalidates the export', async () => {
     const db = new RecordingDb();
     db.rows.push({
       ...db.rows[0],
@@ -155,7 +179,7 @@ describe('SegmentRepository durable timing mutations', () => {
     });
     const repository = new SegmentRepository(db);
 
-    const restored = await (repository as any).restoreSplit('project-1', 's1', 'child-1', 'dev-user', {
+    const restored = await repository.restoreSplit('project-1', 's1', 'child-1', 'dev-user', {
       startMs: 1_000,
       endMs: 3_000,
       sourceText: 'hello beautiful world',
@@ -163,9 +187,10 @@ describe('SegmentRepository durable timing mutations', () => {
       speakerId: 'speaker-1',
     });
 
-    expect(restored).toMatchObject({ id: 's1', startMs: 1_000, endMs: 3_000, voiceStatus: 'pending' });
+    expect(restored).toMatchObject({ id: 's1', startMs: 1_000, endMs: 3_000, voiceStatus: 'pending', dubbedObjectKey: null });
     expect(db.batches).toHaveLength(1);
-    expect(db.batches[0]).toHaveLength(2);
+    expect(db.batches[0]).toHaveLength(3);
+    expectExportInvalidation(db.batches[0][2]);
   });
 
   it('fails closed for unrelated lineage and non-owner access', async () => {
@@ -175,11 +200,11 @@ describe('SegmentRepository durable timing mutations', () => {
     });
     const repository = new SegmentRepository(db);
 
-    await expect((repository as any).restoreSplit('project-1', 's1', 'child-other', 'dev-user', {
+    await expect(repository.restoreSplit('project-1', 's1', 'child-other', 'dev-user', {
       startMs: 1_000, endMs: 3_000, sourceText: 'x', translatedText: 'y', speakerId: 'speaker-1',
     })).rejects.toMatchObject({ code: 'SPLIT_LINEAGE_MISMATCH' });
 
-    await expect((repository as any).splitSegment('project-1', 's1', 'other-user', 2_000))
+    await expect(repository.splitSegment('project-1', 's1', 'other-user', 2_000))
       .rejects.toMatchObject({ code: 'SEGMENT_NOT_FOUND' });
     expect(db.batches).toHaveLength(0);
   });

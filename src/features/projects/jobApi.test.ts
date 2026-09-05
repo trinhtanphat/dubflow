@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getJob, startProcessing } from './jobApi';
+import { getJob, startExport, startProcessing } from './jobApi';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -14,6 +14,18 @@ describe('dubbing job API', () => {
     await expect(startProcessing('project / 1')).resolves.toEqual({ jobId: 'job-1', workflowId: 'workflow-1', status: 'queued' });
     expect(calls).toHaveLength(1);
     expect(calls[0].input).toBe('/api/projects/project%20%2F%201/process');
+    expect(calls[0].init?.method).toBe('POST');
+  });
+
+  it('starts final export through the project-scoped export endpoint', async () => {
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ input, init });
+      return Response.json({ jobId: 'job-export', workflowId: 'workflow-export', status: 'queued' });
+    });
+
+    await expect(startExport('project / 1')).resolves.toEqual({ jobId: 'job-export', workflowId: 'workflow-export', status: 'queued' });
+    expect(calls[0].input).toBe('/api/projects/project%20%2F%201/export');
     expect(calls[0].init?.method).toBe('POST');
   });
 
