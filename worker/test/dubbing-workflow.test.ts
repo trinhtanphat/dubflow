@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import type { UsageRecordInput } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
+const noUsage = { async record(input: UsageRecordInput) { return input as never; } };
+
 describe('dubbing workflow pipeline', () => {
-  it('runs media -> diarized bounded chunk ASR -> persist -> translate in order', async () => {
+  it('runs media -> diarized bounded chunk ASR -> persist -> translate in order and meters real provider work', async () => {
     const calls: string[] = [];
+    const usageEvents: UsageRecordInput[] = [];
     const project = {
       id: 'project-1', userId: 'dev-user', title: 'Episode', sourceLanguage: 'zh' as const,
       targetLanguage: 'vi' as const, status: 'ready' as const, sourceObjectKey: 'projects/project-1/source/movie.mp4',
@@ -13,8 +17,8 @@ describe('dubbing workflow pipeline', () => {
       { id: 'seg-b', projectId: 'project-1', speakerId: 'spk-b', startMs: 300000, endMs: 301000, sourceText: '再见', translatedText: '', translationEngine: 'workers-ai', translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null },
     ];
     const jobs = {
-      async getForProject() { return { status: 'running' as const }; },
-      async setProgress(_id: string, _progress: number, step: string) { calls.push(`job:${step}`); },
+      async getForProject() { return { status: 'running' as const, retryCount: 0 }; },
+      async setProgress(_id: string, _progress: number, stepName: string) { calls.push(`job:${stepName}`); },
       async fail() { calls.push('job:failed'); },
       async complete(_id: string, status?: string) { calls.push(`job:${status ?? 'completed'}`); },
     };
@@ -62,11 +66,17 @@ describe('dubbing workflow pipeline', () => {
         return items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' }));
       },
     };
+    const usage = { async record(input: UsageRecordInput) { usageEvents.push(input); return input as never; } };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
+    const deps = {
+      projects, jobs, media, bucket, asr, segments, translation, usage,
+      asrProviderId: 'deepgram-nova-3',
+      translationProviderId: 'workers-ai',
+    };
 
     await runDubbingPipeline(
       { projectId: 'project-1', userId: 'dev-user', jobId: 'job-1' },
-      { projects, jobs, media, bucket, asr, segments, translation },
+      deps,
       step,
     );
 
@@ -81,6 +91,48 @@ describe('dubbing workflow pipeline', () => {
     expect(persistedAsrInput[0].speakerId).not.toBe(persistedAsrInput[1].speakerId);
     expect(calls).toContain('project:needs_review');
     expect(calls).toContain('job:needs_review');
+
+    expect(usageEvents).toEqual([
+      expect.objectContaining({ kind: 'asr_audio_second', units: 300, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 300, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 60, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 60, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'translation_character', units: 4, provider: 'workers-ai', phase: 'started', operationKey: 'job:job-1:retry:0:translation:batch-0:workers-ai' }),
+      expect.objectContaining({ kind: 'translation_character', units: 4, provider: 'workers-ai', phase: 'completed', operationKey: 'job:job-1:retry:0:translation:batch-0:workers-ai' }),
+    ]);
+  });
+
+  it('uses the durable retry generation in usage operation keys', async () => {
+    async function asrKey(retryCount: number) {
+      const events: UsageRecordInput[] = [];
+      const deps = {
+        projects: {
+          async getByIdForUser() { return { id: 'p', sourceObjectKey: 'projects/p/source/x.mp4', sourceLanguage: 'zh' as const }; },
+          async setStatus() {},
+        },
+        jobs: {
+          async getForProject() { return { status: 'running' as const, retryCount }; },
+          async setProgress() {}, async fail() {}, async complete() {},
+        },
+        media: {
+          async probe() { return { durationMs: 60000 }; },
+          async extractAudioChunks() { return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 60000 }]; },
+        },
+        bucket: { async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; } },
+        asr: { async transcribe() { return { text: '', segments: [] }; } },
+        segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+        translation: { async translateBatch() { return []; } },
+        usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
+        asrProviderId: 'workers-ai-whisper-large-v3-turbo',
+        translationProviderId: 'workers-ai',
+      };
+      const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
+      await runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step);
+      return events.find((event) => event.kind === 'asr_audio_second' && event.phase === 'started')?.operationKey;
+    }
+
+    expect(await asrKey(0)).toBe('job:j:retry:0:asr:projects/p/audio/000.wav:workers-ai-whisper-large-v3-turbo');
+    expect(await asrKey(1)).toBe('job:j:retry:1:asr:projects/p/audio/000.wav:workers-ai-whisper-large-v3-turbo');
   });
 
   it('persists a stable ASR failure before rethrowing', async () => {
@@ -92,7 +144,7 @@ describe('dubbing workflow pipeline', () => {
         async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
       },
       jobs: {
-        async getForProject() { return { status: 'running' as const }; },
+        async getForProject() { return { status: 'running' as const, retryCount: 0 }; },
         async setProgress() {},
         async fail(_id: string, code: string) { calls.push(`job:${code}`); },
         async complete() {},
@@ -107,6 +159,9 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { throw new Error('provider down'); } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noUsage,
+      asrProviderId: 'deepgram-nova-3',
+      translationProviderId: 'workers-ai',
     };
 
     await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step)).rejects.toThrow('provider down');
@@ -125,7 +180,7 @@ describe('dubbing workflow pipeline', () => {
       jobs: {
         async getForProject() {
           checks += 1;
-          return { status: checks >= 3 ? 'cancelled' as const : 'running' as const };
+          return { status: checks >= 3 ? 'cancelled' as const : 'running' as const, retryCount: 0 };
         },
         async setProgress() {},
         async fail() { calls.push('job:failed'); },
@@ -142,6 +197,9 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
+      usage: noUsage,
+      asrProviderId: 'workers-ai-whisper-large-v3-turbo',
+      translationProviderId: 'workers-ai',
     };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 

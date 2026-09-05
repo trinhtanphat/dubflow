@@ -40,6 +40,16 @@ The deploy workflow supports optional `GOOGLE_CLOUD_TRANSLATE_API_KEY`, `DEEPGRA
 
 Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow, including source-level per-speaker voice routing. This is still distinct from production-runtime qualification: the repository must not claim a deployed export PASS until a real fixture produces and returns the final artifact. Voice cloning and visual lip-sync rendering remain capability-gated and unqualified.
 
+## Phase 3B usage qualification
+
+Phase 3B source/CI qualification adds a durable, idempotent internal usage ledger for ASR, translation, generated TTS audio, and final render. Canonical persisted/API units are seconds for ASR/TTS/render and Unicode source characters for translation. Usage operation identity includes durable job retry generation and provider, and `(operation_key, phase)` prevents automatic Workflow replay from duplicating the same logical started/completed event.
+
+Authorized summaries are exposed through `GET /api/usage` and `GET /api/projects/:id/usage`. Project usage remains ownership-scoped and cross-user/missing project access is hidden behind a 404. The dashboard shows informational account usage and provider breakdown while keeping usage loading/errors isolated from project/job loading.
+
+`users.credit_balance` remains informational/read-only, and Phase 3B does not decrement, reserve, price, enforce, or sell credits. `cost_basis` remains zero. There is no payment UI, upgrade CTA, quota enforcement, provider price table, rate-limit policy, observability policy, or public sharing control in this phase.
+
+A GREEN Phase 3B acceptance gate qualifies repository source behavior only. It does **not** change the production-runtime status below: the Cloudflare Container credential and real provider/media fixture gates must still pass before runtime can be called qualified.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
