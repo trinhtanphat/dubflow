@@ -1,0 +1,86 @@
+.video-stage__surface {
+  position: relative;
+  display: grid;
+  min-height: 320px;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  background: #030407;
+}
+
+.studio-video {
+  width: 100%;
+  height: 100%;
+  max-height: 68vh;
+  display: block;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-empty-state,
+.video-processing-state {
+  width: min(520px, 78%);
+  min-height: 180px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 32px;
+  border: 1px dashed var(--yv-border-strong);
+  border-radius: var(--yv-radius-lg);
+  color: var(--yv-text-muted);
+  text-align: center;
+  background: radial-gradient(circle at 50% 20%, rgba(150, 85, 255, .12), transparent 58%), rgba(255,255,255,.012);
+}
+
+.video-empty-state strong,
+.video-processing-state strong {
+  color: var(--yv-text);
+  font-size: 15px;
+}
+
+.video-processing-state::before {
+  content: '';
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(150, 85, 255, .25);
+  border-top-color: var(--yv-accent);
+  border-radius: 50%;
+  animation: yupvox-player-spin .9s linear infinite;
+}
+
+.video-stage__surface .subtitle-overlay {
+  pointer-events: none;
+}
+
+.player-rate-button {
+  min-width: 46px;
+  min-height: 30px;
+  border: 1px solid var(--yv-border);
+  border-radius: 8px;
+  color: var(--yv-text-muted);
+  background: rgba(255,255,255,.02);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.player-rate-button:not(:disabled):hover {
+  color: var(--yv-text);
+  border-color: var(--yv-border-strong);
+  background: rgba(255,255,255,.05);
+}
+
+.player-rate-button:disabled { opacity: .45; cursor: not-allowed; }
+
+@keyframes yupvox-player-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 899px) {
+  .video-stage__surface { min-height: 220px; }
+  .transport-controls .ui-icon-button:first-child,
+  .transport-controls .ui-icon-button:last-child { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-processing-state::before { animation: none; }
+}

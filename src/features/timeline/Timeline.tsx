@@ -1,6 +1,14 @@
-import type { Dispatch } from 'react';
-import type { StudioAction } from '../../app/studioState';
-import { timeToPercent } from './math';
+import { useEffect, useMemo, useRef } from 'react';
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from 'react';
+import type { StudioAction, StudioState } from '../../app/studioState';
+import {
+  chooseRulerIntervalSeconds,
+  fitPixelsPerSecond,
+  pixelsToTime,
+  pointerXToTime,
+  projectWidthPx,
+  timeToPixels,
+} from './math';
 import { TimelineTrack } from './TimelineTrack';
 import { WaveformTrack } from './WaveformTrack';
 import type { StudioProject } from './types';
@@ -9,30 +17,211 @@ type TimelineProps = {
   project: StudioProject;
   playheadMs: number;
   selectedSegmentId: string;
+  timelineView: StudioState['timelineView'];
   dispatch: Dispatch<StudioAction>;
 };
 
-export function Timeline({ project, playheadMs, selectedSegmentId, dispatch }: TimelineProps) {
-  const playhead = timeToPercent(playheadMs, project.durationMs);
-  const playheadOffset = 132 * (1 - playhead / 100);
-  const marks = [0, 10, 20, 30, 40, 45];
+type RulerMark = { timeMs: number; label: string };
+
+function formatRulerLabel(timeMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(timeMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function buildVisibleRulerMarks(
+  durationMs: number,
+  pixelsPerSecond: number,
+  scrollLeft: number,
+  viewportWidth: number,
+): RulerMark[] {
+  const stepMs = chooseRulerIntervalSeconds(pixelsPerSecond) * 1000;
+  const safeViewportWidth = Math.max(1, viewportWidth || 1000);
+  const visibleStartMs = pixelsToTime(scrollLeft, pixelsPerSecond);
+  const visibleEndMs = Math.min(durationMs, pixelsToTime(scrollLeft + safeViewportWidth, pixelsPerSecond));
+  const firstMarkMs = Math.max(0, Math.floor(visibleStartMs / stepMs) * stepMs);
+  const marks: RulerMark[] = [];
+  const maxMarks = Math.ceil(safeViewportWidth / 80) + 3;
+
+  for (let timeMs = firstMarkMs; timeMs <= visibleEndMs + stepMs && marks.length < maxMarks; timeMs += stepMs) {
+    if (timeMs <= durationMs) marks.push({ timeMs, label: formatRulerLabel(timeMs) });
+  }
+
+  return marks;
+}
+
+export function Timeline({ project, playheadMs, selectedSegmentId, timelineView, dispatch }: TimelineProps) {
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const activePlayheadPointerId = useRef<number | null>(null);
+  const pixelsPerSecond = timelineView.pixelsPerSecond;
+  const canvasWidth = Math.max(projectWidthPx(project.durationMs, pixelsPerSecond), timelineView.viewportWidth || 1);
+  const playheadLeft = timeToPixels(playheadMs, pixelsPerSecond);
+  const marks = useMemo(
+    () => buildVisibleRulerMarks(
+      project.durationMs,
+      pixelsPerSecond,
+      timelineView.scrollLeft,
+      timelineView.viewportWidth,
+    ),
+    [project.durationMs, pixelsPerSecond, timelineView.scrollLeft, timelineView.viewportWidth],
+  );
   const select = (segmentId: string) => dispatch({ type: 'selectSegment', segmentId });
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const reportViewport = () => dispatch({ type: 'setTimelineViewport', viewportWidth: viewport.clientWidth });
+    reportViewport();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(reportViewport);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [dispatch]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || Math.abs(viewport.scrollLeft - timelineView.scrollLeft) < 1) return;
+    viewport.scrollLeft = timelineView.scrollLeft;
+  }, [timelineView.scrollLeft]);
+
+  const seekFromPointer = (event: ReactPointerEvent<HTMLElement>) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const targetMs = pointerXToTime(
+      event.clientX,
+      viewport.getBoundingClientRect().left,
+      viewport.scrollLeft,
+      pixelsPerSecond,
+    );
+    dispatch({ type: 'setPlayhead', playheadMs: Math.max(0, Math.min(project.durationMs, targetMs)) });
+  };
+
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest('button, input, textarea, select, [data-timeline-interactive="true"]')) return;
+    seekFromPointer(event);
+  };
+
+  const handlePlayheadPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    activePlayheadPointerId.current = event.pointerId;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    seekFromPointer(event);
+  };
+
+  const handlePlayheadPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (activePlayheadPointerId.current !== event.pointerId) return;
+    event.stopPropagation();
+    seekFromPointer(event);
+  };
+
+  const finishPlayheadDrag = (event: ReactPointerEvent<HTMLButtonElement>, applyFinalPosition: boolean) => {
+    if (activePlayheadPointerId.current !== event.pointerId) return;
+    event.stopPropagation();
+    if (applyFinalPosition) seekFromPointer(event);
+    activePlayheadPointerId.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  };
+
+  const handlePlayheadKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Escape' || activePlayheadPointerId.current === null) return;
+    const pointerId = activePlayheadPointerId.current;
+    activePlayheadPointerId.current = null;
+    if (event.currentTarget.hasPointerCapture?.(pointerId)) {
+      event.currentTarget.releasePointerCapture?.(pointerId);
+    }
+  };
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    dispatch({ type: 'setTimelineScroll', scrollLeft: event.currentTarget.scrollLeft });
+  };
+
+  const fitProject = () => {
+    const viewportWidth = viewportRef.current?.clientWidth ?? timelineView.viewportWidth;
+    dispatch({
+      type: 'setTimelineZoom',
+      pixelsPerSecond: fitPixelsPerSecond(project.durationMs, viewportWidth),
+    });
+    dispatch({ type: 'setTimelineScroll', scrollLeft: 0 });
+    if (viewportRef.current) viewportRef.current.scrollLeft = 0;
+  };
+
   return (
     <section className="timeline-panel" aria-label="Timeline">
-      <div className="timeline-title"><strong>Timeline</strong><span>00:00</span><span>45:23</span></div>
-      <div className="timeline-ruler">
-        <div className="track-label" />
-        <div className="ruler-content">{marks.map((mark) => <span key={mark} style={{ left: `${mark / 45 * 100}%` }}>{String(mark).padStart(2, '0')}:00</span>)}</div>
-      </div>
-      <div className="timeline-body">
-        <div className="timeline-playhead" style={{ left: `calc(${playhead}% + ${playheadOffset}px)` }}><i /></div>
-        <div className="timeline-row video-strip-row">
-          <div className="track-label">▣ Video</div>
-          <div className="track-content video-thumbnails">{Array.from({ length: 12 }, (_, i) => <i key={i}><span>{i + 1}</span></i>)}</div>
+      <div className="timeline-title">
+        <strong>Timeline</strong>
+        <div className="timeline-toolbar" aria-label="Điều khiển timeline">
+          <button type="button" aria-label="Thu nhỏ timeline" onClick={() => dispatch({ type: 'setTimelineZoom', pixelsPerSecond: pixelsPerSecond / 1.25 })}>−</button>
+          <button type="button" aria-label="Vừa toàn dự án" onClick={fitProject}>Fit</button>
+          <button type="button" aria-label="Phóng to timeline" onClick={() => dispatch({ type: 'setTimelineZoom', pixelsPerSecond: pixelsPerSecond * 1.25 })}>+</button>
         </div>
-        <TimelineTrack label="▧ Phụ đề gốc" lane="source" segments={project.segments} durationMs={project.durationMs} selectedSegmentId={selectedSegmentId} onSelect={select} />
-        <TimelineTrack label="◉ Dịch & phụ đề" lane="target" segments={project.segments} durationMs={project.durationMs} selectedSegmentId={selectedSegmentId} onSelect={select} />
-        {project.speakers.map((speaker, index) => <WaveformTrack key={speaker.id} speaker={speaker} index={index} />)}
+      </div>
+
+      <div className="timeline-workspace">
+        <div className="timeline-labels" aria-hidden="true">
+          <div className="timeline-label-spacer" />
+          <div className="track-label">▣ Video</div>
+          <div className="track-label">▧ Phụ đề gốc</div>
+          <div className="track-label">◉ Dịch &amp; phụ đề</div>
+          {project.speakers.map((speaker) => <div className="track-label" key={speaker.id}>◉ {speaker.name}</div>)}
+        </div>
+
+        <div
+          ref={viewportRef}
+          className="timeline-scroll-viewport"
+          data-timeline-viewport="true"
+          onScroll={handleScroll}
+        >
+          <div
+            className="timeline-canvas"
+            data-timeline-canvas="true"
+            style={{ width: canvasWidth }}
+            onPointerDown={handleCanvasPointerDown}
+          >
+            <div className="ruler-content timeline-content-row">
+              {marks.map((mark) => (
+                <span key={mark.timeMs} style={{ left: timeToPixels(mark.timeMs, pixelsPerSecond) }}>{mark.label}</span>
+              ))}
+            </div>
+            <div className="timeline-playhead" style={{ left: playheadLeft }}>
+              <button
+                type="button"
+                className="timeline-playhead-handle"
+                aria-label="Kéo playhead"
+                data-timeline-playhead-handle="true"
+                data-timeline-interactive="true"
+                onPointerDown={handlePlayheadPointerDown}
+                onPointerMove={handlePlayheadPointerMove}
+                onPointerUp={(event) => finishPlayheadDrag(event, true)}
+                onPointerCancel={(event) => finishPlayheadDrag(event, false)}
+                onKeyDown={handlePlayheadKeyDown}
+              />
+            </div>
+            <div className="timeline-content-row video-thumbnails">
+              {Array.from({ length: 12 }, (_, i) => <i key={i}><span>{i + 1}</span></i>)}
+            </div>
+            <TimelineTrack
+              lane="source"
+              segments={project.segments}
+              pixelsPerSecond={pixelsPerSecond}
+              selectedSegmentId={selectedSegmentId}
+              onSelect={select}
+            />
+            <TimelineTrack
+              lane="target"
+              segments={project.segments}
+              pixelsPerSecond={pixelsPerSecond}
+              selectedSegmentId={selectedSegmentId}
+              onSelect={select}
+            />
+            {project.speakers.map((speaker, index) => <WaveformTrack key={speaker.id} speaker={speaker} index={index} />)}
+          </div>
+        </div>
       </div>
     </section>
   );

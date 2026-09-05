@@ -34,6 +34,8 @@ export function buildCloudStudioProject(project: CloudProject, segments: CloudSe
     durationMs,
     sourceLanguage: project.sourceLanguage,
     targetLanguage: project.targetLanguage,
+    sourceObjectKey: project.sourceObjectKey ?? null,
+    status: project.status,
     speakers: buildSpeakers(ordered),
     segments: ordered.map((segment) => ({
       id: segment.id,
