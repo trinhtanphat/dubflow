@@ -15,7 +15,7 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - Voice provider boundary that **does not** claim Vietnamese TTS or voice cloning until a live capability check explicitly verifies it.
 - Media-processing boundary that reports `MEDIA_PROCESSOR_UNAVAILABLE` until an FFmpeg Cloudflare Container is actually configured; export is never faked.
 - `GET /api/ready` checks that the production D1 `projects` schema exists before the deployment is considered ready.
-- GitHub Actions CI/CD is enabled for this public repository.
+- GitHub Actions verification CI is enabled for this public repository.
 
 ## Cloudflare target
 
@@ -41,7 +41,7 @@ Wrangler 4.45+ supports automatic provisioning for draft D1/R2 bindings. This re
 
 `.github/workflows/ci.yml` runs on pushes and pull requests and performs a real dependency install, test suite, TypeScript/Vite production build, and Wrangler dry-run.
 
-`.github/workflows/deploy-cloudflare.yml` runs on `main` and manual dispatch. It requires this GitHub Actions secret:
+`.github/workflows/deploy-cloudflare.yml` is **manual-only** (`workflow_dispatch`) in the current phase. It does not run automatically on every `main` push. To launch it, configure this GitHub Actions secret first:
 
 ```text
 CLOUDFLARE_API_TOKEN
@@ -57,7 +57,7 @@ Optional Google translation support can use this GitHub Actions secret:
 GOOGLE_CLOUD_TRANSLATE_API_KEY
 ```
 
-When present, the deploy workflow syncs it into the Worker secret named `GOOGLE_CLOUD_TRANSLATE_API_KEY`. If absent, YupVox still retains the Workers AI translation path and the Google provider remains unavailable until configured.
+When present, the manual deploy workflow syncs it into the Worker secret named `GOOGLE_CLOUD_TRANSLATE_API_KEY`. If absent, YupVox still retains the Workers AI translation path and the Google provider remains unavailable until configured.
 
 ## Local deployment
 
