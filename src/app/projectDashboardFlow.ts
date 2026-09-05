@@ -1,14 +1,5 @@
-import {
-  cancelProjectJob,
-  listProjectJobs,
-  retryProjectJob,
-  type CloudJob,
-} from '../features/projects/jobApi';
-import {
-  createProject,
-  listProjects,
-  type CloudProject,
-} from '../features/projects/projectApi';
+import { listProjectJobs, type CloudJob } from '../features/projects/jobApi';
+import { createProject, listProjects, type CloudProject } from '../features/projects/projectApi';
 import type { StudioProject } from '../features/timeline/types';
 import { loadCloudStudioProject } from './cloudHydration';
 
@@ -48,38 +39,6 @@ export function openDashboardProject(
   deps: OpenDashboardProjectDeps = defaultOpenDeps,
 ): Promise<StudioProject> {
   return deps.loadCloudStudioProject(projectId);
-}
-
-export type RetryDashboardFlowDeps = {
-  retryProjectJob: typeof retryProjectJob;
-  listProjectJobs: typeof listProjectJobs;
-};
-
-const defaultRetryDeps: RetryDashboardFlowDeps = { retryProjectJob, listProjectJobs };
-
-export async function retryDashboardJob(
-  projectId: string,
-  jobId: string,
-  deps: RetryDashboardFlowDeps = defaultRetryDeps,
-): Promise<CloudJob[]> {
-  await deps.retryProjectJob(projectId, jobId);
-  return deps.listProjectJobs(projectId);
-}
-
-export type CancelDashboardFlowDeps = {
-  cancelProjectJob: typeof cancelProjectJob;
-  listProjectJobs: typeof listProjectJobs;
-};
-
-const defaultCancelDeps: CancelDashboardFlowDeps = { cancelProjectJob, listProjectJobs };
-
-export async function cancelDashboardJob(
-  projectId: string,
-  jobId: string,
-  deps: CancelDashboardFlowDeps = defaultCancelDeps,
-): Promise<CloudJob[]> {
-  await deps.cancelProjectJob(projectId, jobId);
-  return deps.listProjectJobs(projectId);
 }
 
 export type CreateDashboardProjectDeps = {
