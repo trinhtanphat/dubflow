@@ -14,6 +14,7 @@ class MemoryJobStore implements JobStore {
   jobs = new Map<string, DubbingJob>();
 
   async create(projectId: string, type: string): Promise<DubbingJob> {
+    const now = '2026-09-05T00:00:00Z';
     const job: DubbingJob = {
       id: 'job-1',
       projectId,
@@ -23,15 +24,56 @@ class MemoryJobStore implements JobStore {
       currentStep: null,
       errorCode: null,
       errorMessage: null,
+      retryCount: 0,
+      createdAt: now,
+      updatedAt: now,
     };
     this.jobs.set(job.id, job);
     return job;
+  }
+
+  async listForProject(projectId: string, userId: string): Promise<DubbingJob[]> {
+    if (userId !== 'dev-user') return [];
+    return [...this.jobs.values()].filter((job) => job.projectId === projectId);
   }
 
   async getForProject(projectId: string, jobId: string, userId: string): Promise<DubbingJob | null> {
     if (userId !== 'dev-user') return null;
     const job = this.jobs.get(jobId);
     return job?.projectId === projectId ? job : null;
+  }
+
+  async markRetrying(projectId: string, jobId: string, userId: string): Promise<DubbingJob> {
+    const job = await this.getForProject(projectId, jobId, userId);
+    if (!job) throw new JobStateError('JOB_NOT_FOUND', 'Job not found.');
+    if (job.status !== 'failed') throw new JobStateError('JOB_NOT_RETRYABLE', 'Only failed jobs can be retried.');
+    const updated = {
+      ...job,
+      status: 'retrying' as const,
+      progress: 0,
+      currentStep: 'retrying',
+      errorCode: null,
+      errorMessage: null,
+      retryCount: job.retryCount + 1,
+      updatedAt: '2026-09-05T00:01:00Z',
+    };
+    this.jobs.set(jobId, updated);
+    return updated;
+  }
+
+  async cancel(projectId: string, jobId: string, userId: string): Promise<DubbingJob> {
+    const job = await this.getForProject(projectId, jobId, userId);
+    if (!job) throw new JobStateError('JOB_NOT_FOUND', 'Job not found.');
+    if (!['queued', 'running', 'retrying'].includes(job.status)) {
+      throw new JobStateError('JOB_NOT_CANCELLABLE', 'Only active jobs can be cancelled.');
+    }
+    const updated = { ...job, status: 'cancelled' as const, currentStep: 'cancelled' };
+    this.jobs.set(jobId, updated);
+    return updated;
+  }
+
+  async isCancelled(projectId: string, jobId: string, userId: string): Promise<boolean> {
+    return (await this.getForProject(projectId, jobId, userId))?.status === 'cancelled';
   }
 
   async setProgress(jobId: string, progress: number, currentStep: string): Promise<void> {
@@ -44,12 +86,14 @@ class MemoryJobStore implements JobStore {
   async fail(jobId: string, errorCode: string, errorMessage: string): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) throw new JobStateError('JOB_NOT_FOUND', 'Job not found.');
+    if (job.status === 'cancelled') return;
     this.jobs.set(jobId, { ...job, status: 'failed', errorCode, errorMessage });
   }
 
   async complete(jobId: string, status: 'completed' | 'needs_review' = 'completed'): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) throw new JobStateError('JOB_NOT_FOUND', 'Job not found.');
+    if (job.status === 'cancelled') return;
     this.jobs.set(jobId, { ...job, status, progress: 1, currentStep: status });
   }
 }
@@ -91,7 +135,7 @@ function listDb() {
 function transitionDb(initialStatus: DubbingJob['status'], initialRetryCount = 1) {
   let row = {
     id: 'j1', project_id: 'p1', type: 'dubbing', status: initialStatus, progress: 0.7,
-    current_step: 'transcribing', error_code: 'ASR_FAILED', error_message: 'boom',
+    current_step: 'transcribing', error_code: 'ASR_FAILED' as string | null, error_message: 'boom' as string | null,
     retry_count: initialRetryCount, created_at: '2026-09-05T12:00:00Z', updated_at: '2026-09-05T12:05:00Z',
   };
   return {
@@ -117,8 +161,12 @@ function transitionDb(initialStatus: DubbingJob['status'], initialRetryCount = 1
               const [jobId, projectId, userId] = values;
               if (jobId === 'j1' && projectId === 'p1' && userId === 'dev-user' && row.status === 'failed') {
                 row = {
-                  ...row, status: 'retrying', progress: 0, current_step: 'retrying',
-                  error_code: null as unknown as string, error_message: null as unknown as string,
+                  ...row,
+                  status: 'retrying',
+                  progress: 0,
+                  current_step: 'retrying',
+                  error_code: null,
+                  error_message: null,
                   retry_count: row.retry_count + 1,
                 };
                 return { meta: { changes: 1 } };
