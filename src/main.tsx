@@ -8,6 +8,7 @@ import './styles/layout.css';
 import './features/player/player.css';
 import './features/timeline/timeline.css';
 import './app/app.css';
+import './styles/speaker-voice.css';
 import './styles/reference-fidelity.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

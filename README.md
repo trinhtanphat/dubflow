@@ -15,9 +15,10 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - Normalized deterministic segment IDs/timestamps, speaker persistence, and atomic D1 transcript replacement.
 - Workers AI translation using `@cf/meta/m2m100-1.2b` as the default processing path.
 - Official Google Cloud Translation provider plus `workers-ai` / `google` / `compare` retranslation modes.
-- Studio cloud orchestration: upload -> process -> poll durable job -> hydrate the persisted D1 project/timeline/transcript.
+- Studio cloud orchestration: upload -> process -> poll durable job -> hydrate the persisted D1 project/timeline/transcript plus active speaker metadata.
 - Server-backed transcript source/translation/speaker edits. Compare mode is non-destructive until the user explicitly applies one result.
-- ElevenLabs-backed segment TTS boundary and export workflow. The export source generates dubbed segment audio, stores it in R2, asks the FFmpeg media processor to assemble the timeline, and writes a final downloadable media artifact.
+- Persisted speaker display names and per-speaker ElevenLabs voice IDs. Changing a speaker voice invalidates only that speaker's generated dubbed clips plus the stale final export; renaming alone does not discard valid audio.
+- ElevenLabs-backed segment TTS and export workflow. Export uses a speaker's assigned ElevenLabs voice when present, otherwise the configured default voice; generated audio is stored in R2, assembled on the timeline by the FFmpeg media processor, and written as a final downloadable artifact.
 - Voice cloning and visual lip-sync remain capability-gated and are not claimed as implemented or production-qualified.
 - `GET /api/ready` checks that the production D1 `projects` schema exists and reports the configured ASR/diarization capability without exposing secret values.
 - GitHub Actions verification CI runs a real dependency install, tests, TypeScript/Vite build, Wrangler dry-run, and reference screenshot capture.
@@ -103,13 +104,13 @@ R2 multipart upload
 -> Deepgram diarized ASR when configured, otherwise Workers AI Whisper
 -> persisted D1 speakers/segments
 -> Workers AI or configured translation
--> Studio transcript/timeline hydration
--> ElevenLabs segment TTS for export
+-> Studio transcript/timeline/speaker hydration
+-> per-speaker ElevenLabs TTS routing when voice IDs are assigned
 -> FFmpeg timeline assembly/mux
 -> final R2 export artifact
 ```
 
-Until that real deployed fixture succeeds, production runtime remains unqualified even when source CI is GREEN. Cross-chunk speaker identity is also explicitly outside the current diarization qualification.
+Until that real deployed fixture succeeds, production runtime remains unqualified even when source CI is GREEN. Cross-chunk speaker identity is also explicitly outside the current diarization qualification, and source-level per-speaker voice routing is not a production PASS until verified on a real deployed export.
 
 ## Safety / truthfulness boundaries
 

@@ -1,4 +1,12 @@
-export type Speaker = { id: string; name: string; label: string; share: number };
+export type Speaker = {
+  id: string;
+  projectId?: string;
+  name: string;
+  label: string;
+  share: number;
+  voiceProvider?: string | null;
+  voiceId?: string | null;
+};
 export type Segment = { id: string; speakerId: string; startMs: number; endMs: number; sourceText: string; translatedText: string };
 export type StudioProject = {
   id: string;

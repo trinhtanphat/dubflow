@@ -23,20 +23,22 @@ R2 multipart media upload
 -> deterministic/atomic D1 speaker + transcript persistence
 -> Workers AI translation by default
 -> project/job terminal state
--> Studio poll + transcript/timeline hydration
--> server-backed transcript editing and retranslation
--> ElevenLabs segment TTS for export
+-> Studio poll + transcript/timeline/speaker metadata hydration
+-> server-backed transcript editing, speaker naming and per-speaker ElevenLabs voice assignment
+-> ElevenLabs segment TTS using the assigned speaker voice when present
 -> FFmpeg dubbed-audio timeline assembly/mux
 -> final R2 export artifact
 ```
 
 Deepgram speaker identities are currently **chunk-scoped**. A speaker index returned in one 5-minute request is not assumed to be the same person as the same index in another chunk. Cross-chunk identity stitching therefore remains unqualified and is not represented as implemented.
 
+Per-speaker voice assignment is persisted on the existing D1 `speakers` records. Changing a speaker voice invalidates that speaker's previously generated dubbed segment audio plus any published project export before the next render; renaming a speaker does not discard valid audio. Missing per-speaker voice IDs continue to use the configured ElevenLabs default voice rather than fabricating an assignment.
+
 Google Translation remains an optional configured provider. Compare mode does not persist a winner until the user explicitly applies it. Deepgram is also optional: without `DEEPGRAM_API_KEY`, the source falls back to Workers AI Whisper and `/api/ready` reports speaker diarization as unavailable while the base service can remain ready.
 
 The deploy workflow supports optional `GOOGLE_CLOUD_TRANSLATE_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_DEFAULT_VOICE_ID` GitHub secrets and syncs configured values into Worker secrets without committing them.
 
-Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow. This is still distinct from production-runtime qualification: the repository must not claim a deployed export PASS until a real fixture produces and returns the final artifact. Voice cloning and visual lip-sync rendering remain capability-gated and unqualified.
+Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow, including source-level per-speaker voice routing. This is still distinct from production-runtime qualification: the repository must not claim a deployed export PASS until a real fixture produces and returns the final artifact. Voice cloning and visual lip-sync rendering remain capability-gated and unqualified.
 
 ## Studio reference qualification
 
@@ -46,6 +48,6 @@ The exact-head CI screenshot is reviewed as a presentation qualification, not as
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path.
+A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
 
 If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, and ElevenLabs secret values are never committed to the repository.
