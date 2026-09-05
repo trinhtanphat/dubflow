@@ -9,6 +9,7 @@ export type StudioProject = {
   speakers: Speaker[];
   segments: Segment[];
   sourceObjectKey?: string | null;
+  exportObjectKey?: string | null;
   status?: string;
   frameRate?: number | null;
 };
