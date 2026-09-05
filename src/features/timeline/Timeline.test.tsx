@@ -44,4 +44,20 @@ describe('Timeline interactive viewport', () => {
     expect(html).toContain('aria-label="Kéo playhead"');
     expect(html).toContain('data-timeline-playhead-handle="true"');
   });
+
+  it('renders one transient timing preview consistently on both subtitle lanes', () => {
+    const html = renderToStaticMarkup(
+      <TestTimeline
+        project={project}
+        playheadMs={2_000}
+        selectedSegmentId="s1"
+        timelineView={timelineView}
+        segmentPreview={{ segmentId: 's1', startMs: 2_000, endMs: 4_000 }}
+        dispatch={() => {}}
+      />,
+    );
+    expect(html).toContain('data-segment-editing="true"');
+    expect(html.match(/left:100px/g)?.length).toBe(2);
+    expect(html.match(/is-previewing/g)?.length).toBe(2);
+  });
 });
