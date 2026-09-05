@@ -2,7 +2,7 @@ import { patchSegment, type CloudSegment, type SegmentPatch } from './segmentApi
 import { retranslateSegment, type RetranslateResult, type TranslationMode } from '../translation/translationApi';
 
 export type EditorPatchDeps = {
-  patchSegment: (projectId: string, segmentId: string, patch: SegmentPatch) => Promise<CloudSegment>;
+  patchSegment: (projectId: string, segmentId: string, expectedVersion: number, patch: SegmentPatch) => Promise<CloudSegment>;
 };
 
 export type EditorRetranslateDeps = {
@@ -26,10 +26,11 @@ const defaultRetranslateDeps: EditorRetranslateDeps = { retranslateSegment };
 export function persistEditorPatch(
   projectId: string,
   segmentId: string,
+  expectedVersion: number,
   patch: SegmentPatch,
   deps: EditorPatchDeps = defaultPatchDeps,
 ) {
-  return deps.patchSegment(projectId, segmentId, patch);
+  return deps.patchSegment(projectId, segmentId, expectedVersion, patch);
 }
 
 export async function retranslateEditorSegment(
