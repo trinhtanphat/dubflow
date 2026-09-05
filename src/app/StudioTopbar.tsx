@@ -14,6 +14,8 @@ type StudioTopbarProps = {
   onUndo(): void;
   onRedo(): void;
   onOpenCommands(): void;
+  onOpenSources?(): void;
+  onOpenInspector?(): void;
 };
 
 const saveCopy = {
@@ -30,7 +32,18 @@ const cloudCopy = {
   degraded: { label: 'Cloud degraded', detail: 'Some providers unavailable', tone: 'warning' },
 } as const;
 
-export function StudioTopbar({ projectTitle, saveState, cloudState, canUndo, canRedo, onUndo, onRedo, onOpenCommands }: StudioTopbarProps) {
+export function StudioTopbar({
+  projectTitle,
+  saveState,
+  cloudState,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onOpenCommands,
+  onOpenSources,
+  onOpenInspector,
+}: StudioTopbarProps) {
   const save = saveCopy[saveState];
   const cloud = cloudCopy[cloudState];
 
@@ -48,6 +61,10 @@ export function StudioTopbar({ projectTitle, saveState, cloudState, canUndo, can
       </div>
 
       <div className="topbar-actions studio-topbar-actions">
+        <div className="mobile-panel-actions" aria-label="Bảng công cụ mobile">
+          <IconButton label="Mở nguồn media" icon="☰" onClick={onOpenSources} />
+          <IconButton label="Mở inspector" icon="☷" onClick={onOpenInspector} />
+        </div>
         <div className="studio-statuses">
           <StatusBadge label={save.label} detail={save.detail} tone={save.tone} />
           <StatusBadge label={cloud.label} detail={cloud.detail} tone={cloud.tone} />
