@@ -87,6 +87,76 @@
 .project-dashboard__empty strong { font-size: 24px; }
 .project-dashboard__empty span { color: var(--color-text-muted, #969cad); }
 
+.project-usage {
+  max-width: 1280px;
+  margin: 0 auto 24px;
+}
+
+.project-usage__state {
+  margin-bottom: 14px;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.035);
+  padding: 14px 16px;
+  color: var(--color-text-muted, #969cad);
+}
+
+.project-usage__state--error {
+  border-color: rgba(255, 101, 122, 0.28);
+  color: #ff9aaa;
+}
+
+.project-usage__credits,
+.project-usage__details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.project-usage__details { margin-top: 14px; }
+
+.usage-credit-card,
+.usage-panel {
+  border: 1px solid rgba(255,255,255,0.085);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(24,27,39,0.94), rgba(14,16,25,0.94));
+  box-shadow: 0 14px 38px rgba(0,0,0,0.18);
+}
+
+.usage-credit-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.usage-credit-card span,
+.usage-row small {
+  color: var(--color-text-muted, #969cad);
+}
+
+.usage-credit-card strong {
+  font-size: clamp(28px, 4vw, 42px);
+  letter-spacing: -0.04em;
+}
+
+.usage-credit-card small { color: #8d94a8; }
+
+.usage-panel { padding: 18px; }
+.usage-panel h2 { margin: 0 0 14px; font-size: 15px; }
+.usage-list { display: grid; gap: 10px; }
+
+.usage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.usage-row:first-child { border-top: 0; padding-top: 0; }
+.usage-row small { grid-column: 1 / -1; font-size: 12px; }
+
 .project-dashboard__grid {
   max-width: 1280px;
   margin: 0 auto;
@@ -171,6 +241,8 @@
   .project-dashboard { padding: 26px 16px 44px; }
   .project-dashboard__header { align-items: stretch; flex-direction: column; }
   .project-dashboard__create { width: 100%; }
+  .project-usage__credits,
+  .project-usage__details { grid-template-columns: 1fr; }
   .project-card__title-row { flex-direction: column; }
   .project-card__title-row button { width: 100%; }
 }
