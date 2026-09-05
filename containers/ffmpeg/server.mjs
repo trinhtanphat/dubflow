@@ -1,16 +1,17 @@
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
+import { buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT || 8080);
-const MAX_JSON_BYTES = 64 * 1024;
+const MAX_JSON_BYTES = 1024 * 1024;
 
 function json(response, status = 200) {
   return { status, body: JSON.stringify(response), headers: { 'content-type': 'application/json; charset=utf-8' } };
@@ -44,6 +45,17 @@ async function downloadObject(key, destination) {
   const response = await fetch(r2Url(key));
   if (!response.ok || !response.body) throw new Error(`Unable to read R2 object (${response.status}).`);
   await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
+}
+
+async function uploadFile(key, path, contentType) {
+  const body = Readable.toWeb(createReadStream(path));
+  const response = await fetch(r2Url(key), {
+    method: 'PUT',
+    headers: { 'content-type': contentType },
+    body,
+    duplex: 'half',
+  });
+  if (!response.ok) throw new Error(`Unable to write R2 object (${response.status}).`);
 }
 
 async function durationMs(path) {
@@ -104,9 +116,40 @@ async function extractAudioChunks(input) {
   });
 }
 
+async function renderExport(input) {
+  validateRenderExportInput(input);
+  return withSource(input, async ({ root, source }) => {
+    const sourceDurationMs = await durationMs(source);
+    const outside = input.clips.find((clip) => clip.endMs > sourceDurationMs);
+    if (outside) throw new Error(`Dubbed clip ${outside.segmentId} exceeds source duration.`);
+
+    const clipPaths = [];
+    for (let index = 0; index < input.clips.length; index += 1) {
+      const path = join(root, `dub-${String(index).padStart(5, '0')}.audio`);
+      await downloadObject(input.clips[index].objectKey, path);
+      clipPaths.push(path);
+    }
+
+    const output = join(root, 'dubbed.mp4');
+    const args = buildRenderExportArgs({
+      sourcePath: source,
+      outputPath: output,
+      durationMs: sourceDurationMs,
+      clips: input.clips,
+      clipPaths,
+    });
+    await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
+
+    const exportObjectKey = `projects/${input.projectId}/export/dubbed.mp4`;
+    await uploadFile(exportObjectKey, output, 'video/mp4');
+    return { exportObjectKey };
+  });
+}
+
 async function dispatch(pathname, input) {
   if (pathname === '/probe') return probe(input);
   if (pathname === '/extract-audio-chunks') return extractAudioChunks(input);
+  if (pathname === '/render-export') return renderExport(input);
   throw Object.assign(new Error('Not found.'), { statusCode: 404 });
 }
 
