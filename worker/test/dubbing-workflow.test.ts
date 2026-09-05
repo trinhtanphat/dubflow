@@ -119,7 +119,7 @@ describe('dubbing workflow pipeline', () => {
     let checks = 0;
     const deps = {
       projects: {
-        async getByIdForUser() { return { id: 'p', sourceObjectKey: 'projects/p/source/x.mp4' }; },
+        async getByIdForUser() { return { id: 'p', sourceObjectKey: 'projects/p/source/x.mp4', sourceLanguage: 'zh' as const }; },
         async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
       },
       jobs: {
