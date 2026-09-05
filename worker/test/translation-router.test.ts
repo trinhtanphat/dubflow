@@ -92,6 +92,10 @@ function translationEnv(db: TranslationDb): Env {
   } as unknown as Env;
 }
 
+const noOpUsage = () => ({
+  async record(input: unknown) { return { inserted: true, event: input }; },
+});
+
 describe('translation router', () => {
   it('selects workers-ai or google modes', async () => {
     const router = new TranslationRouter(new StubProvider('workers-ai'), new StubProvider('google'));
@@ -137,7 +141,7 @@ describe('revision-aware translation HTTP route', () => {
     vi.stubGlobal('fetch', async () => Response.json({
       data: { translations: [{ translatedText: 'google translated' }] },
     }));
-    const routes = createTranslationRoutes();
+    const routes = createTranslationRoutes(noOpUsage);
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
