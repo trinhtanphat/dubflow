@@ -2,11 +2,16 @@ import { useEffect, useState } from 'react';
 import { ProjectDashboard } from '../features/projects/ProjectDashboard';
 import type { CloudJob } from '../features/projects/jobApi';
 import type { CloudProject } from '../features/projects/projectApi';
+import { cancelDashboardJob, retryDashboardJob, type DashboardJobResult } from './dashboardJobControl';
 import { StudioShell } from './StudioShell';
 import { loadProjectDashboardSnapshot, openDashboardProject } from './projectDashboardFlow';
 import { useStudioState } from './useStudioState';
 
 type AppView = 'dashboard' | 'studio';
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export function App() {
   const studio = useStudioState();
@@ -29,13 +34,21 @@ export function App() {
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setDashboardError(error instanceof Error ? error.message : 'Không thể tải danh sách dự án.');
+        setDashboardError(errorMessage(error, 'Không thể tải danh sách dự án.'));
       })
       .finally(() => {
         if (active) setDashboardLoading(false);
       });
     return () => { active = false; };
   }, [view]);
+
+  function applyJobResult(projectId: string, jobId: string, result: DashboardJobResult) {
+    setProjects((current) => current.map((project) => project.id === projectId ? result.project : project));
+    setJobsByProject((current) => ({
+      ...current,
+      [projectId]: (current[projectId] ?? []).map((job) => job.id === jobId ? result.job : job),
+    }));
+  }
 
   async function handleOpenProject(projectId: string) {
     setDashboardError('');
@@ -44,7 +57,27 @@ export function App() {
       studio.dispatch({ type: 'hydrateProject', project });
       setView('studio');
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : 'Không thể mở dự án.');
+      setDashboardError(errorMessage(error, 'Không thể mở dự án.'));
+    }
+  }
+
+  async function handleRetryJob(projectId: string, jobId: string) {
+    setDashboardError('');
+    try {
+      const result = await retryDashboardJob(projectId, jobId);
+      applyJobResult(projectId, jobId, result);
+    } catch (error) {
+      setDashboardError(errorMessage(error, 'Không thể thử lại job.'));
+    }
+  }
+
+  async function handleCancelJob(projectId: string, jobId: string) {
+    setDashboardError('');
+    try {
+      const result = await cancelDashboardJob(projectId, jobId);
+      applyJobResult(projectId, jobId, result);
+    } catch (error) {
+      setDashboardError(errorMessage(error, 'Không thể hủy job.'));
     }
   }
 
@@ -74,8 +107,8 @@ export function App() {
       loading={dashboardLoading}
       error={dashboardError}
       onOpenProject={(projectId) => { void handleOpenProject(projectId); }}
-      onRetryJob={() => undefined}
-      onCancelJob={() => undefined}
+      onRetryJob={(projectId, jobId) => { void handleRetryJob(projectId, jobId); }}
+      onCancelJob={(projectId, jobId) => { void handleCancelJob(projectId, jobId); }}
       onCreateProject={() => setView('studio')}
     />
   );
