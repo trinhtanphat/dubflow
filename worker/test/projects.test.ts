@@ -28,6 +28,14 @@ class MemoryProjectStore implements ProjectStore {
   async getByIdForUser(id: string, userId: string): Promise<Project | null> {
     return this.projects.find((project) => project.id === id && project.userId === userId) ?? null;
   }
+
+  async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
+    const project = await this.getByIdForUser(id, userId);
+    if (!project) return;
+    project.sourceObjectKey = objectKey;
+    project.sizeBytes = sizeBytes;
+    project.status = 'ready';
+  }
 }
 
 function makeApp(store: ProjectStore) {
