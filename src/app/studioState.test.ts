@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from '../features/timeline/math';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer } from './studioState';
 
@@ -42,5 +43,21 @@ describe('studioReducer', () => {
 
     const muted = studioReducer(initial, { type: 'toggleMuted' });
     expect(muted.playback.muted).toBe(true);
+  });
+
+  it('keeps timeline viewport state transient and bounded', () => {
+    const initial = createInitialStudioState(mockProject);
+    expect(initial.timelineView).toEqual({ pixelsPerSecond: 1, scrollLeft: 0, viewportWidth: 0 });
+
+    const zoomedOut = studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 0 });
+    expect(zoomedOut.timelineView.pixelsPerSecond).toBe(MIN_PIXELS_PER_SECOND);
+    const zoomedIn = studioReducer(initial, { type: 'setTimelineZoom', pixelsPerSecond: 1000 });
+    expect(zoomedIn.timelineView.pixelsPerSecond).toBe(MAX_PIXELS_PER_SECOND);
+
+    const scrolled = studioReducer(initial, { type: 'setTimelineScroll', scrollLeft: -50 });
+    expect(scrolled.timelineView.scrollLeft).toBe(0);
+    const resized = studioReducer(initial, { type: 'setTimelineViewport', viewportWidth: -100 });
+    expect(resized.timelineView.viewportWidth).toBe(0);
+    expect(resized.project).toBe(initial.project);
   });
 });
