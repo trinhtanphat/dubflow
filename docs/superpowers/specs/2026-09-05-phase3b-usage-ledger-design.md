@@ -1,121 +1,150 @@
 # YupVox Phase 3B Usage Ledger Design
 
 Date: 2026-09-05
-Status: Approved for implementation — reconciled to master design
+Status: Approved for implementation
 
 ## 1. Goal
-Add a durable, idempotent internal usage ledger and provider-usage summary without payments, pricing enforcement, guessed provider rates, or credit depletion.
 
-Phase 3B records operational usage so later quota/rate-limit/cost decisions can be based on measured work.
+Add a durable, idempotent internal usage ledger and provider-usage summary for YupVox without introducing payments, pricing enforcement, guessed provider rates, or credit depletion.
+
+Phase 3B records normalized usage in stable base units so later quota, rate-limit, and cost-model decisions can be based on observed work rather than invented conversion rules.
 
 ## 2. Scope
 
 Included:
 - durable usage events for ASR, translation, TTS, and final render;
-- deterministic idempotency across Workflow step replay;
-- `started` and `completed` phases;
+- deterministic idempotency across Cloudflare Workflow step retries/replay;
+- explicit `started` and `completed` phases for externally dependent work;
 - provider attribution per logical provider invocation;
-- master-design units: **ASR audio minutes, translation characters, TTS generated-audio seconds, render minutes**;
-- authorized user/project summaries;
-- dashboard usage summary;
-- informational read-only credit balance.
+- normalized base units: ASR seconds, translation characters, generated TTS audio seconds, and render seconds;
+- authorized user/project usage summaries;
+- a compact dashboard usage summary;
+- internal credit balance readout only.
 
-Deferred:
-- payment integration;
-- decrementing/reserving/pricing credits;
-- provider price tables/invoice reconciliation;
-- hard quotas/rate limits;
-- general observability/alerting policy;
-- public share/download ACLs.
+Deferred to later Phase 3 work:
+- payment processor integration;
+- decrementing, reserving, pricing, or enforcing credits;
+- provider price tables or invoice reconciliation;
+- hard quotas or rate limits;
+- alerting/observability policy;
+- public share links or download permissions.
 
 ## 3. Existing constraints
 
-`usage_events` remains the Phase 3B source of truth. `users.credit_balance` is read-only. Studio Pro V2.5 CAS/autosave and Phase 3A durable job semantics must remain unchanged.
+The existing `usage_events` table remains the source of truth for Phase 3B. Existing `users.credit_balance` remains unchanged and read-only in this phase. Existing Studio Pro V2.5 autosave/CAS behavior and Phase 3A durable job/retry/cancel behavior must not be weakened.
 
-Production runtime qualification remains separate while Cloudflare Containers credentials/live real-media gates are unresolved.
+The current media adapter already exposes project-scoped `probe(...)` support through the FFmpeg Container. Phase 3B may use that capability to measure generated TTS artifact duration after the voice artifact is persisted; it must not invent TTS seconds from text length or scheduled segment span.
 
-## 4. Event model
+Production Cloudflare runtime qualification remains separate from source/CI qualification while the documented Containers credential and real-media fixture gates remain unresolved.
 
-Each event has `id`, `user_id`, `project_id`, `job_id`, `kind`, `units`, `provider`, `phase`, `operation_key`, `cost_basis`, and `created_at`.
+## 4. Usage event model
 
-Phase 3B kinds:
-- `asr_audio_minute`;
-- `translation_character`;
-- `tts_audio_second`;
-- `render_minute`.
+A usage event has:
+- `id` — unique event ID;
+- `user_id`;
+- `project_id`;
+- `job_id` when the event belongs to a durable job;
+- `kind` — `asr_audio_second`, `translation_character`, `tts_audio_second`, or `render_second`;
+- `units` — non-negative numeric usage quantity in that kind's canonical base unit;
+- `provider` — provider identifier such as `deepgram`, `workers-ai`, `google`, `elevenlabs`, or `ffmpeg-container`;
+- `phase` — `started` or `completed`;
+- `operation_key` — deterministic idempotency key for one logical provider/render invocation within one durable job retry generation;
+- `cost_basis` — `0` throughout Phase 3B;
+- `created_at`.
 
-`cost_basis` is always `0` in Phase 3B.
+`(operation_key, phase)` is unique. Re-executing the same Cloudflare Workflow step must not duplicate the same logical phase event.
 
-`(operation_key, phase)` is unique. Automatic replay of the same logical operation reads the canonical existing event instead of duplicating it.
+Phase 3B is an operational usage ledger, not provider invoice reconciliation. A `started` event records that a logical external operation was attempted; a `completed` event records canonical successful work that YupVox can measure. If a provider was reached but the result was not durably completed, the ledger may retain `started` without fabricating completed usage.
 
-## 5. Operation identity
+## 5. Retry and idempotency semantics
 
-Workflow replay and explicit user retry are different.
+Workflow step replay and explicit user job retry are different concepts.
 
-Canonical key:
+For automatic/replayed execution within the same durable job retry generation, the operation key is stable and duplicate inserts are ignored/read back canonically.
+
+For an explicit user retry, `jobs.retry_count` increments. The operation key includes that retry generation so genuinely repeated work is observable separately.
+
+Canonical key shape:
 
 `job:{jobId}:retry:{retryCount}:{stage}:{item}:{provider}`
 
 Examples:
-- `job:j1:retry:0:asr:chunk-0001:deepgram-nova-3`
-- `job:j1:retry:0:translation:batch-0:workers-ai`
-- `job:j2:retry:1:tts:segment-s14:elevenlabs`
-- `job:j2:retry:1:render:final:ffmpeg-container`
+- `job:j1:retry:0:asr:chunk-0001:deepgram`;
+- `job:j1:retry:0:translation:batch-0:workers-ai`;
+- `job:j1:retry:0:translation:batch-0:google`;
+- `job:j2:retry:1:tts:segment-s14:elevenlabs`;
+- `job:j2:retry:1:render:final:ffmpeg-container`.
 
-`retry_count` comes from the canonical durable job row. Local loop state must never substitute for it.
+The provider suffix is part of the logical operation. Compare/quality translation modes that invoke more than one provider therefore meter each actual provider invocation independently.
 
 ## 6. Start/completion semantics
 
-Write `started` immediately before the logical external/provider/container call. Write `completed` only after the result needed by YupVox is durably available and measurable.
+For externally dependent operations, write `started` immediately before the provider/container call and `completed` only after the result needed by YupVox is durably available and its measurable units are known.
 
-Completed summaries count only `phase='completed'`.
+This preserves two truths:
+- successful canonical work has both phases;
+- interrupted or ambiguous work can retain `started` without falsely claiming successful completion.
 
-If final units are outcome-dependent, `started.units` may be `0`; `completed.units` carries the measured quantity. This is required for TTS generated-audio duration.
+Completed usage summaries count only `phase='completed'`. Started-only rows remain available for later observability work but never inflate completed totals.
+
+When final units are outcome-dependent, `started.units` may be `0`; the matching `completed` row carries the measured units. This specifically applies to TTS duration.
 
 ## 7. Metering rules
 
 ### ASR
-- one operation per extracted chunk/provider invocation;
-- kind `asr_audio_minute`;
-- units `chunk.durationMs / 60000`;
-- provider is the configured adapter ID from `asrCapabilities(...)`;
-- same job generation + same chunk/provider is idempotent.
+
+One logical operation per extracted audio chunk and provider invocation.
+
+- Kind: `asr_audio_second`.
+- Completed units: `chunk.durationMs / 1000`.
+- Started units may use the same known input duration.
+- Provider: the actual configured ASR provider ID.
+- Replaying the same chunk/provider operation in the same retry generation must not duplicate its ledger rows.
 
 ### Translation
-- one operation per batch/provider invocation;
-- kind `translation_character`;
-- units are Unicode source-text characters sent to that provider;
-- provider is the real translation provider (`workers-ai`, `google`, etc.);
-- compare/quality modes meter each actual provider invocation independently.
+
+One logical operation per translation batch per provider invocation.
+
+- Kind: `translation_character`.
+- Units: Unicode source-text character count sent to that provider invocation.
+- Provider: the actual provider (`workers-ai`, `google`, etc.).
+- Compare/quality modes that call more than one provider create distinct operation keys and rows for each invocation.
+- Applying/rejecting a compare result later creates no extra usage event because the provider work already occurred.
 
 ### TTS
-- one operation per segment only when a new voice artifact is generated;
-- kind `tts_audio_second`;
-- provider is the actual voice provider, currently `elevenlabs` on export;
-- `started.units = 0` before generation;
-- after non-empty audio is durably written and the segment references it, probe the durable object with the existing media processor;
-- `completed.units = generatedDurationMs / 1000`;
-- a pre-existing valid durable voice artifact produces no new TTS operation.
 
-To avoid regenerating voice when generation succeeded but later probe/ledger completion failed, `UsageStore` exposes canonical lookup by `(operationKey, phase)`. On a replay with a durable voice artifact:
-- if there is no `started` event for the current retry generation, treat the artifact as pre-existing and do not meter it;
-- if `started` exists but `completed` does not, probe the existing durable artifact and complete the usage event without regenerating voice.
+One logical operation per segment only when a new voice artifact is actually generated.
+
+- Kind: `tts_audio_second`.
+- Provider: the actual voice provider, currently `elevenlabs` for the production export path or `workers-ai` where that adapter is used.
+- `started` is written before generation with `units = 0` because actual generated duration is not yet known.
+- After non-empty generated audio is durably written to the project-scoped R2 key and the segment points at that artifact, use existing media `probe(objectKey)` to obtain `durationMs`.
+- `completed.units = durationMs / 1000`.
+- If a valid durable voice artifact is reused (`voiceStatus === 'completed'` with a durable dubbed object key), do not record a new TTS operation.
+- If generation succeeds but later duration probe or ledger completion fails, retry/replay must reuse the durable artifact rather than intentionally regenerate voice merely to recover metering.
+
+To distinguish a pre-existing artifact from current-generation incomplete metering, `UsageStore` exposes canonical lookup by `(operationKey, phase)`:
+- if no current-generation `started` exists, treat the durable artifact as pre-existing and do not meter it;
+- if current-generation `started` exists but `completed` does not, probe the durable artifact and complete usage without regenerating voice.
 
 ### Render
-- one final-render operation;
-- kind `render_minute`;
-- units `project.durationMs / 60000` from canonical project metadata;
-- provider `ffmpeg-container`;
-- completed only after a valid project-scoped final export object key is available.
 
-## 8. Migration
+One logical operation for final dubbed-media render.
 
-Add to `usage_events`:
+- Kind: `render_second`.
+- Provider: `ffmpeg-container`.
+- Units: durable project `durationMs / 1000`.
+- Duration must come from canonical project metadata established by media probing; do not infer it from segment count or subtitle span.
+- `started` is written immediately before final render and `completed` only after a valid project-scoped final export artifact is durably available.
+
+## 8. Database migration
+
+Add nullable/backfill-safe columns to `usage_events`:
 - `job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL`;
 - `phase TEXT NOT NULL DEFAULT 'completed' CHECK (phase IN ('started','completed'))`;
 - `operation_key TEXT`.
 
-Add:
+Add a partial unique index for new metered events:
 
 ```sql
 CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_operation_phase
@@ -123,81 +152,143 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_operation_phase
   WHERE operation_key IS NOT NULL;
 ```
 
-Existing historical rows remain valid and require no synthetic operation key.
+Existing historical rows remain valid completed usage and require no synthetic operation keys. Existing historical `kind` values, if any, remain historical data; Phase 3B writers use only the normalized kinds defined above.
+
+No pricing columns or credit-debit ledger are added in Phase 3B.
 
 ## 9. Repository boundary
 
-`worker/src/db/usage.ts` provides:
-- `record(input): Promise<UsageEvent>`;
-- `getByOperation(operationKey, phase): Promise<UsageEvent | null>`;
-- `summarizeForUser(userId): Promise<UsageSummary>`;
-- `summarizeForProject(projectId, userId): Promise<UsageSummary>`;
-- `getCreditBalance(userId): Promise<number>`.
+Create/maintain `worker/src/db/usage.ts` with `UsageStore` and `UsageRepository`.
 
-Project summary must fail closed with `PROJECT_NOT_FOUND` when ownership does not match.
+Required methods:
+- `record(input: UsageRecordInput): Promise<UsageEvent>` — insert-or-read canonical event by `(operationKey, phase)`;
+- `getByOperation(operationKey: string, phase: UsagePhase): Promise<UsageEvent | null>`;
+- `summarizeForUser(userId: string): Promise<UsageSummary>`;
+- `summarizeForProject(projectId: string, userId: string): Promise<UsageSummary>`;
+- `getCreditBalance(userId: string): Promise<number>`.
 
-Totals:
+Canonical summary totals:
 
 ```ts
 {
-  asrAudioMinutes: number;
+  asrAudioSeconds: number;
   translationCharacters: number;
   ttsAudioSeconds: number;
-  renderMinutes: number;
+  renderSeconds: number;
 }
 ```
 
-Provider breakdown uses the same shape and completed rows only.
+`record` validates non-negative finite units, non-empty server-generated operation keys/provider IDs, supported phases, and normalized Phase 3B kinds before writing.
+
+Summary totals include only `phase='completed'` rows, preserve provider breakdown, and never round stored values. Project summaries fail closed with `PROJECT_NOT_FOUND` when ownership does not match.
 
 ## 10. Workflow integration
 
-`DubbingWorkflow` and `ExportWorkflow` construct `UsageRepository` and inject only the narrow usage interface.
+`DubbingWorkflow` and `ExportWorkflow` construct `UsageRepository` and inject a narrow usage interface into the pipeline layer rather than exposing D1 directly to provider adapters.
 
-Usage failures are not silently swallowed. Metering must not intentionally repeat already-durable TTS generation merely because a later probe/ledger completion failed.
+The retry generation used in operation keys comes from the canonical durable job row. Pipelines must not infer retry count from local loop state.
+
+Metering is placed at durable boundaries around provider/container work:
+- record `started` before the logical external call;
+- perform provider/container work in the existing deterministic Workflow structure;
+- persist the durable result/artifact;
+- record `completed` with measured units.
+
+Automatic Workflow replay reuses the same operation key. Existing durable outputs are checked/reused before new external work where a valid reusable-artifact contract exists.
+
+Usage recording failures are not silently swallowed. However, implementation must avoid intentionally repeating already-durable TTS generation merely because a later usage-duration probe or ledger write failed.
 
 ## 11. API
 
-Authorized routes:
-- `GET /api/usage` — current-user summary + informational credit balance;
-- `GET /api/projects/:id/usage` — owned-project summary.
+Add authorized routes:
+- `GET /api/usage` — current user's completed usage summary plus informational credit balance;
+- `GET /api/projects/:id/usage` — completed usage summary scoped to a project owned by the current user.
 
-No route accepts client `userId`. Cross-user project access returns 404.
+Cross-user project access returns 404 rather than exposing resource existence. No route accepts arbitrary `userId` from the client.
 
-## 12. Dashboard
+User-level response:
 
-Show a compact independent usage panel with:
-- informational internal credits;
-- ASR minutes;
+```ts
+{
+  creditBalance: number,
+  totals: {
+    asrAudioSeconds: number,
+    translationCharacters: number,
+    ttsAudioSeconds: number,
+    renderSeconds: number
+  },
+  providers: Record<string, {
+    asrAudioSeconds: number,
+    translationCharacters: number,
+    ttsAudioSeconds: number,
+    renderSeconds: number
+  }>
+}
+```
+
+Project response uses the same `totals`/`providers` shape and may omit `creditBalance`.
+
+## 12. Dashboard UX
+
+The Phase 3A dashboard receives a compact independent usage summary panel displaying:
+- available internal credits as informational only;
+- completed ASR time;
 - translation characters;
-- generated voice seconds;
-- render minutes;
-- provider breakdown.
+- completed generated voice time;
+- completed render time;
+- provider breakdown in a secondary region.
 
-Usage loading/error is isolated from persisted project/job state. No payment CTA, upgrade prompt, quota warning, or fake money estimate.
+The API remains normalized in seconds. UI may present seconds or convert to minutes depending on magnitude, but presentation conversion must not alter canonical stored/returned units.
+
+No payment CTA, upgrade prompt, quota warning, or fake monetary estimate is introduced in Phase 3B.
+
+A usage API failure does not hide persisted projects/jobs. Usage loading/error state is independent.
 
 ## 13. Precision
 
-Do not round in repository/API summaries. UI may round minutes/seconds to at most two decimals; character counts remain integers.
+Usage units remain numeric/REAL as already supported by schema. Repository/API summaries accumulate without early rounding.
 
-## 14. Required tests
+UI only rounds for presentation:
+- time: at most two decimals after chosen display-unit conversion;
+- characters: integer locale formatting.
 
-- duplicate same operation/phase returns one canonical event;
-- started/completed coexist;
+Tests use values that expose precision mistakes.
+
+## 14. Security
+
+All usage queries are scoped to the current user. Project summaries require ownership. No route accepts arbitrary user identity from request data.
+
+Operation keys are server-generated and never trusted from request bodies.
+
+## 15. Required tests
+
+- migration keeps existing rows valid and enforces unique `(operation_key, phase)` for new rows;
+- duplicate same-operation insert returns canonical single event;
+- started and completed phases coexist;
 - canonical lookup works;
-- completed-only summaries and provider precision;
-- unauthorized project fails closed;
-- ASR replay and explicit retry generation;
-- translation provider attribution;
-- pre-existing TTS artifact is not metered;
-- started-but-incomplete current-generation TTS reuses/probes durable artifact without regeneration;
-- new TTS usage uses probed generated-audio seconds;
-- render uses durable project minutes;
-- usage API authorization;
-- dashboard usage failure isolation;
-- no Phase 3B path decrements credits.
+- summaries exclude started-only rows;
+- provider totals and aggregate totals retain precision;
+- cross-user project usage is hidden/fails closed;
+- ASR chunk replay does not double-count and explicit job retry gets a distinct key;
+- ASR uses seconds;
+- translation usage follows actual provider invocation/input;
+- reused durable TTS output writes no new usage;
+- current-generation started-but-incomplete TTS reuses/probes durable artifact without regeneration;
+- newly generated TTS usage uses probed generated-audio seconds;
+- render uses durable project seconds;
+- usage API authorization and error redaction;
+- dashboard usage failure is isolated from project/job state;
+- no Phase 3B path decrements credits;
+- source acceptance rejects stale `asr_audio_minute`, `tts_character`, or `render_minute` contracts.
 
-## 15. Qualification
+## 16. Qualification
 
-Every task follows RED -> GREEN. Before merge: full verify, exact-head CI including Wrangler/screenshots/artifact, reverse-sync current `main` if advanced, rerun exact-head CI, expected-head merge, then post-merge `main` full GREEN.
+Each implementation task follows RED -> GREEN. Before merge:
+1. run the repository's full verification contract;
+2. require exact-head GitHub Actions GREEN including Wrangler dry-run and screenshot/artifact gates;
+3. re-read live `main` and reverse-sync non-force if it advanced;
+4. rerun full exact-head CI after reconciliation;
+5. merge with expected head SHA;
+6. require post-merge `main` CI GREEN.
 
-Source/CI success does not qualify production runtime.
+Production runtime remains UNQUALIFIED unless separate live Cloudflare credentials/runtime gates pass.
