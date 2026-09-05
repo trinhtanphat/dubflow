@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateMediaFile, validateMediaDuration, MAX_MEDIA_BYTES, MAX_MEDIA_DURATION_SECONDS } from '../build/upload/mediaValidation.js';
-import { formatTimestamp } from '../build/player/time.js';
-import { clamp, timeToPercent } from '../build/timeline/math.js';
+import { validateMediaFile, validateMediaDuration, MAX_MEDIA_BYTES, MAX_MEDIA_DURATION_SECONDS } from '../build/features/upload/mediaValidation.js';
+import { formatTimestamp } from '../build/features/player/time.js';
+import { clamp, timeToPercent } from '../build/features/timeline/math.js';
 
 test('media validation accepts supported formats within 5 GB', () => {
   assert.equal(validateMediaFile({ name: 'episode.mp4', size: MAX_MEDIA_BYTES }).valid, true);

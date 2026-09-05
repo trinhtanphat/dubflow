@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeProjectInput, ProjectInputError } from '../build/domain/project.js';
-import { healthPayload } from '../build/routes/health.js';
+import { normalizeProjectInput, ProjectInputError } from '../build-worker/domain/project.js';
+import { healthPayload } from '../build-worker/routes/health.js';
 
 test('health payload identifies DubFlow foundation phase', () => {
   assert.deepEqual(healthPayload(), { ok: true, service: 'dubflow', phase: 'foundation' });
