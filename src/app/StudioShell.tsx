@@ -10,7 +10,7 @@ import {
   persistRedo,
   persistUndo,
 } from '../features/timeline/segmentMutationService';
-import type { CloudJob } from '../features/projects/jobApi';
+import { startExport, type CloudJob } from '../features/projects/jobApi';
 import type { SegmentPatch } from '../features/transcript/segmentApi';
 import type { TranslationMode } from '../features/translation/translationApi';
 import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
@@ -197,6 +197,27 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     setActiveJob({ projectId: project.id, jobId: job.jobId });
   };
 
+  const startFinalExport = async () => {
+    if (!cloudEditable || activeJob || editorBusy) return;
+    setCloudError('');
+    try {
+      const job = await startExport(state.project.id);
+      setCloudJob({
+        id: job.jobId,
+        projectId: state.project.id,
+        type: 'export',
+        status: 'queued',
+        progress: 0,
+        currentStep: 'queued',
+        errorCode: null,
+        errorMessage: null,
+      });
+      setActiveJob({ projectId: state.project.id, jobId: job.jobId });
+    } catch (error) {
+      setCloudError(error instanceof Error ? error.message : 'Không thể bắt đầu xuất bản Dubbing.');
+    }
+  };
+
   useEffect(() => {
     if (!activeJob) return;
     const controller = new AbortController();
@@ -277,6 +298,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       if (patch.speakerId !== undefined && updated.speakerId && state.project.speakers.some((speaker) => speaker.id === updated.speakerId)) {
         dispatch({ type: 'assignSpeaker', segmentId, speakerId: updated.speakerId });
       }
+      if (patch.translatedText !== undefined || patch.speakerId !== undefined) await restoreCloudProject();
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
       await restoreCloudProject();
@@ -294,6 +316,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         setTranslationComparison({ workersAI: result.workersAI, google: result.google });
       } else {
         dispatch({ type: 'editTranslation', segmentId, text: result.segment.translatedText });
+        await restoreCloudProject();
       }
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Dịch lại thất bại.');
@@ -310,6 +333,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
       dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
       setTranslationComparison(null);
+      await restoreCloudProject();
     } catch (error) {
       setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
       await restoreCloudProject();
@@ -323,6 +347,15 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
   const canUndo = cloudEditable && !editorBusy && state.history.past.length > 0;
   const canRedo = cloudEditable && !editorBusy && state.history.future.length > 0;
+  const exportBusy = Boolean(activeJob && cloudJob?.type === 'export');
+  const canExport = cloudEditable
+    && !activeJob
+    && !editorBusy
+    && !state.project.exportObjectKey
+    && (state.project.status === 'needs_review' || state.project.status === 'completed');
+  const exportHref = state.project.exportObjectKey
+    ? `/api/projects/${encodeURIComponent(state.project.id)}/export/media`
+    : undefined;
 
   return (
     <div className={`app-shell studio-pro-shell reference-fidelity mobile-panel--${mobilePanel}`}>
@@ -334,6 +367,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         cloudDetail={cloudDetail}
         canUndo={canUndo}
         canRedo={canRedo}
+        canExport={canExport}
+        exportBusy={exportBusy}
+        exportHref={exportHref}
+        onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
         onOpenCommands={() => {}}
