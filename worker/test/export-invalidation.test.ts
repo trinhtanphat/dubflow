@@ -19,7 +19,9 @@ function statefulDb() {
         async all<T>() { return { results: [segmentRow] as T[] }; },
         async first<T>() {
           if (sql.includes('FROM segments s JOIN projects p')) return segmentRow as T;
-          if (sql.includes('SELECT id, duration_ms FROM projects')) return { id: 'p1', duration_ms: 10_000 } as T;
+          if (sql.includes('SELECT id, duration_ms, status FROM projects')) {
+            return { id: 'p1', duration_ms: 10_000, status: 'needs_review' } as T;
+          }
           return null as T | null;
         },
       };
