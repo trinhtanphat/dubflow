@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
 
 export type ProcessRouteDeps = {
@@ -24,6 +25,9 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
       const project = await projects.getByIdForUser(projectId, userId);
       if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before processing.'), 400);
+
+      const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
+      if (rateLimited) return rateLimited;
 
       const job = await jobs.create(projectId, 'dubbing');
       try {
