@@ -1,5 +1,6 @@
 import type {
   EditorMutation,
+  FieldMutation,
   SplitMutation,
   TimingMutation,
 } from '../../app/editorHistory';
@@ -11,7 +12,7 @@ import {
   type RestoreSegmentInput,
   type SegmentPatch,
 } from '../transcript/segmentApi';
-import type { Segment } from './types';
+import type { Segment, StudioProject } from './types';
 
 const UNASSIGNED_SPEAKER_ID = 'unassigned';
 
@@ -52,8 +53,21 @@ function toRestoreInput(segment: Segment): RestoreSegmentInput {
   };
 }
 
-function fieldHistoryRequiresCurrentCanonical(): never {
-  throw new Error('Field history persistence requires the current canonical project.');
+function requireCurrentSegment(project: StudioProject, segmentId: string): Segment {
+  const segment = project.segments.find((item) => item.id === segmentId);
+  if (!segment) throw new Error(`Current canonical segment not found: ${segmentId}`);
+  return segment;
+}
+
+function fieldPatch(mutation: FieldMutation, direction: 'undo' | 'redo'): SegmentPatch {
+  const source = direction === 'undo' ? mutation.before : mutation.after;
+  const patch: SegmentPatch = {};
+  for (const field of mutation.fields) {
+    if (field === 'sourceText') patch.sourceText = source.sourceText;
+    else if (field === 'translatedText') patch.translatedText = source.translatedText;
+    else patch.speakerId = source.speakerId === UNASSIGNED_SPEAKER_ID ? null : source.speakerId;
+  }
+  return patch;
 }
 
 export async function commitSegmentTiming(
@@ -89,45 +103,79 @@ export async function commitSegmentSplit(
 export async function persistUndo(
   projectId: string,
   mutation: EditorMutation,
+  currentProject: StudioProject,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
-  if (mutation.kind === 'fields') return fieldHistoryRequiresCurrentCanonical();
+  if (mutation.kind === 'fields') {
+    const current = requireCurrentSegment(currentProject, mutation.segmentId);
+    const persisted = await deps.patchSegment(projectId, mutation.segmentId, current.version, fieldPatch(mutation, 'undo'));
+    const canonical = toStudioSegment(persisted, current.speakerId);
+    return { ...mutation, before: canonical, after: current };
+  }
+
   if (mutation.kind === 'timing') {
-    await deps.patchSegment(projectId, mutation.segmentId, mutation.after.version, {
+    const current = requireCurrentSegment(currentProject, mutation.segmentId);
+    const persisted = await deps.patchSegment(projectId, mutation.segmentId, current.version, {
       startMs: mutation.before.startMs,
       endMs: mutation.before.endMs,
     });
-    return mutation;
+    return {
+      kind: 'timing',
+      segmentId: mutation.segmentId,
+      before: toStudioSegment(persisted, current.speakerId),
+      after: current,
+    };
   }
 
-  await deps.restoreSplit(
+  const currentParent = requireCurrentSegment(currentProject, mutation.originalBefore.id);
+  const currentChild = requireCurrentSegment(currentProject, mutation.rightAfter.id);
+  const persisted = await deps.restoreSplit(
     projectId,
-    mutation.originalBefore.id,
-    mutation.leftAfter.version,
-    mutation.rightAfter.id,
-    mutation.rightAfter.version,
+    currentParent.id,
+    currentParent.version,
+    currentChild.id,
+    currentChild.version,
     toRestoreInput(mutation.originalBefore),
   );
-  return mutation;
+  return {
+    kind: 'split',
+    originalBefore: toStudioSegment(persisted, currentParent.speakerId),
+    leftAfter: currentParent,
+    rightAfter: currentChild,
+  };
 }
 
 export async function persistRedo(
   projectId: string,
   mutation: EditorMutation,
+  currentProject: StudioProject,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
-  if (mutation.kind === 'fields') return fieldHistoryRequiresCurrentCanonical();
+  if (mutation.kind === 'fields') {
+    const current = requireCurrentSegment(currentProject, mutation.segmentId);
+    const persisted = await deps.patchSegment(projectId, mutation.segmentId, current.version, fieldPatch(mutation, 'redo'));
+    const canonical = toStudioSegment(persisted, current.speakerId);
+    return { ...mutation, before: current, after: canonical };
+  }
+
   if (mutation.kind === 'timing') {
-    await deps.patchSegment(projectId, mutation.segmentId, mutation.before.version, {
+    const current = requireCurrentSegment(currentProject, mutation.segmentId);
+    const persisted = await deps.patchSegment(projectId, mutation.segmentId, current.version, {
       startMs: mutation.after.startMs,
       endMs: mutation.after.endMs,
     });
-    return mutation;
+    return {
+      kind: 'timing',
+      segmentId: mutation.segmentId,
+      before: current,
+      after: toStudioSegment(persisted, current.speakerId),
+    };
   }
 
+  const currentParent = requireCurrentSegment(currentProject, mutation.originalBefore.id);
   return commitSegmentSplit(
     projectId,
-    mutation.originalBefore,
+    currentParent,
     mutation.leftAfter.endMs,
     deps,
   );
