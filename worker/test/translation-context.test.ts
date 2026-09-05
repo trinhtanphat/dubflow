@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+// This source-level contract keeps the schema/provenance surface reviewable before behavioral D1 tests.
 const migrationPath = 'migrations/0006_translation_context.sql';
 const contextPath = 'worker/src/services/translation/context.ts';
 const repositoryPath = 'worker/src/db/translation-context.ts';
