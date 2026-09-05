@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { Dispatch, PointerEvent as ReactPointerEvent, UIEvent } from 'react';
+import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, UIEvent } from 'react';
 import type { StudioAction, StudioState } from '../../app/studioState';
 import {
   chooseRulerIntervalSeconds,
@@ -53,6 +53,7 @@ function buildVisibleRulerMarks(
 
 export function Timeline({ project, playheadMs, selectedSegmentId, timelineView, dispatch }: TimelineProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const activePlayheadPointerId = useRef<number | null>(null);
   const pixelsPerSecond = timelineView.pixelsPerSecond;
   const canvasWidth = Math.max(projectWidthPx(project.durationMs, pixelsPerSecond), timelineView.viewportWidth || 1);
   const playheadLeft = timeToPixels(playheadMs, pixelsPerSecond);
@@ -101,6 +102,39 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
     const target = event.target as HTMLElement;
     if (target.closest('button, input, textarea, select, [data-timeline-interactive="true"]')) return;
     seekFromPointer(event);
+  };
+
+  const handlePlayheadPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    activePlayheadPointerId.current = event.pointerId;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    seekFromPointer(event);
+  };
+
+  const handlePlayheadPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (activePlayheadPointerId.current !== event.pointerId) return;
+    event.stopPropagation();
+    seekFromPointer(event);
+  };
+
+  const finishPlayheadDrag = (event: ReactPointerEvent<HTMLButtonElement>, applyFinalPosition: boolean) => {
+    if (activePlayheadPointerId.current !== event.pointerId) return;
+    event.stopPropagation();
+    if (applyFinalPosition) seekFromPointer(event);
+    activePlayheadPointerId.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  };
+
+  const handlePlayheadKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Escape' || activePlayheadPointerId.current === null) return;
+    const pointerId = activePlayheadPointerId.current;
+    activePlayheadPointerId.current = null;
+    if (event.currentTarget.hasPointerCapture?.(pointerId)) {
+      event.currentTarget.releasePointerCapture?.(pointerId);
+    }
   };
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
@@ -154,7 +188,20 @@ export function Timeline({ project, playheadMs, selectedSegmentId, timelineView,
                 <span key={mark.timeMs} style={{ left: timeToPixels(mark.timeMs, pixelsPerSecond) }}>{mark.label}</span>
               ))}
             </div>
-            <div className="timeline-playhead" style={{ left: playheadLeft }} aria-label="Playhead"><i /></div>
+            <div className="timeline-playhead" style={{ left: playheadLeft }}>
+              <button
+                type="button"
+                className="timeline-playhead-handle"
+                aria-label="Kéo playhead"
+                data-timeline-playhead-handle="true"
+                data-timeline-interactive="true"
+                onPointerDown={handlePlayheadPointerDown}
+                onPointerMove={handlePlayheadPointerMove}
+                onPointerUp={(event) => finishPlayheadDrag(event, true)}
+                onPointerCancel={(event) => finishPlayheadDrag(event, false)}
+                onKeyDown={handlePlayheadKeyDown}
+              />
+            </div>
             <div className="timeline-content-row video-thumbnails">
               {Array.from({ length: 12 }, (_, i) => <i key={i}><span>{i + 1}</span></i>)}
             </div>
