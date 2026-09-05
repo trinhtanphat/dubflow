@@ -5,8 +5,12 @@ import { VideoStage } from '../features/player/VideoStage';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
 import { Timeline } from '../features/timeline/Timeline';
 import type { CloudJob } from '../features/projects/jobApi';
+import type { SegmentPatch } from '../features/transcript/segmentApi';
+import type { TranslationMode } from '../features/translation/translationApi';
+import { persistEditorPatch, retranslateEditorSegment } from '../features/transcript/editorPersistence';
 import type { useStudioState } from './useStudioState';
 import { followCloudJob } from './cloudJobFlow';
+import { loadCloudStudioProject } from './cloudHydration';
 import { StudioTopbar } from './StudioTopbar';
 
 type StudioShellProps = ReturnType<typeof useStudioState>;
@@ -17,6 +21,12 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [activeJob, setActiveJob] = useState<{ projectId: string; jobId: string } | null>(null);
   const [cloudJob, setCloudJob] = useState<CloudJob | null>(null);
   const [cloudError, setCloudError] = useState('');
+  const [translationMode, setTranslationMode] = useState<TranslationMode>('workers-ai');
+  const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
+  const [editorBusy, setEditorBusy] = useState(false);
+  const [editorError, setEditorError] = useState('');
+
+  const cloudEditable = state.project.id !== 'demo';
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -60,14 +70,85 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     return () => controller.abort();
   }, [activeJob, dispatch]);
 
+  useEffect(() => {
+    setTranslationComparison(null);
+    setEditorError('');
+  }, [state.selectedSegmentId]);
+
+  const restoreCloudProject = async () => {
+    if (!cloudEditable) return;
+    try {
+      const project = await loadCloudStudioProject(state.project.id);
+      dispatch({ type: 'hydrateProject', project });
+    } catch {
+      // Preserve the visible error from the original failed mutation.
+    }
+  };
+
+  const commitPatch = async (segmentId: string, patch: SegmentPatch) => {
+    if (!cloudEditable) return;
+    setEditorError('');
+    try {
+      const updated = await persistEditorPatch(state.project.id, segmentId, patch);
+      if (patch.sourceText !== undefined) {
+        dispatch({ type: 'editSource', segmentId, text: updated.sourceText });
+      }
+      if (patch.translatedText !== undefined) {
+        dispatch({ type: 'editTranslation', segmentId, text: updated.translatedText });
+      }
+      if (patch.speakerId !== undefined && updated.speakerId && state.project.speakers.some((speaker) => speaker.id === updated.speakerId)) {
+        dispatch({ type: 'assignSpeaker', segmentId, speakerId: updated.speakerId });
+      }
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Không thể lưu thay đổi segment.');
+      await restoreCloudProject();
+    }
+  };
+
+  const retranslate = async (segmentId: string) => {
+    if (!cloudEditable || editorBusy) return;
+    setEditorBusy(true);
+    setEditorError('');
+    setTranslationComparison(null);
+    try {
+      const result = await retranslateEditorSegment(state.project.id, segmentId, translationMode);
+      if (result.mode === 'compare') {
+        setTranslationComparison({ workersAI: result.workersAI, google: result.google });
+      } else {
+        dispatch({ type: 'editTranslation', segmentId, text: result.segment.translatedText });
+      }
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Dịch lại thất bại.');
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
+  const applyTranslation = async (text: string) => {
+    if (!selectedSegment || !cloudEditable || editorBusy) return;
+    setEditorBusy(true);
+    setEditorError('');
+    try {
+      const updated = await persistEditorPatch(state.project.id, selectedSegment.id, { translatedText: text });
+      dispatch({ type: 'editTranslation', segmentId: selectedSegment.id, text: updated.translatedText });
+      setTranslationComparison(null);
+    } catch (error) {
+      setEditorError(error instanceof Error ? error.message : 'Không thể áp dụng bản dịch.');
+      await restoreCloudProject();
+    } finally {
+      setEditorBusy(false);
+    }
+  };
+
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
   const cloudDetail = cloudError || cloudJob?.currentStep || (cloudJob ? cloudJob.status : undefined);
+  const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
 
   return (
     <div className={`app-shell studio-pro-shell mobile-panel--${mobilePanel}`}>
       <StudioTopbar
         projectTitle={state.project.title}
-        saveState="offline"
+        saveState={saveState}
         cloudState={cloudState}
         cloudProgress={cloudJob?.progress}
         cloudDetail={cloudDetail}
@@ -93,7 +174,21 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           <Timeline project={state.project} playheadMs={state.playheadMs} selectedSegmentId={state.selectedSegmentId} dispatch={dispatch} />
         </section>
 
-        <ScriptInspector segment={selectedSegment} speakers={state.project.speakers} lipSyncEnabled={state.lipSyncEnabled} dispatch={dispatch} />
+        <ScriptInspector
+          segment={selectedSegment}
+          speakers={state.project.speakers}
+          lipSyncEnabled={state.lipSyncEnabled}
+          dispatch={dispatch}
+          cloudEditable={cloudEditable}
+          translationMode={translationMode}
+          onTranslationModeChange={setTranslationMode}
+          onCommitPatch={commitPatch}
+          onRetranslate={retranslate}
+          comparison={translationComparison}
+          onApplyTranslation={applyTranslation}
+          busy={editorBusy}
+          error={editorError}
+        />
       </main>
 
       <button
