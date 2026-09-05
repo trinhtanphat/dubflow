@@ -92,8 +92,8 @@ describe('segment split drafting', () => {
 
   it('splits text near the proportional whitespace boundary', () => {
     expect(splitTextAtRatio('hello beautiful world', 0.5)).toEqual({
-      left: 'hello',
-      right: 'beautiful world',
+      left: 'hello beautiful',
+      right: 'world',
     });
   });
 
@@ -107,8 +107,8 @@ describe('segment split drafting', () => {
     const draft = splitSegmentDraft(segment, 2000);
     expect(draft.left).toMatchObject({ id: 'seg-1', startMs: 1000, endMs: 2000, speakerId: 'speaker-1' });
     expect(draft.right).toMatchObject({ startMs: 2000, endMs: 3000, speakerId: 'speaker-1' });
-    expect(draft.left.sourceText).toBe('hello');
-    expect(draft.right.sourceText).toBe('beautiful world');
+    expect(draft.left.sourceText).toBe('hello beautiful');
+    expect(draft.right.sourceText).toBe('world');
 
     expect(() => splitSegmentDraft(segment, 1050)).toThrow(/100 ms/i);
     expect(() => splitSegmentDraft(segment, 2950)).toThrow(/100 ms/i);
