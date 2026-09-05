@@ -9,6 +9,9 @@ import { createProcessRoutes } from './routes/process';
 import { createSegmentRoutes } from './routes/segments';
 import { createTranslationRoutes } from './routes/translation';
 
+export { ContainerProxy } from '@cloudflare/containers';
+export { FfmpegContainer } from './containers/FfmpegContainer';
+
 const app = new Hono<{ Bindings: Env }>();
 
 app.get('/api/health', (c) => c.json(healthPayload()));

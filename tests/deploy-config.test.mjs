@@ -28,7 +28,7 @@ test('deployment config defines the FFmpeg container Durable Object', () => {
   const container = config.containers?.find((item) => item.class_name === 'FfmpegContainer');
   assert.ok(container, 'missing FfmpegContainer container definition');
   assert.equal(container.image, './containers/ffmpeg/Dockerfile');
-  assert.equal(container.instance_type, 'basic');
+  assert.equal(container.instance_type, 'standard-1');
 
   const binding = config.durable_objects?.bindings?.find((item) => item.name === 'FFMPEG_CONTAINER');
   assert.deepEqual(binding, { name: 'FFMPEG_CONTAINER', class_name: 'FfmpegContainer' });
