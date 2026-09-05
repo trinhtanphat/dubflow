@@ -145,7 +145,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const saveState = !cloudEditable ? 'offline' : editorError ? 'error' : editorBusy ? 'saving' : 'saved';
 
   return (
-    <div className={`app-shell studio-pro-shell mobile-panel--${mobilePanel}`}>
+    <div className={`app-shell studio-pro-shell reference-fidelity mobile-panel--${mobilePanel}`}>
       <StudioTopbar
         projectTitle={state.project.title}
         saveState={saveState}
