@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ApiError } from '../../lib/api/client';
 import { fetchVoiceCapabilities, fetchVoicePreview } from './voiceApi';
 
 describe('voiceApi', () => {
@@ -28,8 +27,9 @@ describe('voiceApi', () => {
     const fetcher = vi.fn(async () => Response.json({
       code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'Voice provider is not configured.',
     }, { status: 503 }));
-    await expect(fetchVoicePreview({ text: 'Xin chào', language: 'vi' }, fetcher as typeof fetch)).rejects.toEqual(
-      expect.objectContaining<ApiError>({ status: 503, code: 'VOICE_PROVIDER_UNCONFIGURED' }),
-    );
+    await expect(fetchVoicePreview({ text: 'Xin chào', language: 'vi' }, fetcher as typeof fetch)).rejects.toMatchObject({
+      status: 503,
+      code: 'VOICE_PROVIDER_UNCONFIGURED',
+    });
   });
 });
