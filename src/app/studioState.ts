@@ -1,7 +1,23 @@
 import { clampPixelsPerSecond } from '../features/timeline/math';
-import type { StudioProject } from '../features/timeline/types';
+import type { Segment, StudioProject } from '../features/timeline/types';
+import {
+  applyMutation,
+  emptyEditorHistory,
+  pushHistory,
+  redoHistory,
+  undoHistory,
+  type EditorHistory,
+  type SplitMutation,
+  type TimingMutation,
+} from './editorHistory';
 
 export type PlaybackRate = 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2;
+
+export type SegmentPreview = {
+  segmentId: string;
+  startMs: number;
+  endMs: number;
+};
 
 export type StudioState = {
   project: StudioProject;
@@ -19,6 +35,8 @@ export type StudioState = {
     scrollLeft: number;
     viewportWidth: number;
   };
+  history: EditorHistory;
+  segmentPreview: SegmentPreview | null;
 };
 
 export type StudioAction =
@@ -35,7 +53,13 @@ export type StudioAction =
   | { type: 'toggleMuted' }
   | { type: 'setTimelineZoom'; pixelsPerSecond: number }
   | { type: 'setTimelineScroll'; scrollLeft: number }
-  | { type: 'setTimelineViewport'; viewportWidth: number };
+  | { type: 'setTimelineViewport'; viewportWidth: number }
+  | { type: 'previewSegmentTiming'; segmentId: string; startMs: number; endMs: number }
+  | { type: 'cancelSegmentPreview' }
+  | { type: 'commitTimingMutation'; before: Segment; after: Segment }
+  | { type: 'commitSplitMutation'; originalBefore: Segment; leftAfter: Segment; rightAfter: Segment }
+  | { type: 'applyUndoLocal' }
+  | { type: 'applyRedoLocal' };
 
 export function createInitialStudioState(project: StudioProject): StudioState {
   const firstSegment = project.segments[0];
@@ -46,12 +70,20 @@ export function createInitialStudioState(project: StudioProject): StudioState {
     lipSyncEnabled: true,
     playback: { playing: false, rate: 1, volume: 1, muted: false },
     timelineView: { pixelsPerSecond: 1, scrollLeft: 0, viewportWidth: 0 },
+    history: emptyEditorHistory(),
+    segmentPreview: null,
   };
 }
 
 function updateSegment(state: StudioState, segmentId: string, update: (segment: StudioProject['segments'][number]) => StudioProject['segments'][number]): StudioState {
   const segments = state.project.segments.map((segment) => segment.id === segmentId ? update(segment) : segment);
   return { ...state, project: { ...state.project, segments } };
+}
+
+function selectionAfterMutation(state: StudioState, project: StudioProject, preferredId?: string): string {
+  if (preferredId && project.segments.some((segment) => segment.id === preferredId)) return preferredId;
+  if (project.segments.some((segment) => segment.id === state.selectedSegmentId)) return state.selectedSegmentId;
+  return project.segments[0]?.id ?? '';
 }
 
 export function studioReducer(state: StudioState, action: StudioAction): StudioState {
@@ -81,6 +113,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
         selectedSegmentId: selected?.id ?? '',
         playheadMs: Math.max(0, Math.min(action.project.durationMs, retainedPlayhead)),
         playback: { ...state.playback, playing: false },
+        history: emptyEditorHistory(),
+        segmentPreview: null,
       };
     }
     case 'toggleLipSync':
@@ -111,6 +145,77 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
           viewportWidth: Number.isFinite(action.viewportWidth) ? Math.max(0, action.viewportWidth) : 0,
         },
       };
+    case 'previewSegmentTiming':
+      if (!state.project.segments.some((segment) => segment.id === action.segmentId)) return state;
+      return {
+        ...state,
+        segmentPreview: {
+          segmentId: action.segmentId,
+          startMs: action.startMs,
+          endMs: action.endMs,
+        },
+      };
+    case 'cancelSegmentPreview':
+      return state.segmentPreview ? { ...state, segmentPreview: null } : state;
+    case 'commitTimingMutation': {
+      if (action.before.id !== action.after.id) return { ...state, segmentPreview: null };
+      const mutation: TimingMutation = {
+        kind: 'timing',
+        segmentId: action.before.id,
+        before: action.before,
+        after: action.after,
+      };
+      const project = applyMutation(state.project, mutation, 'forward');
+      return {
+        ...state,
+        project,
+        history: pushHistory(state.history, mutation),
+        segmentPreview: null,
+        selectedSegmentId: selectionAfterMutation(state, project, action.after.id),
+      };
+    }
+    case 'commitSplitMutation': {
+      const mutation: SplitMutation = {
+        kind: 'split',
+        originalBefore: action.originalBefore,
+        leftAfter: action.leftAfter,
+        rightAfter: action.rightAfter,
+      };
+      const project = applyMutation(state.project, mutation, 'forward');
+      return {
+        ...state,
+        project,
+        history: pushHistory(state.history, mutation),
+        segmentPreview: null,
+        selectedSegmentId: selectionAfterMutation(state, project, action.leftAfter.id),
+      };
+    }
+    case 'applyUndoLocal': {
+      const step = undoHistory(state.history);
+      if (!step.mutation) return state;
+      const project = applyMutation(state.project, step.mutation, 'backward');
+      const preferredId = step.mutation.kind === 'split' ? step.mutation.originalBefore.id : step.mutation.segmentId;
+      return {
+        ...state,
+        project,
+        history: step.history,
+        segmentPreview: null,
+        selectedSegmentId: selectionAfterMutation(state, project, preferredId),
+      };
+    }
+    case 'applyRedoLocal': {
+      const step = redoHistory(state.history);
+      if (!step.mutation) return state;
+      const project = applyMutation(state.project, step.mutation, 'forward');
+      const preferredId = step.mutation.kind === 'split' ? step.mutation.leftAfter.id : step.mutation.segmentId;
+      return {
+        ...state,
+        project,
+        history: step.history,
+        segmentPreview: null,
+        selectedSegmentId: selectionAfterMutation(state, project, preferredId),
+      };
+    }
     default:
       return state;
   }
