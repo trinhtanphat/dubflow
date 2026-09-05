@@ -287,11 +287,13 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
   const retranslate = async (segmentId: string) => {
     if (!cloudEditable || editorBusy) return;
+    const current = state.project.segments.find((segment) => segment.id === segmentId);
+    if (!current) return;
     setEditorBusy(true);
     setEditorError('');
     setTranslationComparison(null);
     try {
-      const result = await retranslateEditorSegment(state.project.id, segmentId, translationMode);
+      const result = await retranslateEditorSegment(state.project.id, segmentId, current.version, translationMode);
       if (result.mode === 'compare') {
         setTranslationComparison({ workersAI: result.workersAI, google: result.google });
       } else {
