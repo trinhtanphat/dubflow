@@ -27,6 +27,7 @@ type ScriptInspectorProps = {
   segment?: Segment;
   speakers: Speaker[];
   lipSyncEnabled: boolean;
+  visualLipSyncAvailable?: boolean;
   dispatch: Dispatch<StudioAction>;
   cloudEditable?: boolean;
   draft?: SegmentDraft;
@@ -70,6 +71,7 @@ export function ScriptInspector({
   segment,
   speakers,
   lipSyncEnabled,
+  visualLipSyncAvailable = false,
   dispatch,
   cloudEditable = false,
   draft,
@@ -125,6 +127,7 @@ export function ScriptInspector({
   const effectiveVoiceProvider = voiceProviderLabel ?? providerLabel(detectedVoice);
   const effectiveVoiceBusy = voiceBusy || internalVoiceBusy;
   const effectiveVoiceError = voiceError || internalVoiceError;
+  const effectiveLipSyncEnabled = visualLipSyncAvailable && lipSyncEnabled;
 
   const commitLegacy = (patch: SegmentPatch) => {
     if (cloudEditable) onCommitPatch?.(segment.id, patch);
@@ -293,14 +296,21 @@ export function ScriptInspector({
         <div className="toggle-row">
           <div>
             <strong>Đồng bộ khẩu hình</strong>
-            <span>Duration fitting khả dụng; visual lip-sync chỉ bật khi capability backend xác nhận.</span>
+            <span>
+              {visualLipSyncAvailable
+                ? 'Visual lip-sync đã được backend xác nhận; duration fitting vẫn được áp dụng.'
+                : 'Visual lip-sync chưa khả dụng trên backend hiện tại.'}
+            </span>
           </div>
           <button
-            className={`toggle ${lipSyncEnabled ? 'is-on' : ''}`}
+            className={`toggle ${effectiveLipSyncEnabled ? 'is-on' : ''}`}
+            disabled={!visualLipSyncAvailable}
             aria-label="Bật hoặc tắt đồng bộ khẩu hình"
-            aria-pressed={lipSyncEnabled}
+            aria-pressed={effectiveLipSyncEnabled}
             type="button"
-            onClick={() => dispatch({ type: 'toggleLipSync' })}
+            onClick={() => {
+              if (visualLipSyncAvailable) dispatch({ type: 'toggleLipSync' });
+            }}
           ><i /></button>
         </div>
       </section>
