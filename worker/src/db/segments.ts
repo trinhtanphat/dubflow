@@ -49,6 +49,7 @@ export interface SegmentStore {
   splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number): Promise<{ left: Segment; right: Segment }>;
   restoreSplit(projectId: string, segmentId: string, childSegmentId: string, userId: string, original: SegmentRestoreInput): Promise<Segment>;
   setTranslationResult(projectId: string, segmentId: string, userId: string, translatedText: string, engine: 'workers-ai' | 'google'): Promise<Segment | null>;
+  setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
   replaceFromAsr(projectId: string, userId: string, segments: PersistedAsrSegment[]): Promise<Segment[]>;
 }
 
@@ -83,6 +84,24 @@ export class SegmentRepository implements SegmentStore {
   private async getAuthorizedProject(projectId: string, userId: string): Promise<AuthorizedProject | null> {
     return this.db.prepare(`SELECT id, duration_ms FROM projects WHERE id = ? AND user_id = ? LIMIT 1`)
       .bind(projectId, userId).first<AuthorizedProject>();
+  }
+
+  private invalidationStatement(projectId: string, userId: string) {
+    return this.db.prepare(`UPDATE projects
+      SET export_object_key = NULL, status = 'needs_review', updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?`)
+      .bind(projectId, userId);
+  }
+
+  private clearExportStatement(projectId: string, userId: string) {
+    return this.db.prepare(`UPDATE projects
+      SET export_object_key = NULL, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?`)
+      .bind(projectId, userId);
+  }
+
+  private async invalidatePublishedExport(projectId: string, userId: string): Promise<void> {
+    await this.invalidationStatement(projectId, userId).run();
   }
 
   private async assertLegalTiming(
@@ -136,6 +155,7 @@ export class SegmentRepository implements SegmentStore {
       SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(next.sourceText, next.translatedText, next.speakerId, next.startMs, next.endMs, voiceStatus, dubbedObjectKey, segmentId, projectId, userId).run();
+    if (invalidatesVoice) await this.invalidatePublishedExport(projectId, userId);
     return {
       ...current,
       ...next,
@@ -207,6 +227,7 @@ export class SegmentRepository implements SegmentStore {
           right.translationStatus,
           current.id,
         ),
+      this.invalidationStatement(projectId, userId),
     ]);
     return { left, right };
   }
@@ -256,6 +277,7 @@ export class SegmentRepository implements SegmentStore {
           projectId,
           userId,
         ),
+      this.invalidationStatement(projectId, userId),
     ]);
     return restored;
   }
@@ -266,6 +288,7 @@ export class SegmentRepository implements SegmentStore {
     await this.db.prepare(`UPDATE segments SET translated_text = ?, translation_engine = ?, translation_status = 'completed', voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(translatedText, engine, segmentId, projectId, userId).run();
+    await this.invalidatePublishedExport(projectId, userId);
     return {
       ...current,
       translatedText,
@@ -307,6 +330,7 @@ export class SegmentRepository implements SegmentStore {
           translation_engine, translation_status, voice_status, dubbed_object_key, version
         ) VALUES (?, ?, NULL, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', NULL, 1)`,
       ).bind(segment.id, projectId, segment.startMs, segment.endMs, segment.sourceText)),
+      this.clearExportStatement(projectId, userId),
     ];
     await this.db.batch(statements);
     return this.list(projectId, userId);
