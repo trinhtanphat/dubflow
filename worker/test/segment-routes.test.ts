@@ -27,29 +27,42 @@ const baseSegment: Segment = {
 class MemorySegmentStore implements SegmentStore {
   calls: Array<{ method: string; args: unknown[] }> = [];
   updateError: Error | null = null;
+  current: Segment = baseSegment;
 
   async list() {
-    return [baseSegment];
+    return [this.current];
   }
 
   async get(_projectId: string, segmentId: string, userId: string) {
     if (segmentId !== 's1' || userId !== 'dev-user') return null;
-    return baseSegment;
+    return this.current;
   }
 
   async updateText(): Promise<Segment | null> {
     throw new Error('legacy updateText must not be used by segment routes');
   }
 
-  async updateSegment(projectId: string, segmentId: string, userId: string, patch: SegmentPatch) {
-    this.calls.push({ method: 'updateSegment', args: [projectId, segmentId, userId, patch] });
+  async updateSegment(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    expectedVersionOrPatch: number | SegmentPatch,
+    maybePatch?: SegmentPatch,
+  ) {
+    const expectedVersion = typeof expectedVersionOrPatch === 'number' ? expectedVersionOrPatch : null;
+    const patch = (maybePatch ?? expectedVersionOrPatch) as SegmentPatch;
+    this.calls.push({ method: 'updateSegment', args: [projectId, segmentId, userId, expectedVersion, patch] });
     if (this.updateError) throw this.updateError;
-    return {
-      ...baseSegment,
+    if (expectedVersion !== this.current.version) {
+      throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
+    this.current = {
+      ...this.current,
       ...patch,
-      voiceStatus: patch.startMs !== undefined || patch.endMs !== undefined ? 'pending' : baseSegment.voiceStatus,
-      version: 2,
+      voiceStatus: patch.startMs !== undefined || patch.endMs !== undefined ? 'pending' : this.current.voiceStatus,
+      version: this.current.version + 1,
     };
+    return this.current;
   }
 
   async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number) {
@@ -95,19 +108,49 @@ function makeApp(store: SegmentStore) {
 }
 
 describe('segment mutation routes', () => {
-  it('routes PATCH timing edits through current-state repository validation', async () => {
+  it('requires an expected revision and routes the inner PATCH through repository validation', async () => {
     const store = new MemorySegmentStore();
     const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ startMs: 1_200, endMs: 3_200 }),
+      body: JSON.stringify({ expectedVersion: 1, patch: { startMs: 1_200, endMs: 3_200 } }),
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ startMs: 1_200, endMs: 3_200, voiceStatus: 'pending' });
+    expect(await response.json()).toMatchObject({ startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', version: 2 });
     expect(store.calls).toEqual([
-      { method: 'updateSegment', args: ['project-1', 's1', 'dev-user', { startMs: 1_200, endMs: 3_200 }] },
+      { method: 'updateSegment', args: ['project-1', 's1', 'dev-user', 1, { startMs: 1_200, endMs: 3_200 }] },
     ]);
+  });
+
+  it('rejects a PATCH without a positive integer expectedVersion', async () => {
+    const store = new MemorySegmentStore();
+    const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ patch: { translatedText: 'new' } }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(store.calls).toEqual([]);
+  });
+
+  it('returns 409 with the fresh canonical server segment for a stale revision', async () => {
+    const store = new MemorySegmentStore();
+    store.current = { ...baseSegment, translatedText: 'server-new', version: 2 };
+    const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 1, patch: { translatedText: 'local-old' } }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: true,
+      code: 'SEGMENT_VERSION_CONFLICT',
+      message: 'Segment changed elsewhere.',
+      segment: store.current,
+    });
   });
 
   it('exposes the dedicated Worker split endpoint', async () => {
@@ -154,7 +197,7 @@ describe('segment mutation routes', () => {
     const response = await makeApp(store).request('/api/projects/project-1/segments/s1', {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ startMs: 2_500, endMs: 4_500 }),
+      body: JSON.stringify({ expectedVersion: 1, patch: { startMs: 2_500, endMs: 4_500 } }),
     });
 
     expect(response.status).toBe(409);
