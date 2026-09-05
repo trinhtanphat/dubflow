@@ -6,7 +6,7 @@ import { VideoStage } from './VideoStage';
 
 const segment: Segment = {
   id: 's1', speakerId: 'speaker-1', startMs: 1000, endMs: 3000,
-  sourceText: 'Lời gốc', translatedText: 'Bản dịch',
+  sourceText: 'Lời gốc', translatedText: 'Bản dịch', version: 1,
 };
 const playback: StudioState['playback'] = { playing: false, rate: 1, volume: 1, muted: false };
 const baseProject: StudioProject = {
