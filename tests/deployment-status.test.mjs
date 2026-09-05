@@ -4,7 +4,8 @@ import fs from 'node:fs';
 
 const status = fs.readFileSync(new URL('../docs/deployment-status.md', import.meta.url), 'utf8');
 
-test('deployment status pins the production hostname and forbids GitHub Actions', () => {
+test('deployment status pins production hostname and GitHub Actions contract', () => {
   assert.match(status, /yupvox\.qs3d\.site/);
-  assert.match(status, /does not use GitHub Actions/);
+  assert.match(status, /GitHub Actions is enabled/);
+  assert.match(status, /CLOUDFLARE_API_TOKEN/);
 });
