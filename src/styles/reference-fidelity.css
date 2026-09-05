@@ -312,6 +312,7 @@
   }
 
   .studio-pro-shell.reference-fidelity .reference-drop-zone {
+    height: 96px;
     min-height: 96px;
     margin-top: 8px;
   }
