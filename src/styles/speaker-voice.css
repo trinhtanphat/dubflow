@@ -1,0 +1,56 @@
+.speaker-voice-editor {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.speaker-voice-editor input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid #2c2e38;
+  border-radius: 6px;
+  outline: none;
+  padding: 0 8px;
+  background: #0f1016;
+  color: #d9dbe3;
+  font-size: 9px;
+}
+
+.speaker-voice-editor input::placeholder {
+  color: #626573;
+}
+
+.speaker-voice-editor input:focus {
+  border-color: #7540b6;
+  box-shadow: 0 0 0 2px rgba(139, 54, 244, .12);
+}
+
+.speaker-voice-editor .secondary-button {
+  min-height: 30px;
+  border: 1px solid #3c3150;
+  border-radius: 6px;
+  background: rgba(139, 54, 244, .08);
+  color: #d9c5f7;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.speaker-voice-editor small {
+  color: #858896;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+@media (min-width: 1280px) {
+  .reference-fidelity .speaker-voice-editor {
+    gap: 5px;
+    margin-top: 6px;
+  }
+
+  .reference-fidelity .speaker-voice-editor input,
+  .reference-fidelity .speaker-voice-editor .secondary-button {
+    height: 27px;
+    min-height: 27px;
+  }
+}
