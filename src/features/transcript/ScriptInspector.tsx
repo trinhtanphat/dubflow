@@ -21,9 +21,9 @@ export function ScriptInspector({ segment, speakers, lipSyncEnabled, dispatch }:
         <span className="status-dot" title="Editor sẵn sàng">●</span>
       </div>
 
-      <div className="inspector-tabs" role="tablist" aria-label="Chế độ inspector">
-        <button className="is-active" type="button" role="tab" aria-selected="true">Kịch bản</button>
-        <button type="button" role="tab" aria-selected="false">Nhân vật</button>
+      <div className="inspector-tabs" aria-label="Chế độ inspector">
+        <button className="is-active" type="button" aria-current="page">Kịch bản</button>
+        <button type="button" disabled title="Chế độ Nhân vật sẽ được kích hoạt trong Studio Pro V2.4">Nhân vật</button>
       </div>
 
       <div className="language-card language-card--source">
