@@ -8,6 +8,7 @@ import { createVoiceRoutes } from './routes/voice';
 import { createProcessRoutes } from './routes/process';
 import { createSegmentRoutes } from './routes/segments';
 import { createTranslationRoutes } from './routes/translation';
+import { createMediaRoutes } from './routes/media';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -21,6 +22,7 @@ app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
 app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createTranslationRoutes());
+app.route('/api/projects', createMediaRoutes());
 app.route('/api/voice', createVoiceRoutes());
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
