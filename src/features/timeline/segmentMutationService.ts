@@ -52,6 +52,10 @@ function toRestoreInput(segment: Segment): RestoreSegmentInput {
   };
 }
 
+function fieldHistoryRequiresCurrentCanonical(): never {
+  throw new Error('Field history persistence requires the current canonical project.');
+}
+
 export async function commitSegmentTiming(
   projectId: string,
   before: Segment,
@@ -87,6 +91,7 @@ export async function persistUndo(
   mutation: EditorMutation,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
+  if (mutation.kind === 'fields') return fieldHistoryRequiresCurrentCanonical();
   if (mutation.kind === 'timing') {
     await deps.patchSegment(projectId, mutation.segmentId, mutation.after.version, {
       startMs: mutation.before.startMs,
@@ -111,6 +116,7 @@ export async function persistRedo(
   mutation: EditorMutation,
   deps: SegmentMutationDeps = defaultDeps,
 ): Promise<EditorMutation> {
+  if (mutation.kind === 'fields') return fieldHistoryRequiresCurrentCanonical();
   if (mutation.kind === 'timing') {
     await deps.patchSegment(projectId, mutation.segmentId, mutation.before.version, {
       startMs: mutation.after.startMs,
