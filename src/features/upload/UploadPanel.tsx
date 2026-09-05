@@ -3,6 +3,7 @@ import { Panel } from '../../components/ui/Panel';
 import { validateMediaFile } from './mediaValidation';
 import { createProject, type CloudProject } from '../projects/projectApi';
 import { uploadMediaMultipart } from './multipartApi';
+import './upload.css';
 
 export function UploadPanel() {
   const [file, setFile] = useState<File | null>(null);
