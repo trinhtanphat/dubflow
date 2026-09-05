@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { mockProject } from './mockProject';
 import { createInitialStudioState, studioReducer, type StudioAction } from './studioState';
-import { createStudioEditorActions } from './StudioShell';
+import { createStudioEditorActions, createVoicePreviewAction } from './StudioShell';
 import type { SplitMutation, TimingMutation } from './editorHistory';
 
 describe('StudioShell mobile controls', () => {
@@ -26,6 +26,42 @@ describe('StudioShell mobile controls', () => {
     }
     expect(html).toContain('reference-feature-strip');
     expect((html.match(/Capability-gated/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('StudioShell live voice preview wiring', () => {
+  it('fetches Vietnamese audio, plays it, and revokes the object URL', async () => {
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mpeg' });
+    const setBusy = vi.fn();
+    const setError = vi.fn();
+    const services = {
+      fetchVoicePreview: vi.fn(async () => blob),
+      createObjectURL: vi.fn(() => 'blob:yupvox-preview'),
+      revokeObjectURL: vi.fn(),
+      playAudio: vi.fn(async () => {}),
+    };
+    const preview = createVoicePreviewAction({ setBusy, setError, services });
+
+    await preview(' Xin chào ');
+
+    expect(services.fetchVoicePreview).toHaveBeenCalledWith({ text: 'Xin chào', language: 'vi' });
+    expect(services.createObjectURL).toHaveBeenCalledWith(blob);
+    expect(services.playAudio).toHaveBeenCalledWith('blob:yupvox-preview');
+    expect(services.revokeObjectURL).toHaveBeenCalledWith('blob:yupvox-preview');
+    expect(setBusy.mock.calls).toEqual([[true], [false]]);
+    expect(setError).toHaveBeenCalledWith('');
+  });
+
+  it('does nothing for empty preview text', async () => {
+    const services = {
+      fetchVoicePreview: vi.fn(),
+      createObjectURL: vi.fn(),
+      revokeObjectURL: vi.fn(),
+      playAudio: vi.fn(),
+    };
+    const preview = createVoicePreviewAction({ setBusy: vi.fn(), setError: vi.fn(), services });
+    await preview('   ');
+    expect(services.fetchVoicePreview).not.toHaveBeenCalled();
   });
 });
 
