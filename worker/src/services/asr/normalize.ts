@@ -8,7 +8,12 @@ export type AsrChunkForNormalization = {
   segments: AsrSegment[];
 };
 
-export type NormalizedAsrSegment = AsrSegment & { id: string; projectId: string; chunkId: string };
+export type NormalizedAsrSegment = AsrSegment & {
+  id: string;
+  projectId: string;
+  chunkId: string;
+  speakerId?: string;
+};
 
 function stableHash(value: string): string {
   let hash = 0x811c9dc5;
@@ -17,6 +22,10 @@ function stableHash(value: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, '0');
+}
+
+function chunkSpeakerId(projectId: string, chunkId: string, speakerIndex: number): string {
+  return `spk_${stableHash(`${projectId}:${chunkId}:${speakerIndex}`)}`;
 }
 
 export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): NormalizedAsrSegment[] {
@@ -40,7 +49,10 @@ export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): Normaliz
         startMs,
         endMs,
         text: segment.text,
-        ...(segment.speakerIndex === undefined ? {} : { speakerIndex: segment.speakerIndex }),
+        ...(segment.speakerIndex === undefined ? {} : {
+          speakerIndex: segment.speakerIndex,
+          speakerId: chunkSpeakerId(chunk.projectId, chunk.chunkId, segment.speakerIndex),
+        }),
       });
     });
   }
