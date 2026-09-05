@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ScriptInspector } from './ScriptInspector';
 
 const segment = {
@@ -21,5 +21,30 @@ describe('ScriptInspector', () => {
     expect(html).toContain('Kịch bản');
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Nhân vật<\/button>/);
     expect(html).toContain('Chưa cấu hình');
+    expect(html).not.toContain('Nhà cung cấp dịch');
+  });
+
+  it('adds live translation controls only for a cloud-editable project while preserving guarded voice controls', () => {
+    const html = renderToStaticMarkup(
+      <ScriptInspector
+        segment={segment}
+        speakers={speakers}
+        lipSyncEnabled
+        dispatch={vi.fn()}
+        cloudEditable
+        translationMode="compare"
+        onTranslationModeChange={vi.fn()}
+        onCommitPatch={vi.fn()}
+        onRetranslate={vi.fn()}
+        comparison={{ workersAI: 'Bản AI', google: 'Bản Google' }}
+        onApplyTranslation={vi.fn()}
+      />,
+    );
+    expect(html).toContain('aria-label="Nhà cung cấp dịch"');
+    for (const label of ['Dịch lại', 'Workers AI', 'Google', 'So sánh', 'Bản AI', 'Bản Google', 'Áp dụng']) {
+      expect(html).toContain(label);
+    }
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>▷ Nghe thử giọng · Chưa cấu hình<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Tạo lại giọng · Chưa cấu hình<\/button>/);
   });
 });
