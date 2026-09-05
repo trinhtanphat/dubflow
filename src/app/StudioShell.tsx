@@ -45,7 +45,13 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
             playback={state.playback}
             dispatch={dispatch}
           />
-          <Timeline project={state.project} playheadMs={state.playheadMs} selectedSegmentId={state.selectedSegmentId} dispatch={dispatch} />
+          <Timeline
+            project={state.project}
+            playheadMs={state.playheadMs}
+            selectedSegmentId={state.selectedSegmentId}
+            timelineView={state.timelineView}
+            dispatch={dispatch}
+          />
         </section>
 
         <ScriptInspector segment={selectedSegment} speakers={state.project.speakers} lipSyncEnabled={state.lipSyncEnabled} dispatch={dispatch} />
