@@ -20,6 +20,7 @@ const baseSegment: Segment = {
   translationEngine: 'workers-ai',
   translationStatus: 'completed',
   voiceStatus: 'completed',
+  dubbedObjectKey: 'projects/project-1/dubbed/s1.mp3',
   version: 1,
   splitParentId: null,
 };
@@ -44,10 +45,12 @@ class MemorySegmentStore implements SegmentStore {
   async updateSegment(projectId: string, segmentId: string, userId: string, patch: SegmentPatch) {
     this.calls.push({ method: 'updateSegment', args: [projectId, segmentId, userId, patch] });
     if (this.updateError) throw this.updateError;
+    const invalidatesVoice = patch.startMs !== undefined || patch.endMs !== undefined || patch.translatedText !== undefined || patch.speakerId !== undefined;
     return {
       ...baseSegment,
       ...patch,
-      voiceStatus: patch.startMs !== undefined || patch.endMs !== undefined ? 'pending' : baseSegment.voiceStatus,
+      voiceStatus: invalidatesVoice ? 'pending' : baseSegment.voiceStatus,
+      dubbedObjectKey: invalidatesVoice ? null : baseSegment.dubbedObjectKey,
       version: 2,
     };
   }
@@ -55,7 +58,7 @@ class MemorySegmentStore implements SegmentStore {
   async splitSegment(projectId: string, segmentId: string, userId: string, playheadMs: number) {
     this.calls.push({ method: 'splitSegment', args: [projectId, segmentId, userId, playheadMs] });
     return {
-      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', version: 2 },
+      left: { ...baseSegment, endMs: playheadMs, voiceStatus: 'pending', dubbedObjectKey: null, version: 2 },
       right: {
         ...baseSegment,
         id: 'worker-child',
@@ -63,6 +66,7 @@ class MemorySegmentStore implements SegmentStore {
         sourceText: 'world',
         translatedText: 'chao',
         voiceStatus: 'pending',
+        dubbedObjectKey: null,
         splitParentId: segmentId,
       },
     };
@@ -76,12 +80,14 @@ class MemorySegmentStore implements SegmentStore {
     original: SegmentRestoreInput,
   ) {
     this.calls.push({ method: 'restoreSplit', args: [projectId, segmentId, childSegmentId, userId, original] });
-    return { ...baseSegment, ...original, voiceStatus: 'pending', version: 3 };
+    return { ...baseSegment, ...original, voiceStatus: 'pending', dubbedObjectKey: null, version: 3 };
   }
 
   async setTranslationResult() {
     return null;
   }
+
+  async setVoiceResult() {}
 
   async replaceFromAsr() {
     return [];
@@ -104,7 +110,7 @@ describe('segment mutation routes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ startMs: 1_200, endMs: 3_200, voiceStatus: 'pending' });
+    expect(await response.json()).toMatchObject({ startMs: 1_200, endMs: 3_200, voiceStatus: 'pending', dubbedObjectKey: null });
     expect(store.calls).toEqual([
       { method: 'updateSegment', args: ['project-1', 's1', 'dev-user', { startMs: 1_200, endMs: 3_200 }] },
     ]);
@@ -121,7 +127,7 @@ describe('segment mutation routes', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as { left: Segment; right: Segment };
     expect(body.left.endMs).toBe(2_000);
-    expect(body.right).toMatchObject({ id: 'worker-child', startMs: 2_000, splitParentId: 's1' });
+    expect(body.right).toMatchObject({ id: 'worker-child', startMs: 2_000, splitParentId: 's1', dubbedObjectKey: null });
     expect(store.calls).toContainEqual({ method: 'splitSegment', args: ['project-1', 's1', 'dev-user', 2_000] });
   });
 
@@ -141,7 +147,7 @@ describe('segment mutation routes', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ id: 's1', voiceStatus: 'pending' });
+    expect(await response.json()).toMatchObject({ id: 's1', voiceStatus: 'pending', dubbedObjectKey: null });
     expect(store.calls).toContainEqual({
       method: 'restoreSplit',
       args: ['project-1', 's1', 'worker-child', 'dev-user', original],
