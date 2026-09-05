@@ -20,7 +20,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     <div className={`app-shell studio-pro-shell mobile-panel--${mobilePanel}`}>
       <StudioTopbar
         projectTitle={state.project.title}
-        saveState="saved"
+        saveState="offline"
         cloudState="ready"
         canUndo={false}
         canRedo={false}
