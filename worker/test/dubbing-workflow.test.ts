@@ -93,10 +93,10 @@ describe('dubbing workflow pipeline', () => {
     expect(calls).toContain('job:needs_review');
 
     expect(usageEvents).toEqual([
-      expect.objectContaining({ kind: 'asr_audio_minute', units: 5, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
-      expect.objectContaining({ kind: 'asr_audio_minute', units: 5, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
-      expect.objectContaining({ kind: 'asr_audio_minute', units: 1, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
-      expect.objectContaining({ kind: 'asr_audio_minute', units: 1, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 300, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 300, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/000.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 60, provider: 'deepgram-nova-3', phase: 'started', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
+      expect.objectContaining({ kind: 'asr_audio_second', units: 60, provider: 'deepgram-nova-3', phase: 'completed', operationKey: 'job:job-1:retry:0:asr:projects/project-1/audio/001.wav:deepgram-nova-3' }),
       expect.objectContaining({ kind: 'translation_character', units: 4, provider: 'workers-ai', phase: 'started', operationKey: 'job:job-1:retry:0:translation:batch-0:workers-ai' }),
       expect.objectContaining({ kind: 'translation_character', units: 4, provider: 'workers-ai', phase: 'completed', operationKey: 'job:job-1:retry:0:translation:batch-0:workers-ai' }),
     ]);
@@ -128,7 +128,7 @@ describe('dubbing workflow pipeline', () => {
       };
       const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
       await runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step);
-      return events.find((event) => event.kind === 'asr_audio_minute' && event.phase === 'started')?.operationKey;
+      return events.find((event) => event.kind === 'asr_audio_second' && event.phase === 'started')?.operationKey;
     }
 
     expect(await asrKey(0)).toBe('job:j:retry:0:asr:projects/p/audio/000.wav:workers-ai-whisper-large-v3-turbo');
