@@ -8,15 +8,20 @@ const segment = {
 };
 
 describe('editor persistence', () => {
-  it('persists source, translation and speaker patches through the project-scoped API', async () => {
+  it('persists source, translation and speaker patches with the expected revision', async () => {
     const calls: unknown[] = [];
-    const updated = await persistEditorPatch('p1', 's1', { translatedText: 'Chào bạn', speakerId: 'speaker-2' }, {
-      async patchSegment(projectId, segmentId, patch) {
-        calls.push({ projectId, segmentId, patch });
+    const updated = await persistEditorPatch('p1', 's1', 2, { translatedText: 'Chào bạn', speakerId: 'speaker-2' }, {
+      async patchSegment(projectId, segmentId, expectedVersion, patch) {
+        calls.push({ projectId, segmentId, expectedVersion, patch });
         return { ...segment, ...patch, version: 3 };
       },
     });
-    expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', patch: { translatedText: 'Chào bạn', speakerId: 'speaker-2' } }]);
+    expect(calls).toEqual([{
+      projectId: 'p1',
+      segmentId: 's1',
+      expectedVersion: 2,
+      patch: { translatedText: 'Chào bạn', speakerId: 'speaker-2' },
+    }]);
     expect(updated).toMatchObject({ translatedText: 'Chào bạn', speakerId: 'speaker-2', version: 3 });
   });
 
