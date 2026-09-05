@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_PIXELS_PER_SECOND,
   MIN_PIXELS_PER_SECOND,
+  chooseRulerIntervalSeconds,
   clamp,
   clampPixelsPerSecond,
   fitPixelsPerSecond,
   pixelsToTime,
+  pointerXToTime,
   projectWidthPx,
   timeToPercent,
   timeToPixels,
@@ -28,5 +30,17 @@ describe('timeline math', () => {
     expect(clampPixelsPerSecond(1000)).toBe(MAX_PIXELS_PER_SECOND);
     expect(projectWidthPx(10_000, 50)).toBe(500);
     expect(fitPixelsPerSecond(10_000, 500)).toBe(50);
+  });
+
+  it('maps a viewport pointer into project time including horizontal scroll', () => {
+    expect(pointerXToTime(250, 100, 50, 50)).toBe(4000);
+    expect(pointerXToTime(50, 100, 0, 50)).toBe(0);
+  });
+
+  it('chooses a bounded major-ruler interval that keeps labels readable', () => {
+    expect(chooseRulerIntervalSeconds(240)).toBe(1);
+    expect(chooseRulerIntervalSeconds(50)).toBe(2);
+    expect(chooseRulerIntervalSeconds(1)).toBe(300);
+    expect(chooseRulerIntervalSeconds(0.25)).toBe(600);
   });
 });
