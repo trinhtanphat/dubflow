@@ -80,6 +80,21 @@
   box-shadow: var(--yv-shadow-accent);
 }
 
+.studio-capability-strip {
+  min-height: 34px;
+  gap: 18px;
+  padding-inline: 16px;
+  color: var(--yv-text-muted);
+  border-top: 1px solid var(--yv-border);
+  background: rgba(10, 11, 16, .96);
+  font-size: 10px;
+}
+.studio-capability-strip span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.capability-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: var(--yv-text-subtle); }
+.capability-dot--ready { background: var(--yv-success); box-shadow: 0 0 0 3px rgba(56, 213, 138, .08); }
+.capability-dot--optional { background: var(--yv-warning); box-shadow: 0 0 0 3px rgba(245, 185, 95, .08); }
+.capability-dot--guarded { background: var(--yv-text-subtle); box-shadow: 0 0 0 3px rgba(104, 110, 128, .08); }
+
 .mobile-panel-actions { display: none; }
 .mobile-panel-backdrop { display: none; }
 
@@ -96,6 +111,7 @@
   }
   .studio-pro-shell .studio-grid { grid-template-columns: 232px minmax(0, 1fr) 286px; }
   .studio-credits { display: none; }
+  .studio-capability-strip { overflow-x: auto; justify-content: flex-start; }
 }
 
 @media (max-width: 1040px) {
@@ -152,4 +168,6 @@
 
   .studio-pro-shell.mobile-panel--sources .mobile-panel-backdrop,
   .studio-pro-shell.mobile-panel--inspector .mobile-panel-backdrop { display: block; }
+
+  .studio-capability-strip { display: none; }
 }
