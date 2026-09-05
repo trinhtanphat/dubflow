@@ -1,16 +1,22 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import { UsageRepository, type UsageStore } from '../db/usage';
+import { getCurrentUserId } from '../security/current-user';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { VoiceProviderError } from '../services/voice/types';
 import { WorkersAIVoiceProvider } from '../services/voice/workers-ai';
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type UsageStoreFactory = (env: Env) => Pick<UsageStore, 'record'>;
 
 function hasElevenLabs(env: Env) {
   return Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_DEFAULT_VOICE_ID?.trim());
 }
 
-export function createVoiceRoutes(fetcher: FetchLike = fetch) {
+export function createVoiceRoutes(
+  fetcher: FetchLike = fetch,
+  makeUsage: UsageStoreFactory = (env) => new UsageRepository(env.DB),
+) {
   const routes = new Hono<{ Bindings: Env }>();
 
   routes.get('/capabilities', (c) => {
@@ -58,6 +64,20 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
 
     try {
       const audio = await provider.generate({ text, language, ...(voice ? { voice } : {}) });
+      try {
+        await makeUsage(c.env).record({
+          userId: getCurrentUserId(),
+          projectId: null,
+          jobId: null,
+          kind: 'tts_characters',
+          units: text.length,
+          provider: 'elevenlabs',
+          idempotencyKey: `request:${crypto.randomUUID()}:tts:preview`,
+        });
+      } catch {
+        return c.json({ code: 'USAGE_RECORD_FAILED', message: 'Unable to record voice preview usage.' }, 500);
+      }
+
       const headers = new Headers();
       headers.set('content-type', audio.headers.get('content-type') ?? 'audio/mpeg');
       headers.set('cache-control', 'no-store');
