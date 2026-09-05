@@ -7,7 +7,7 @@ import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
 import { normalizeAsrChunks } from '../services/asr/normalize';
 import type { TranslationProvider } from '../services/translation/types';
-import { assertJobActive, isJobCancelledError } from './jobCancellation';
+import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
 export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -16,7 +16,7 @@ export interface WorkflowStepLike {
 }
 
 type PipelineProjects = Pick<ProjectStore, 'getByIdForUser' | 'setStatus'>;
-type PipelineJobs = Pick<JobStore, 'getForProject' | 'setProgress' | 'fail' | 'complete'>;
+type PipelineJobs = JobStatusReader & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
 
 export type DubbingPipelineDeps = {
