@@ -165,8 +165,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
       <main className="studio-grid" aria-label="DubFlow dubbing workspace">
         <aside className="left-rail" aria-label="Nguồn media và nhân vật">
-          <UploadPanel onProcessStarted={onProcessStarted} />
-          <SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />
+          <UploadPanel onProcessStarted={onProcessStarted} speakerSection={<SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />} />
         </aside>
 
         <section className="center-stage" aria-label="Không gian chỉnh sửa">
