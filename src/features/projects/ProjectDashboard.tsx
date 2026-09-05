@@ -1,11 +1,16 @@
 import type { CloudJob } from './jobApi';
 import type { CloudProject } from './projectApi';
+import { UsageSummaryPanel } from './UsageSummaryPanel';
+import type { UsageSummaryResponse } from './usageApi';
 
 export type ProjectDashboardProps = {
   projects: CloudProject[];
   jobsByProject: Record<string, CloudJob[]>;
   loading: boolean;
   error: string;
+  usageSummary?: UsageSummaryResponse | null;
+  usageLoading?: boolean;
+  usageError?: string;
   onOpenProject(projectId: string): void;
   onRetryJob(projectId: string, jobId: string): void;
   onCancelJob(projectId: string, jobId: string): void;
@@ -37,6 +42,9 @@ export function ProjectDashboard({
   jobsByProject,
   loading,
   error,
+  usageSummary = null,
+  usageLoading = false,
+  usageError = '',
   onOpenProject,
   onRetryJob,
   onCancelJob,
@@ -52,6 +60,8 @@ export function ProjectDashboard({
         </div>
         <button className="project-dashboard__create" type="button" onClick={onCreateProject}>Tạo dự án</button>
       </header>
+
+      <UsageSummaryPanel summary={usageSummary} loading={usageLoading} error={usageError} />
 
       {error ? <div className="project-dashboard__error" role="alert">{error}</div> : null}
       {loading ? <div className="project-dashboard__loading" role="status">Đang tải dự án…</div> : null}
