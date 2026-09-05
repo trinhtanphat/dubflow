@@ -96,7 +96,7 @@ export function VideoStage({ project, segment, playheadMs, playback, dispatch }:
 
   return (
     <section className="video-stage" aria-label="Video preview">
-      <div className="video-stage__surface">
+      <div className="video-stage__surface reference-video-frame">
         {stageContent}
         <div className="subtitle-overlay" aria-live="off">
           <div className="subtitle-source">{segment?.sourceText ?? ''}</div>
@@ -109,7 +109,7 @@ export function VideoStage({ project, segment, playheadMs, playback, dispatch }:
         <span style={{ left: `${progress}%` }} />
       </div>
 
-      <div className="transport-bar">
+      <div className="transport-bar reference-transport-row">
         <div className="transport-time">{formatTimestamp(playheadMs / 1000)} / {formatTimestamp(project.durationMs / 1000)}</div>
         <div className="transport-controls">
           <IconButton icon="−1f" label="Lùi một khung hình" onClick={() => stepFrame(-1)} disabled={!mediaUrl} />
