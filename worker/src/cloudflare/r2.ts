@@ -33,5 +33,10 @@ export interface R2MultipartUploadLike {
 export interface R2BucketLike {
   createMultipartUpload(key: string): Promise<R2MultipartUploadLike>;
   resumeMultipartUpload(key: string, uploadId: string): R2MultipartUploadLike;
+}
+
+export interface R2ReadableBucketLike {
   get(key: string, options?: R2GetOptions): Promise<R2ObjectBodyLike | null>;
 }
+
+export type R2MediaBucketLike = R2BucketLike & R2ReadableBucketLike;
