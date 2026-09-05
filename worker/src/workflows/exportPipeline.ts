@@ -1,7 +1,7 @@
 import type { ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
 import type { VoiceGenerateInput } from '../services/voice/types';
-import { assertJobActive, isJobCancelledError } from './jobCancellation';
+import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
 
 export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -43,7 +43,7 @@ export type ExportPipelineDeps = {
     setStatus(projectId: string, userId: string, status: ProjectStatus): Promise<void>;
     setExportObject(projectId: string, userId: string, objectKey: string): Promise<void>;
   };
-  jobs: Pick<JobStore, 'getForProject' | 'setProgress' | 'fail' | 'complete'>;
+  jobs: JobStatusReader & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
   segments: {
     list(projectId: string, userId: string): Promise<ExportSegment[]>;
     setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
