@@ -2,12 +2,13 @@ import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
 import type { Project, ProjectStatus } from '../db/projects';
 import type { JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
+import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
 import { normalizeAsrChunks } from '../services/asr/normalize';
 import type { TranslationProvider } from '../services/translation/types';
-import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
+import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
 
@@ -20,8 +21,9 @@ type PipelineProjects = {
   getByIdForUser(projectId: string, userId: string): Promise<PipelineProject | null>;
   setStatus(projectId: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
 };
-type PipelineJobs = JobStatusReader & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
+type PipelineJobs = Pick<JobStore, 'getForProject' | 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
+type UsageMeter = Pick<UsageStore, 'record'>;
 
 export type DubbingPipelineDeps = {
   projects: PipelineProjects;
@@ -29,12 +31,29 @@ export type DubbingPipelineDeps = {
   media: Pick<MediaProcessor, 'probe' | 'extractAudioChunks'>;
   bucket: Pick<R2BucketLike, 'get'>;
   asr: AsrProvider;
+  asrProviderId: string;
   segments: PipelineSegments;
   translation: TranslationProvider;
+  translationProviderId: string;
+  usage: UsageMeter;
 };
 
 function asMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown pipeline failure.';
+}
+
+function providerId(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${label} provider id is missing.`);
+  return normalized;
+}
+
+function operationKey(jobId: string, retryCount: number, stage: string, item: string, provider: string): string {
+  return `job:${jobId}:retry:${retryCount}:${stage}:${item}:${provider}`;
+}
+
+function sourceCharacters(texts: string[]): number {
+  return Array.from(texts.join('')).length;
 }
 
 async function readChunk(bucket: Pick<R2BucketLike, 'get'>, key: string): Promise<ArrayBuffer> {
@@ -55,6 +74,15 @@ export async function runDubbingPipeline(
     const project = await step.do('authorize project', async () => deps.projects.getByIdForUser(params.projectId, params.userId));
     if (!project) throw new Error('Project not found.');
     if (!project.sourceObjectKey) throw new Error('Project source media is missing.');
+
+    const job = await step.do('load usage retry generation', async () =>
+      deps.jobs.getForProject(params.projectId, params.jobId, params.userId),
+    );
+    if (!job) throw new Error('Job not found.');
+    const retryCount = job.retryCount;
+    if (!Number.isInteger(retryCount) || retryCount < 0) throw new Error('Job retry generation is invalid.');
+    const asrProvider = providerId(deps.asrProviderId, 'ASR');
+    const translationProvider = providerId(deps.translationProviderId, 'Translation');
 
     await step.do('mark processing', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'processing');
@@ -85,7 +113,22 @@ export async function runDubbingPipeline(
       await step.do(`check cancellation before ASR chunk ${index + 1}`, ensureActive);
       const asrResult = await step.do(`transcribe audio chunk ${index + 1}`, async () => {
         const audio = await readChunk(deps.bucket, chunk.objectKey);
-        return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+        const units = chunk.durationMs / 60000;
+        if (!Number.isFinite(units) || units < 0) throw new Error('ASR chunk duration is invalid.');
+        const key = operationKey(params.jobId, retryCount, 'asr', chunk.objectKey, asrProvider);
+        const common = {
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'asr_audio_minute' as const,
+          units,
+          provider: asrProvider,
+          operationKey: key,
+        };
+        await deps.usage.record({ ...common, phase: 'started' });
+        const result = await deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+        await deps.usage.record({ ...common, phase: 'completed' });
+        return result;
       });
       normalizedInputs.push({
         projectId: params.projectId,
@@ -114,13 +157,28 @@ export async function runDubbingPipeline(
     for (let offset = 0; offset < persisted.length; offset += batchSize) {
       const batch = persisted.slice(offset, offset + batchSize);
       await step.do(`check cancellation before translation ${offset + 1}`, ensureActive);
-      const translated = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () =>
-        deps.translation.translateBatch(
-          batch.map((segment) => ({ id: segment.id, text: segment.sourceText })),
-          project.sourceLanguage,
-          'vi',
-        ),
-      );
+      const translated = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () => {
+        const items = batch.map((segment) => ({ id: segment.id, text: segment.sourceText }));
+        const units = sourceCharacters(items.map((item) => item.text));
+        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, translationProvider);
+        const common = {
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'translation_character' as const,
+          units,
+          provider: translationProvider,
+          operationKey: key,
+        };
+        await deps.usage.record({ ...common, phase: 'started' });
+        const results = await deps.translation.translateBatch(items, project.sourceLanguage, 'vi');
+        const unexpected = results.find((result) => result.provider !== translationProvider);
+        if (unexpected) {
+          throw new Error(`Translation provider mismatch: expected ${translationProvider}, received ${unexpected.provider}.`);
+        }
+        await deps.usage.record({ ...common, phase: 'completed' });
+        return results;
+      });
       const byId = new Map(translated.map((item) => [item.id, item]));
       await step.do(`persist translations ${offset + 1}-${offset + batch.length}`, async () => {
         for (const segment of batch) {
