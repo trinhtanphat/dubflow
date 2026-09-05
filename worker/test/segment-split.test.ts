@@ -59,7 +59,7 @@ class Statement implements D1StatementLike {
       return { meta: { changes: 1 } };
     }
 
-    if (this.sql.includes('UPDATE segments SET translated_text = ?')) {
+    if (this.sql.includes('UPDATE segments') && this.sql.includes('SET translated_text = ?')) {
       const [translatedText, engine, segmentId, projectId, userId, expectedVersion] = this.values as [string, string, string, string, string, number | undefined];
       const project = this.db.projects.find((item) => item.id === projectId && item.user_id === userId);
       const row = project ? this.db.rows.find((item) => item.id === segmentId && item.project_id === projectId) : undefined;
