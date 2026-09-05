@@ -8,7 +8,12 @@ export type AsrChunkForNormalization = {
   segments: AsrSegment[];
 };
 
-export type NormalizedAsrSegment = AsrSegment & { id: string; projectId: string; chunkId: string };
+export type NormalizedAsrSegment = AsrSegment & {
+  id: string;
+  projectId: string;
+  chunkId: string;
+  speakerId?: string;
+};
 
 function stableHash(value: string): string {
   let hash = 0x811c9dc5;
@@ -19,6 +24,10 @@ function stableHash(value: string): string {
   return hash.toString(16).padStart(8, '0');
 }
 
+function chunkSpeakerId(projectId: string, chunkId: string, speakerIndex: number): string {
+  return `spk_${stableHash(`${projectId}:${chunkId}:${speakerIndex}`)}`;
+}
+
 export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): NormalizedAsrSegment[] {
   const output: NormalizedAsrSegment[] = [];
   for (const chunk of chunks) {
@@ -26,6 +35,9 @@ export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): Normaliz
     chunk.segments.forEach((segment, index) => {
       if (!Number.isFinite(segment.startMs) || !Number.isFinite(segment.endMs) || segment.endMs <= segment.startMs) {
         throw new AsrError('ASR_RANGE_INVALID', 'ASR segment end must be after start.');
+      }
+      if (segment.speakerIndex !== undefined && (!Number.isInteger(segment.speakerIndex) || segment.speakerIndex < 0)) {
+        throw new AsrError('ASR_SPEAKER_INVALID', 'ASR speaker index must be a non-negative integer.');
       }
       const startMs = segment.startMs + chunk.offsetMs;
       const endMs = segment.endMs + chunk.offsetMs;
@@ -37,6 +49,10 @@ export function normalizeAsrChunks(chunks: AsrChunkForNormalization[]): Normaliz
         startMs,
         endMs,
         text: segment.text,
+        ...(segment.speakerIndex === undefined ? {} : {
+          speakerIndex: segment.speakerIndex,
+          speakerId: chunkSpeakerId(chunk.projectId, chunk.chunkId, segment.speakerIndex),
+        }),
       });
     });
   }

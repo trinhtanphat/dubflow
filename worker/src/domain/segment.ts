@@ -18,6 +18,7 @@ export type SegmentRestoreInput = {
 
 export type PersistedAsrSegment = {
   id: string;
+  speakerId?: string | null;
   startMs: number;
   endMs: number;
   sourceText: string;
@@ -125,8 +126,21 @@ export function normalizeAsrSegments(input: unknown): PersistedAsrSegment[] {
     if (typeof record.sourceText !== 'string') {
       throw new SegmentInputError(`ASR segment ${id} sourceText must be a string.`);
     }
+    let speakerId: string | null | undefined;
+    if ('speakerId' in record) {
+      if (record.speakerId !== null && typeof record.speakerId !== 'string') {
+        throw new SegmentInputError(`ASR segment ${id} speakerId must be a string or null.`);
+      }
+      if (typeof record.speakerId === 'string') {
+        speakerId = record.speakerId.trim();
+        if (!speakerId) throw new SegmentInputError(`ASR segment ${id} speakerId must not be empty.`);
+      } else {
+        speakerId = null;
+      }
+    }
     return {
       id,
+      ...(speakerId === undefined ? {} : { speakerId }),
       startMs: record.startMs as number,
       endMs: record.endMs as number,
       sourceText: record.sourceText,

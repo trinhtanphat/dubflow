@@ -40,9 +40,15 @@ class RecordingDb implements D1DatabaseLike {
     this.rows = [];
     for (const statement of typed) {
       if (!statement.sql.startsWith('INSERT INTO segments')) continue;
-      const [id, projectId, startMs, endMs, sourceText] = statement.values;
+      const values = statement.values;
+      const [id, projectId] = values;
+      const speakerAware = values.length >= 6;
+      const speakerId = speakerAware ? values[2] : null;
+      const startMs = values[speakerAware ? 3 : 2];
+      const endMs = values[speakerAware ? 4 : 3];
+      const sourceText = values[speakerAware ? 5 : 4];
       this.rows.push({
-        id, project_id: projectId, speaker_id: null, start_ms: startMs, end_ms: endMs,
+        id, project_id: projectId, speaker_id: speakerId, start_ms: startMs, end_ms: endMs,
         source_text: sourceText, translated_text: '', translation_engine: 'workers-ai',
         translation_status: 'pending', voice_status: 'pending', version: 1,
       });
@@ -79,6 +85,22 @@ describe('ASR segment persistence', () => {
     expect(segments[0]).toMatchObject({
       translatedText: '', translationStatus: 'pending', voiceStatus: 'pending', version: 1,
     });
+  });
+
+  it('upserts detected speaker rows before persisting diarized segment foreign keys', async () => {
+    const db = new RecordingDb();
+    const repository = new SegmentRepository(db);
+
+    const segments = await repository.replaceFromAsr('project-1', 'dev-user', [
+      { id: 'a', speakerId: 'spk_1234abcd', startMs: 0, endMs: 1000, sourceText: 'first' },
+    ]);
+
+    const batch = db.batches[0];
+    const speakerInsert = batch.find((statement) => /INSERT INTO speakers/i.test(statement.sql));
+    const segmentInsert = batch.find((statement) => /INSERT INTO segments/i.test(statement.sql));
+    expect(speakerInsert?.values.slice(0, 2)).toEqual(['spk_1234abcd', 'project-1']);
+    expect(segmentInsert?.values.slice(0, 3)).toEqual(['a', 'project-1', 'spk_1234abcd']);
+    expect(segments[0]).toMatchObject({ speakerId: 'spk_1234abcd' });
   });
 
   it('rejects writes to a project outside the current user', async () => {

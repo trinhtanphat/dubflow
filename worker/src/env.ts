@@ -22,6 +22,7 @@ export interface Env {
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
+  DEEPGRAM_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
 }

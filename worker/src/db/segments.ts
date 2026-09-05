@@ -334,17 +334,40 @@ export class SegmentRepository implements SegmentStore {
       throw new SegmentPersistenceError('D1_BATCH_UNAVAILABLE', 'Atomic D1 batch support is required for ASR replacement.');
     }
 
+    const speakerIds = [...new Set(
+      segments.map((segment) => segment.speakerId ?? null).filter((speakerId): speakerId is string => Boolean(speakerId)),
+    )].sort();
+    const speakerNames = new Map(speakerIds.map((speakerId, index) => [speakerId, `Nhân vật AI ${index + 1}`]));
     const statements = [
       this.db.prepare(`DELETE FROM segments WHERE project_id = ?`).bind(projectId),
+      ...speakerIds.map((speakerId) => this.db.prepare(
+        `INSERT INTO speakers (id, project_id, label, display_name)
+         VALUES (?, ?, 'AI diarization', ?)
+         ON CONFLICT(id) DO NOTHING`,
+      ).bind(speakerId, projectId, speakerNames.get(speakerId) ?? speakerId)),
       ...segments.map((segment) => this.db.prepare(
         `INSERT INTO segments (
           id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
           translation_engine, translation_status, voice_status, dubbed_object_key, version
-        ) VALUES (?, ?, NULL, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', NULL, 1)`,
-      ).bind(segment.id, projectId, segment.startMs, segment.endMs, segment.sourceText)),
+        ) VALUES (?, ?, ?, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', NULL, 1)`,
+      ).bind(segment.id, projectId, segment.speakerId ?? null, segment.startMs, segment.endMs, segment.sourceText)),
       this.clearExportStatement(projectId, userId),
     ];
     await this.db.batch(statements);
-    return this.list(projectId, userId);
+    return segments.map((segment) => ({
+      id: segment.id,
+      projectId,
+      speakerId: segment.speakerId ?? null,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      sourceText: segment.sourceText,
+      translatedText: '',
+      translationEngine: 'workers-ai',
+      translationStatus: 'pending',
+      voiceStatus: 'pending',
+      dubbedObjectKey: null,
+      version: 1,
+      splitParentId: null,
+    }));
   }
 }

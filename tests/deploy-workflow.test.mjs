@@ -9,11 +9,14 @@ test('Cloudflare deployment is manual-only while container credentials are exter
   assert.match(workflow, /^  workflow_dispatch:\s*$/m);
 });
 
-test('production deploy wires optional translation and ElevenLabs voice secrets without committing values', () => {
+test('production deploy wires optional translation, diarization and ElevenLabs voice secrets without committing values', () => {
   assert.match(workflow, /GOOGLE_CLOUD_TRANSLATE_API_KEY:\s*\$\{\{ secrets\.GOOGLE_CLOUD_TRANSLATE_API_KEY \}\}/);
+  assert.match(workflow, /DEEPGRAM_API_KEY:\s*\$\{\{ secrets\.DEEPGRAM_API_KEY \}\}/);
   assert.match(workflow, /ELEVENLABS_API_KEY:\s*\$\{\{ secrets\.ELEVENLABS_API_KEY \}\}/);
   assert.match(workflow, /ELEVENLABS_DEFAULT_VOICE_ID:\s*\$\{\{ secrets\.ELEVENLABS_DEFAULT_VOICE_ID \}\}/);
+  assert.match(workflow, /wrangler secret put DEEPGRAM_API_KEY/);
   assert.match(workflow, /wrangler secret put ELEVENLABS_API_KEY/);
   assert.match(workflow, /wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID/);
+  assert.doesNotMatch(workflow, /Authorization:\s*Token\s+[A-Za-z0-9]/i);
   assert.doesNotMatch(workflow, /xi-api-key:\s*[A-Za-z0-9]/i);
 });
