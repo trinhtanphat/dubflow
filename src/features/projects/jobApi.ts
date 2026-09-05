@@ -11,9 +11,9 @@ export type CloudJob = {
   currentStep: string | null;
   errorCode: string | null;
   errorMessage: string | null;
-  retryCount: number;
-  createdAt: string;
-  updatedAt: string;
+  retryCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type StartProcessingResult = {
