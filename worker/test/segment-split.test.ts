@@ -11,6 +11,7 @@ type SegmentRow = {
   source_text: string;
   translated_text: string;
   translation_engine: string;
+  translation_context_revision?: number | null;
   translation_status: string;
   voice_status: string;
   dubbed_object_key?: string | null;
@@ -63,7 +64,9 @@ class Statement implements D1StatementLike {
     }
 
     if (this.sql.includes('UPDATE segments') && this.sql.includes('SET translated_text = ?')) {
-      const [translatedText, engine, segmentId, projectId, userId, expectedVersion] = this.values as [string, string, string, string, string, number | undefined];
+      const [translatedText, engine, contextRevision, segmentId, projectId, userId, expectedVersion] = this.values as [
+        string, string, number | null, string, string, string, number | undefined,
+      ];
       const project = this.db.projects.find((item) => item.id === projectId && item.user_id === userId);
       const row = project ? this.db.rows.find((item) => item.id === segmentId && item.project_id === projectId) : undefined;
       if (!row || (expectedVersion !== undefined && row.version !== expectedVersion)) {
@@ -71,6 +74,7 @@ class Statement implements D1StatementLike {
       }
       row.translated_text = translatedText;
       row.translation_engine = engine;
+      row.translation_context_revision = contextRevision;
       row.translation_status = 'completed';
       row.voice_status = 'pending';
       row.dubbed_object_key = null;
@@ -117,12 +121,14 @@ class RecordingDb implements D1DatabaseLike {
     {
       id: 's1', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 1_000, end_ms: 3_000,
       source_text: 'hello beautiful world', translated_text: 'xin chao the gioi', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s1.mp3', version: 3, split_parent_id: null,
+      translation_context_revision: null, translation_status: 'completed', voice_status: 'completed',
+      dubbed_object_key: 'projects/project-1/dubbed/s1.mp3', version: 3, split_parent_id: null,
     },
     {
       id: 's2', project_id: 'project-1', speaker_id: 'speaker-1', start_ms: 4_000, end_ms: 5_000,
       source_text: 'next', translated_text: 'tiep', translation_engine: 'workers-ai',
-      translation_status: 'completed', voice_status: 'completed', dubbed_object_key: 'projects/project-1/dubbed/s2.mp3', version: 1, split_parent_id: null,
+      translation_context_revision: null, translation_status: 'completed', voice_status: 'completed',
+      dubbed_object_key: 'projects/project-1/dubbed/s2.mp3', version: 1, split_parent_id: null,
     },
   ];
   runs: Statement[] = [];
@@ -298,7 +304,8 @@ describe('SegmentRepository durable revision-aware mutations', () => {
 
     const updated = await repository.setTranslationResult('project-1', 's1', 'dev-user', 3, 'ban dich moi', 'workers-ai');
     expect(updated).toMatchObject({
-      translatedText: 'ban dich moi', translationEngine: 'workers-ai', voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
+      translatedText: 'ban dich moi', translationEngine: 'workers-ai', translationContextRevision: null,
+      voiceStatus: 'pending', dubbedObjectKey: null, version: 4,
     });
     expectExportInvalidation(db.runs[1]!);
 
@@ -306,6 +313,18 @@ describe('SegmentRepository durable revision-aware mutations', () => {
       .rejects.toMatchObject({ code: 'SEGMENT_VERSION_CONFLICT' });
     expect(db.rows[0]?.translated_text).toBe('ban dich moi');
     expect(db.rows[0]?.version).toBe(4);
+  });
+
+  it('persists a contextual translation revision when supplied', async () => {
+    const db = new RecordingDb();
+    const repository = new SegmentRepository(db);
+
+    const updated = await repository.setTranslationResult(
+      'project-1', 's1', 'dev-user', 3, 'ban dich co ngu canh', 'workers-ai', 7,
+    );
+
+    expect(updated).toMatchObject({ translationContextRevision: 7, version: 4 });
+    expect(db.rows[0]?.translation_context_revision).toBe(7);
   });
 
   it('fails closed for unrelated lineage and non-owner access', async () => {
