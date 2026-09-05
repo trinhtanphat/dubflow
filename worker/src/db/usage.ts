@@ -3,7 +3,7 @@ import type { D1DatabaseLike } from './projects';
 export type UsageKind =
   | 'asr_audio_minute'
   | 'translation_character'
-  | 'tts_character'
+  | 'tts_audio_second'
   | 'render_minute';
 
 export type UsagePhase = 'started' | 'completed';
@@ -27,7 +27,7 @@ export type UsageRecordInput = Omit<UsageEvent, 'id' | 'costBasis' | 'createdAt'
 export type UsageTotals = {
   asrAudioMinutes: number;
   translationCharacters: number;
-  ttsCharacters: number;
+  ttsAudioSeconds: number;
   renderMinutes: number;
 };
 
@@ -38,6 +38,7 @@ export type UsageSummary = {
 
 export interface UsageStore {
   record(input: UsageRecordInput): Promise<UsageEvent>;
+  getByOperation(operationKey: string, phase: UsagePhase): Promise<UsageEvent | null>;
   summarizeForUser(userId: string): Promise<UsageSummary>;
   summarizeForProject(projectId: string, userId: string): Promise<UsageSummary>;
   getCreditBalance(userId: string): Promise<number>;
@@ -67,6 +68,12 @@ type UsageRow = {
 type UsageAggregateRow = Pick<UsageRow, 'kind' | 'units' | 'provider'>;
 
 const USAGE_COLUMNS = `id, user_id, project_id, job_id, kind, units, provider, phase, operation_key, cost_basis, created_at`;
+const USAGE_KINDS = new Set<UsageKind>([
+  'asr_audio_minute',
+  'translation_character',
+  'tts_audio_second',
+  'render_minute',
+]);
 
 function fromRow(row: UsageRow): UsageEvent {
   return {
@@ -88,7 +95,7 @@ function emptyTotals(): UsageTotals {
   return {
     asrAudioMinutes: 0,
     translationCharacters: 0,
-    ttsCharacters: 0,
+    ttsAudioSeconds: 0,
     renderMinutes: 0,
   };
 }
@@ -96,7 +103,7 @@ function emptyTotals(): UsageTotals {
 function addUnits(totals: UsageTotals, kind: UsageKind, units: number): void {
   if (kind === 'asr_audio_minute') totals.asrAudioMinutes += units;
   else if (kind === 'translation_character') totals.translationCharacters += units;
-  else if (kind === 'tts_character') totals.ttsCharacters += units;
+  else if (kind === 'tts_audio_second') totals.ttsAudioSeconds += units;
   else totals.renderMinutes += units;
 }
 
@@ -105,9 +112,10 @@ function summarize(rows: UsageAggregateRow[]): UsageSummary {
   const providers: Record<string, UsageTotals> = {};
   for (const row of rows) {
     const units = Number(row.units);
-    if (!Number.isFinite(units) || units < 0) continue;
+    if (!USAGE_KINDS.has(row.kind) || !Number.isFinite(units) || units < 0) continue;
     addUnits(totals, row.kind, units);
     const provider = row.provider.trim();
+    if (!provider) continue;
     if (!providers[provider]) providers[provider] = emptyTotals();
     addUnits(providers[provider], row.kind, units);
   }
@@ -123,7 +131,20 @@ function nonEmpty(value: string, label: string): string {
 export class UsageRepository implements UsageStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
+  async getByOperation(operationKey: string, phase: UsagePhase): Promise<UsageEvent | null> {
+    const key = nonEmpty(operationKey, 'Operation key');
+    const row = await this.db.prepare(
+      `SELECT ${USAGE_COLUMNS}
+       FROM usage_events
+       WHERE operation_key = ? AND phase = ?
+       LIMIT 1`,
+    ).bind(key, phase).first<UsageRow>();
+    return row ? fromRow(row) : null;
+  }
+
   async record(input: UsageRecordInput): Promise<UsageEvent> {
+    if (!USAGE_KINDS.has(input.kind)) throw new Error('Usage kind is unsupported.');
+    if (input.phase !== 'started' && input.phase !== 'completed') throw new Error('Usage phase is unsupported.');
     if (!Number.isFinite(input.units) || input.units < 0) {
       throw new Error('Usage units must be a non-negative finite number.');
     }
@@ -150,17 +171,18 @@ export class UsageRepository implements UsageStore {
       operationKey,
     ).run();
 
-    const row = await this.db.prepare(
-      `SELECT ${USAGE_COLUMNS}
-       FROM usage_events
-       WHERE operation_key = ? AND phase = ?
-       LIMIT 1`,
-    ).bind(operationKey, input.phase).first<UsageRow>();
-    if (!row) throw new Error('Usage event was not persisted.');
-    if (row.user_id !== userId || row.project_id !== projectId || row.job_id !== jobId || row.kind !== input.kind) {
+    const event = await this.getByOperation(operationKey, input.phase);
+    if (!event) throw new Error('Usage event was not persisted.');
+    if (
+      event.userId !== userId ||
+      event.projectId !== projectId ||
+      event.jobId !== jobId ||
+      event.kind !== input.kind ||
+      event.provider !== provider
+    ) {
       throw new Error('Usage operation key collision detected.');
     }
-    return fromRow(row);
+    return event;
   }
 
   async summarizeForUser(userId: string): Promise<UsageSummary> {
