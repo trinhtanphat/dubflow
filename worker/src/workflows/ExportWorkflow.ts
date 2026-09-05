@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
+import { SpeakerRepository } from '../db/speakers';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
@@ -16,6 +17,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         projects: new ProjectRepository(this.env.DB),
         jobs: new JobRepository(this.env.DB),
         segments: new SegmentRepository(this.env.DB),
+        speakers: new SpeakerRepository(this.env.DB),
         bucket: this.env.MEDIA,
         voice: new ElevenLabsVoiceProvider(
           this.env.ELEVENLABS_API_KEY ?? '',
