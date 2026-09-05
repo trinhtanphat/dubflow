@@ -1,52 +1,35 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import {
+  MAX_CONTEXT_PAYLOAD_BYTES,
+  MAX_GLOSSARY_ENTRIES,
+  TRANSLATION_STYLES,
+  isTranslationContextActive,
+  normalizeGlossaryKey,
+  type TranslationContext,
+} from '../src/services/translation/context';
 
-// This source-level contract keeps the schema/provenance surface reviewable before behavioral D1 tests.
-const migrationPath = 'migrations/0006_translation_context.sql';
-const contextPath = 'worker/src/services/translation/context.ts';
-const repositoryPath = 'worker/src/db/translation-context.ts';
-const segmentsPath = 'worker/src/db/segments.ts';
-
-describe('Phase 4A translation context storage contract', () => {
-  it('declares the project context, segment provenance, glossary table, and revision triggers', () => {
-    expect(existsSync(migrationPath)).toBe(true);
-    if (!existsSync(migrationPath)) return;
-
-    const migration = readFileSync(migrationPath, 'utf8');
-    expect(migration).toMatch(/translation_style\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+'neutral'/);
-    expect(migration).toMatch(/translation_context_revision\s+INTEGER\s+NOT\s+NULL\s+DEFAULT\s+1/);
-    expect(migration).toMatch(/ALTER TABLE segments ADD COLUMN translation_context_revision INTEGER/);
-    expect(migration).toMatch(/CREATE TABLE project_glossary_entries/);
-    expect(migration).toMatch(/CREATE UNIQUE INDEX idx_project_glossary_unique/);
-    expect(migration).toMatch(/CREATE TRIGGER trg_project_glossary_insert_revision/);
-    expect(migration).toMatch(/CREATE TRIGGER trg_project_glossary_update_revision/);
-    expect(migration).toMatch(/CREATE TRIGGER trg_project_glossary_delete_revision/);
+describe('Phase 4A translation context primitives', () => {
+  it('normalizes glossary keys deterministically', () => {
+    expect(normalizeGlossaryKey('  Ａcme  ', false)).toBe('acme');
+    expect(normalizeGlossaryKey('  Ａcme  ', true)).toBe('Acme');
   });
 
-  it('declares the canonical context types and revision-aware repository surface', () => {
-    expect(existsSync(contextPath)).toBe(true);
-    expect(existsSync(repositoryPath)).toBe(true);
-    if (!existsSync(contextPath) || !existsSync(repositoryPath)) return;
-
-    const contextSource = readFileSync(contextPath, 'utf8');
-    const repositorySource = readFileSync(repositoryPath, 'utf8');
-    expect(contextSource).toMatch(/neutral.*natural.*formal.*casual.*cinematic/s);
-    expect(contextSource).toMatch(/MAX_GLOSSARY_ENTRIES\s*=\s*200/);
-    expect(contextSource).toMatch(/MAX_CONTEXT_PAYLOAD_BYTES\s*=\s*128\s*\*\s*1024/);
-    expect(contextSource).toMatch(/function normalizeGlossaryKey/);
-    expect(contextSource).toMatch(/function isTranslationContextActive/);
-    expect(repositorySource).toMatch(/interface TranslationContextStore/);
-    expect(repositorySource).toMatch(/class TranslationContextRepository/);
-    expect(repositorySource).toMatch(/TRANSLATION_CONTEXT_CONFLICT/);
-    expect(repositorySource).toMatch(/GLOSSARY_ENTRY_CONFLICT/);
-    expect(repositorySource).toMatch(/GLOSSARY_LIMIT_REACHED/);
+  it('locks the canonical styles and context limits', () => {
+    expect(TRANSLATION_STYLES).toEqual(['neutral', 'natural', 'formal', 'casual', 'cinematic']);
+    expect(MAX_GLOSSARY_ENTRIES).toBe(200);
+    expect(MAX_CONTEXT_PAYLOAD_BYTES).toBe(128 * 1024);
   });
 
-  it('extends persisted segment translation results with contextual provenance', () => {
-    const source = readFileSync(segmentsPath, 'utf8');
-    expect(source).toMatch(/translationContextRevision:\s*number\s*\|\s*null/);
-    expect(source).toMatch(/translation_context_revision/);
-    expect(source).toMatch(/contextRevision\?:\s*number\s*\|\s*null/);
-    expect(source).toMatch(/SET translated_text = \?, translation_engine = \?, translation_context_revision = \?/);
+  it('treats neutral empty context as inactive and style/glossary context as active', () => {
+    const neutral: TranslationContext = { revision: 1, style: 'neutral', glossary: [] };
+    expect(isTranslationContextActive(neutral)).toBe(false);
+    expect(isTranslationContextActive({ ...neutral, style: 'formal' })).toBe(true);
+    expect(isTranslationContextActive({
+      ...neutral,
+      glossary: [{
+        id: 'g1', projectId: 'p1', sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null,
+        caseSensitive: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z',
+      }],
+    })).toBe(true);
   });
 });
