@@ -37,6 +37,12 @@ class MemoryProjectStore implements ProjectStore {
     project.status = 'ready';
   }
 
+  async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
+    const project = this.projects.find((candidate) => candidate.id === id && candidate.userId === userId);
+    if (!project) return;
+    project.exportObjectKey = objectKey;
+  }
+
   async setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void> {
     const project = this.projects.find((candidate) => candidate.id === id && candidate.userId === userId);
     if (!project) return;
