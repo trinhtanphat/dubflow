@@ -4,6 +4,7 @@ export type UsageTotals = {
   asrAudioSeconds: number;
   translationCharacters: number;
   ttsAudioSeconds: number;
+  stemSeparationAudioSeconds: number;
   renderSeconds: number;
 };
 
