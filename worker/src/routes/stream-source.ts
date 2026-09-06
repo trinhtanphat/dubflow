@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { streamMediaObject, MediaObjectNotFoundError } from '../http/media-stream';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { verifyStreamSourceToken } from '../security/stream-source-token';
@@ -23,13 +24,24 @@ async function authorize(c: any): Promise<{ projectId: string; objectKey: string
   return allowed ? { projectId, objectKey } : null;
 }
 
+function readableBucket(c: any): R2ReadableBucketLike {
+  return {
+    async head(key) {
+      return c.env.MEDIA.head ? c.env.MEDIA.head(key) : null;
+    },
+    async get(key, options) {
+      return c.env.MEDIA.get ? c.env.MEDIA.get(key, options) : null;
+    },
+  };
+}
+
 export function createStreamSourceRoutes() {
   const routes = new Hono<WorkerHonoEnv>();
 
   routes.on('HEAD', '/:projectId', async (c) => {
     const source = await authorize(c);
     if (!source) return c.body(null, 403);
-    const object = c.env.MEDIA.head ? await c.env.MEDIA.head(source.objectKey) : null;
+    const object = await readableBucket(c).head?.(source.objectKey);
     if (!object) return c.body(null, 404);
     const headers = new Headers();
     headers.set('Accept-Ranges', 'bytes');
@@ -44,7 +56,7 @@ export function createStreamSourceRoutes() {
     const source = await authorize(c);
     if (!source) return c.body(null, 403);
     try {
-      return await streamMediaObject(c.env.MEDIA, source.objectKey, c.req.raw, 'source-media');
+      return await streamMediaObject(readableBucket(c), source.objectKey, c.req.raw, 'source-media');
     } catch (error) {
       if (error instanceof MediaObjectNotFoundError) return c.body(null, 404);
       throw error;

@@ -37,8 +37,8 @@ export interface ProjectStore {
   setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
   setExportObject(id: string, userId: string, objectKey: string): Promise<void>;
   setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
-  setStreamProvenance(id: string, userId: string, sourceObjectKey: string, videoUid: string, readyAt?: string | null): Promise<void>;
-  clearStreamProvenance(id: string, userId: string): Promise<void>;
+  setStreamProvenance?(id: string, userId: string, sourceObjectKey: string, videoUid: string, readyAt?: string | null): Promise<void>;
+  clearStreamProvenance?(id: string, userId: string): Promise<void>;
 }
 
 export type D1RunResultLike = {
