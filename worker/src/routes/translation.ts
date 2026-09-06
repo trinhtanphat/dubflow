@@ -3,6 +3,7 @@ import type { Env } from '../env';
 import { ProjectRepository } from '../db/projects';
 import { SegmentPersistenceError, SegmentRepository } from '../db/segments';
 import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
@@ -38,6 +39,9 @@ export function createTranslationRoutes() {
         segment,
       }, 409);
     }
+
+    const rateLimited = await enforceRateLimit(c, 'translate', userId, projectId);
+    if (rateLimited) return rateLimited;
 
     try {
       const router = new TranslationRouter(
