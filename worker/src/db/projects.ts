@@ -68,6 +68,8 @@ type ProjectRow = {
   updated_at?: string;
 };
 
+type TableInfoRow = { name: string };
+
 function fromRow(row: ProjectRow): Project {
   return {
     id: row.id,
@@ -75,10 +77,10 @@ function fromRow(row: ProjectRow): Project {
     title: row.title,
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
-    targetLanguagesRevision: row.target_languages_revision,
+    targetLanguagesRevision: Number(row.target_languages_revision ?? 1),
     status: row.status,
     sourceObjectKey: row.source_object_key,
-    exportObjectKey: row.export_object_key,
+    exportObjectKey: row.export_object_key ?? null,
     durationMs: row.duration_ms,
     sizeBytes: row.size_bytes,
     createdAt: row.created_at,
@@ -86,10 +88,36 @@ function fromRow(row: ProjectRow): Project {
   };
 }
 
-const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
+const CURRENT_PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
 
 export class ProjectRepository implements ProjectStore {
+  private projectColumnsPromise?: Promise<Set<string>>;
+
   constructor(private readonly db: D1DatabaseLike) {}
+
+  private async projectColumns(): Promise<Set<string>> {
+    if (!this.projectColumnsPromise) {
+      this.projectColumnsPromise = this.db
+        .prepare("PRAGMA table_info('projects')")
+        .all<TableInfoRow>()
+        .then((result) => new Set((result.results ?? []).map((row) => row.name)));
+    }
+    return this.projectColumnsPromise;
+  }
+
+  private async readableProjectColumns(): Promise<string> {
+    const columns = await this.projectColumns();
+    if (columns.size === 0) return CURRENT_PROJECT_COLUMNS;
+
+    const targetLanguagesRevision = columns.has('target_languages_revision')
+      ? 'target_languages_revision'
+      : '1 AS target_languages_revision';
+    const exportObjectKey = columns.has('export_object_key')
+      ? 'export_object_key'
+      : 'NULL AS export_object_key';
+
+    return `id, user_id, title, source_language, target_language, ${targetLanguagesRevision}, status, source_object_key, ${exportObjectKey}, duration_ms, size_bytes, created_at, updated_at`;
+  }
 
   private async ensureDevelopmentUser(userId: string) {
     await this.db.prepare(
@@ -117,15 +145,17 @@ export class ProjectRepository implements ProjectStore {
   }
 
   async listByUser(userId: string): Promise<Project[]> {
+    const columns = await this.readableProjectColumns();
     const result = await this.db.prepare(
-      `SELECT ${PROJECT_COLUMNS} FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
+      `SELECT ${columns} FROM projects WHERE user_id = ? ORDER BY updated_at DESC`,
     ).bind(userId).all<ProjectRow>();
     return (result.results ?? []).map(fromRow);
   }
 
   async getByIdForUser(id: string, userId: string): Promise<Project | null> {
+    const columns = await this.readableProjectColumns();
     const row = await this.db.prepare(
-      `SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
+      `SELECT ${columns} FROM projects WHERE id = ? AND user_id = ? LIMIT 1`,
     ).bind(id, userId).first<ProjectRow>();
     return row ? fromRow(row) : null;
   }

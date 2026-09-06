@@ -12,6 +12,7 @@ export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
+  schemaRevision: 10 | null;
   asr: AsrCapabilities;
 };
 
@@ -23,6 +24,8 @@ type ReadinessSchemaRow = {
   project_target_languages_table: number;
   project_exports_output_column: number;
 };
+
+const CURRENT_SCHEMA_REVISION = 10 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   if (!row) return false;
@@ -68,11 +71,29 @@ export async function checkReadiness(db: ReadinessDatabaseLike, deepgramApiKey?:
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
-      return { ready: false, service: 'dubflow', database: 'missing-schema', asr };
+      return {
+        ready: false,
+        service: 'dubflow',
+        database: 'missing-schema',
+        schemaRevision: null,
+        asr,
+      };
     }
 
-    return { ready: true, service: 'dubflow', database: 'ready', asr };
+    return {
+      ready: true,
+      service: 'dubflow',
+      database: 'ready',
+      schemaRevision: CURRENT_SCHEMA_REVISION,
+      asr,
+    };
   } catch {
-    return { ready: false, service: 'dubflow', database: 'unavailable', asr };
+    return {
+      ready: false,
+      service: 'dubflow',
+      database: 'unavailable',
+      schemaRevision: null,
+      asr,
+    };
   }
 }
