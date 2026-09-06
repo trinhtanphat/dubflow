@@ -102,6 +102,16 @@ The Phase 4B rate limiter is an additive abuse/admission control and does not mo
 
 A GREEN Phase 4B source CI and Wrangler dry-run do not prove real provider cloning behavior. A real authorized ElevenLabs sample/consent fixture and deletion/assignment round trip are still required before production voice cloning may be called qualified. Production deployment remains **manual-only** and is not performed by Phase 4B. Production runtime remains **UNQUALIFIED**.
 
+## Phase 4C batch multi-language translation and export qualification
+
+Phase 4C is **source/CI qualified only** for batch multi-language translation and export across `vi`, `en`, `zh`, `ja`, and `ko`. One canonical source/timeline/speaker graph remains authoritative; target translations are separate revisioned variants keyed by canonical segment and target language. Project language configuration and target translation edits use revision/version conflict handling, and Studio exposes source plus enabled target-language controls without cloning canonical segment identity.
+
+The Vietnamese compatibility bridge preserves the legacy `vi` dubbing/export path while new target-language Workflows, R2 voice/subtitle/export keys, and usage operation identities remain language-scoped. Translation always starts from canonical source text rather than another target translation. Batch export records immutable per-target attempts and preserves partial successes. Subtitle export remains available independently of dubbed voice capability; dubbed export fails closed when the configured voice provider is unavailable, its language capability is unknown, or the requested target is unsupported.
+
+Phase 3C admission/telemetry and Phase 3B usage accounting remain authoritative. Language translation provider calls stay telemetry-wrapped, export admission remains rate-limited after authorization/validation, and translation/TTS/render operation identity includes the target language so automatic retries do not collide across targets. Phase 4A context/stitching acceptance and Phase 4B managed IVC acceptance remain wired; Phase 4C does not alter voice-clone enrollment or consent semantics.
+
+A GREEN Phase 4C source CI, TypeScript/Vite build, Wrangler dry-run, and reference screenshot artifact qualify repository source/configuration only. Production deployment remains **manual-only** and no Phase 4C production deploy is performed by this qualification work. Production runtime remains **UNQUALIFIED**. Real provider/model/voice/media fixtures are still required before any production claim, including contextual translation for each intended target, ElevenLabs language capability and generated audio, subtitle correctness, target-scoped FFmpeg media output, retrieval of final R2 artifacts, retry/isolation behavior, and the existing Cloudflare Container credential gate.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
