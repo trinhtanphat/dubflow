@@ -1,0 +1,265 @@
+import type { AudioSeparation } from '../db/audio-separation';
+import { separationObjectPrefix } from '../db/audio-separation';
+import type { AudioSeparationProvider, SeparationCapabilities, SeparationResult } from '../services/separation/types';
+import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
+
+export type SeparationWorkflowParams = {
+  projectId: string;
+  userId: string;
+  jobId: string;
+};
+
+type ProjectSnapshot = {
+  id: string;
+  sourceObjectKey: string | null;
+  sourceRevision: number;
+  sizeBytes?: number | null;
+};
+
+type ProjectReader = {
+  getByIdForUser(projectId: string, userId: string): Promise<ProjectSnapshot | null>;
+};
+
+type SeparationStore = {
+  getCurrent(
+    projectId: string,
+    userId: string,
+    sourceRevision: number,
+    provider: string,
+    modelDigest: string,
+  ): Promise<AudioSeparation | null>;
+  createQueued(input: {
+    projectId: string;
+    userId: string;
+    sourceRevision: number;
+    sourceObjectKey: string;
+    sourceSizeBytes?: number | null;
+    provider: string;
+    modelId: string;
+    modelDigest: string;
+    jobId?: string | null;
+  }): Promise<AudioSeparation>;
+  markRunning(projectId: string, separationId: string, userId: string): Promise<void>;
+  complete(
+    projectId: string,
+    separationId: string,
+    userId: string,
+    identity: { sourceRevision: number; provider: string; modelDigest: string },
+    keys: { backgroundObjectKey: string; dialogueObjectKey: string },
+  ): Promise<void>;
+  fail(projectId: string, separationId: string, userId: string, code: string, message: string): Promise<void>;
+};
+
+type SeparationUsageEvent = {
+  phase: 'started' | 'completed' | 'failed';
+  operationKey: string;
+  units?: number;
+};
+
+type SeparationUsageStore = {
+  getByOperation(operationKey: string, phase: 'started' | 'completed' | 'failed'): Promise<SeparationUsageEvent | null>;
+  record(input: {
+    userId: string;
+    projectId: string;
+    jobId: string;
+    kind: 'audio_separation_minute';
+    units: number;
+    provider: string;
+    phase: 'started' | 'completed' | 'failed';
+    operationKey: string;
+  }): Promise<SeparationUsageEvent>;
+};
+
+type WorkflowStep = {
+  do<T>(name: string, callback: () => Promise<T>): Promise<T>;
+};
+
+export type SeparationPipelineDeps = {
+  projects: ProjectReader;
+  jobs: JobStatusReader;
+  separations: SeparationStore;
+  provider: AudioSeparationProvider;
+  usage: SeparationUsageStore;
+};
+
+export type SeparationPipelineResult = {
+  status: 'completed';
+  separationId: string;
+  reused: boolean;
+  recovered?: boolean;
+};
+
+function operationKey(projectId: string, sourceRevision: number, capabilities: SeparationCapabilities): string {
+  return `project:${projectId}:source:${sourceRevision}:separation:${capabilities.provider}:${capabilities.modelDigest}`;
+}
+
+function canonicalKeys(projectId: string, sourceRevision: number, capabilities: SeparationCapabilities) {
+  const prefix = separationObjectPrefix(projectId, sourceRevision, capabilities.provider, capabilities.modelDigest);
+  return {
+    dialogueObjectKey: `${prefix}dialogue.wav`,
+    backgroundObjectKey: `${prefix}background.wav`,
+  };
+}
+
+function assertValidProviderResult(
+  result: SeparationResult,
+  expected: ReturnType<typeof canonicalKeys>,
+): void {
+  if (!Number.isFinite(result.durationMs) || result.durationMs <= 0) {
+    throw new Error('SEPARATION_RESPONSE_INVALID: provider returned an invalid duration.');
+  }
+  if (result.dialogueObjectKey !== expected.dialogueObjectKey || result.backgroundObjectKey !== expected.backgroundObjectKey) {
+    throw new Error('SEPARATION_RESPONSE_INVALID: provider returned non-canonical artifact keys.');
+  }
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof Error && 'code' in error && typeof (error as Error & { code?: unknown }).code === 'string') {
+    return (error as Error & { code: string }).code;
+  }
+  return 'SEPARATION_FAILED';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function runSeparationPipeline(
+  params: SeparationWorkflowParams,
+  deps: SeparationPipelineDeps,
+  step: WorkflowStep,
+): Promise<SeparationPipelineResult> {
+  const project = await step.do('load-project-source', async () => deps.projects.getByIdForUser(params.projectId, params.userId));
+  if (!project) throw new Error('Project not found.');
+  if (!project.sourceObjectKey || !Number.isInteger(project.sourceRevision) || project.sourceRevision < 1) {
+    throw new Error('SEPARATION_SOURCE_UNAVAILABLE: project has no durable source media.');
+  }
+
+  const capabilities = await step.do('resolve-separation-provider', async () => deps.provider.capabilities());
+  if (!capabilities.configured) throw new Error('SEPARATION_PROVIDER_UNAVAILABLE: provider is not configured.');
+
+  const opKey = operationKey(project.id, project.sourceRevision, capabilities);
+  const expectedKeys = canonicalKeys(project.id, project.sourceRevision, capabilities);
+
+  let separation = await step.do('load-current-separation', async () => deps.separations.getCurrent(
+    project.id,
+    params.userId,
+    project.sourceRevision,
+    capabilities.provider,
+    capabilities.modelDigest,
+  ));
+
+  if (separation?.status === 'completed') {
+    if (separation.dialogueObjectKey !== expectedKeys.dialogueObjectKey || separation.backgroundObjectKey !== expectedKeys.backgroundObjectKey) {
+      throw new Error('SEPARATION_ARTIFACT_MISSING: completed separation does not contain canonical stems.');
+    }
+    return { status: 'completed', separationId: separation.id, reused: true };
+  }
+
+  const completedUsage = await step.do('recover-completed-usage', async () => deps.usage.getByOperation(opKey, 'completed'));
+  if (completedUsage && separation) {
+    await step.do('recover-separation-completion', async () => deps.separations.complete(
+      project.id,
+      separation!.id,
+      params.userId,
+      {
+        sourceRevision: project.sourceRevision,
+        provider: capabilities.provider,
+        modelDigest: capabilities.modelDigest,
+      },
+      expectedKeys,
+    ));
+    return { status: 'completed', separationId: separation.id, reused: true, recovered: true };
+  }
+  if (completedUsage && !separation) {
+    throw new Error('SEPARATION_INVARIANT_VIOLATION: completed usage exists without durable separation state.');
+  }
+
+  if (!separation) {
+    separation = await step.do('create-separation', async () => deps.separations.createQueued({
+      projectId: project.id,
+      userId: params.userId,
+      sourceRevision: project.sourceRevision,
+      sourceObjectKey: project.sourceObjectKey!,
+      sourceSizeBytes: project.sizeBytes ?? null,
+      provider: capabilities.provider,
+      modelId: capabilities.modelId,
+      modelDigest: capabilities.modelDigest,
+      jobId: params.jobId,
+    }));
+  }
+
+  await step.do('check-cancellation-before-separation', async () => assertJobActive(deps.jobs, project.id, params.jobId, params.userId));
+  await step.do('mark-separation-running', async () => deps.separations.markRunning(project.id, separation!.id, params.userId));
+
+  const started = await step.do('load-started-usage', async () => deps.usage.getByOperation(opKey, 'started'));
+  if (!started) {
+    await step.do('record-separation-started', async () => deps.usage.record({
+      userId: params.userId,
+      projectId: project.id,
+      jobId: params.jobId,
+      kind: 'audio_separation_minute',
+      units: 0,
+      provider: capabilities.provider,
+      phase: 'started',
+      operationKey: opKey,
+    }));
+  }
+
+  let providerResult: SeparationResult;
+  try {
+    providerResult = await step.do('run-audio-separation', async () => deps.provider.separate({
+      projectId: project.id,
+      sourceObjectKey: project.sourceObjectKey!,
+      sourceRevision: project.sourceRevision,
+      provider: capabilities.provider,
+      modelId: capabilities.modelId,
+      modelDigest: capabilities.modelDigest,
+    }));
+    assertValidProviderResult(providerResult, expectedKeys);
+  } catch (error) {
+    await step.do('mark-separation-failed', async () => deps.separations.fail(
+      project.id,
+      separation!.id,
+      params.userId,
+      errorCode(error),
+      errorMessage(error),
+    ));
+    throw error;
+  }
+
+  const completed = await step.do('load-completed-usage-after-provider', async () => deps.usage.getByOperation(opKey, 'completed'));
+  if (!completed) {
+    await step.do('record-separation-completed-usage', async () => deps.usage.record({
+      userId: params.userId,
+      projectId: project.id,
+      jobId: params.jobId,
+      kind: 'audio_separation_minute',
+      units: providerResult.durationMs / 60_000,
+      provider: capabilities.provider,
+      phase: 'completed',
+      operationKey: opKey,
+    }));
+  }
+
+  try {
+    await step.do('check-cancellation-before-completion', async () => assertJobActive(deps.jobs, project.id, params.jobId, params.userId));
+  } catch (error) {
+    if (isJobCancelledError(error)) throw error;
+    throw error;
+  }
+
+  await step.do('persist-separation-completion', async () => deps.separations.complete(
+    project.id,
+    separation!.id,
+    params.userId,
+    {
+      sourceRevision: project.sourceRevision,
+      provider: capabilities.provider,
+      modelDigest: capabilities.modelDigest,
+    },
+    expectedKeys,
+  ));
+
+  return { status: 'completed', separationId: separation.id, reused: false };
+}
