@@ -10,6 +10,7 @@ const summary: UsageSummary = {
     translationCharacters: 1200,
     ttsAudioSeconds: 35.5,
     renderSeconds: 150,
+    audioSeparationMinutes: 0,
   },
   providers: {
     'deepgram-nova-3': {
@@ -17,12 +18,14 @@ const summary: UsageSummary = {
       translationCharacters: 0,
       ttsAudioSeconds: 0,
       renderSeconds: 0,
+      audioSeparationMinutes: 0,
     },
     elevenlabs: {
       asrAudioSeconds: 0,
       translationCharacters: 0,
       ttsAudioSeconds: 35.5,
       renderSeconds: 0,
+      audioSeparationMinutes: 0,
     },
   },
 };
