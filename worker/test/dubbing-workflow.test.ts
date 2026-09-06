@@ -61,6 +61,7 @@ describe('dubbing workflow pipeline', () => {
       async setTranslationResult(_p: string, id: string) { calls.push(`segments:translate:${id}`); return null; },
     };
     const translation = {
+      capabilities: { contextual: false, available: true },
       async translateBatch(items: { id: string; text: string }[]) {
         calls.push('translation:batch');
         return items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' }));
@@ -121,7 +122,7 @@ describe('dubbing workflow pipeline', () => {
         bucket: { async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; } },
         asr: { async transcribe() { return { text: '', segments: [] }; } },
         segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-        translation: { async translateBatch() { return []; } },
+        translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
         usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
         asrProviderId: 'workers-ai-whisper-large-v3-turbo',
         translationProviderId: 'workers-ai',
@@ -158,7 +159,7 @@ describe('dubbing workflow pipeline', () => {
       },
       asr: { async transcribe() { throw new Error('provider down'); } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-      translation: { async translateBatch() { return []; } },
+      translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
       usage: noUsage,
       asrProviderId: 'deepgram-nova-3',
       translationProviderId: 'workers-ai',
@@ -196,7 +197,7 @@ describe('dubbing workflow pipeline', () => {
       bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-      translation: { async translateBatch() { return []; } },
+      translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
       usage: noUsage,
       asrProviderId: 'workers-ai-whisper-large-v3-turbo',
       translationProviderId: 'workers-ai',
