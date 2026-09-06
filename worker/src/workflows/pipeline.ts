@@ -8,7 +8,8 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
-import { normalizeAsrChunks } from '../services/asr/normalize';
+import { stitchAsrChunks, type StitchChunk } from '../services/asr/stitch';
+import { reconcileSpeakerIds, type ExistingSpeakerCoverage } from '../services/asr/reconcile';
 import type { TranslationProvider } from '../services/translation/types';
 import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
@@ -30,7 +31,7 @@ type PipelineJobs = {
     userId: string,
   ): Promise<Pick<DubbingJob, 'status' | 'retryCount'> | null>;
 } & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
-type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
+type PipelineSegments = Pick<SegmentStore, 'list' | 'replaceFromAsr' | 'setTranslationResult'>;
 type UsageMeter = Pick<UsageStore, 'record'>;
 
 export type DubbingPipelineDeps = {
@@ -70,6 +71,24 @@ async function readChunk(bucket: Pick<R2BucketLike, 'get'>, key: string): Promis
   const object = await bucket.get(key);
   if (!object) throw new Error(`Audio chunk not found: ${key}`);
   return new Response(object.body).arrayBuffer();
+}
+
+function existingSpeakerCoverage(
+  segments: Awaited<ReturnType<SegmentStore['list']>>,
+): ExistingSpeakerCoverage[] {
+  const bySpeaker = new Map<string, ExistingSpeakerCoverage>();
+  for (const segment of segments) {
+    if (!segment.speakerId) continue;
+    const current = bySpeaker.get(segment.speakerId) ?? { speakerId: segment.speakerId, ranges: [] };
+    current.ranges.push({ startMs: segment.startMs, endMs: segment.endMs });
+    bySpeaker.set(segment.speakerId, current);
+  }
+  return [...bySpeaker.values()]
+    .map((coverage) => ({
+      speakerId: coverage.speakerId,
+      ranges: [...coverage.ranges].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs),
+    }))
+    .sort((a, b) => a.speakerId.localeCompare(b.speakerId));
 }
 
 export async function runDubbingPipeline(
@@ -116,7 +135,7 @@ export async function runDubbingPipeline(
     if (chunks.length === 0) throw new Error('FFmpeg returned no audio chunks.');
 
     failureCode = 'ASR_FAILED';
-    const normalizedInputs = [] as Array<{ projectId: string; chunkId: string; offsetMs: number; segments: Awaited<ReturnType<AsrProvider['transcribe']>>['segments'] }>;
+    const stitchInputs: StitchChunk[] = [];
     for (let index = 0; index < chunks.length; index += 1) {
       const chunk = chunks[index];
       await step.do(`check cancellation before ASR chunk ${index + 1}`, ensureActive);
@@ -147,10 +166,13 @@ export async function runDubbingPipeline(
         await deps.usage.record({ ...common, phase: 'completed' });
         return result;
       });
-      normalizedInputs.push({
+      stitchInputs.push({
         projectId: params.projectId,
         chunkId: chunk.objectKey,
+        chunkOrder: index,
         offsetMs: chunk.offsetMs,
+        overlapBeforeMs: chunk.overlapBeforeMs,
+        overlapAfterMs: chunk.overlapAfterMs,
         segments: asrResult.segments,
       });
       const progress = 0.2 + ((index + 1) / chunks.length) * 0.45;
@@ -158,9 +180,14 @@ export async function runDubbingPipeline(
     }
 
     failureCode = 'PIPELINE_FAILED';
-    const normalized = normalizeAsrChunks(normalizedInputs).map((segment) => ({
+    const existing = await step.do('load existing speaker coverage', async () =>
+      deps.segments.list(params.projectId, params.userId),
+    );
+    const stitched = stitchAsrChunks(stitchInputs);
+    const reconciled = reconcileSpeakerIds(stitched, existingSpeakerCoverage(existing));
+    const normalized = reconciled.map((segment) => ({
       id: segment.id,
-      speakerId: segment.speakerId ?? null,
+      speakerId: segment.speakerId,
       startMs: segment.startMs,
       endMs: segment.endMs,
       sourceText: segment.text,
