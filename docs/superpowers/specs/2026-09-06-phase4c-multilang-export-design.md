@@ -59,7 +59,7 @@ Fields:
 
 - `project_id` FK -> projects, cascade delete;
 - `target_language` constrained to `vi|en|ja|ko|zh`;
-- `enabled` boolean-like integer;
+- `enabled` integer with `CHECK (enabled IN (0,1))`;
 - `created_at`, `updated_at`;
 - primary key `(project_id, target_language)`.
 
@@ -119,8 +119,10 @@ Fields:
 - `object_key` nullable;
 - `job_id` nullable;
 - `error_code` nullable;
-- `source_revision`/generation identity sufficient for idempotency;
+- `generation_key` non-null and unique per logical target render attempt;
 - timestamps.
+
+The generation key must include project, target language and the durable export generation/retry identity so Workflow replay of the same logical target render is idempotent while a user-requested new render can create a new generation.
 
 Completed object keys are target-scoped:
 
@@ -166,10 +168,12 @@ Rules:
 - 1–4 distinct target languages;
 - each language must be in the bounded set;
 - only after authorization and validation consume the batch limiter;
-- create one batch operation summary plus independent per-target export operations;
+- create independent per-target export operations;
 - no provider/workflow side effects if admission fails.
 
-Response includes per-target operation identifiers and initial statuses. One target failing later does not roll back another target that completed successfully.
+The endpoint does not create a new persisted batch table or new job-state enum. It returns the child target operation identifiers and initial statuses. Reloaded batch/progress UI derives aggregate state from those target export records: all completed -> `completed`; mixed completed plus failed/cancelled -> `partial`; all terminal and none completed -> `failed`; otherwise -> `running`.
+
+One target failing later does not roll back another target that completed successfully.
 
 ### 5.4 Export read/list/share
 
@@ -196,7 +200,7 @@ For each admitted target:
 
 Each target has independent retry/idempotency identity. Retry of one failed target must not regenerate or re-meter completed work for another target.
 
-The batch summary derives from child target states and can be `completed`, `partial`, or `failed` at the API/UI level without changing the existing job-state enum unless implementation evidence requires a separate persisted batch status record.
+Batch summary is always derived from the child target export states and is never its own persisted authority.
 
 ## 7. Translation semantics
 
