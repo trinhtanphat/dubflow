@@ -13,51 +13,47 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      CURRENT_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       TARGET_SHA: 4b36730c27fd940c7eb97975f72380fb3a785525
     steps:
-      - name: Inspect build, deployment and domain state
+      - name: Inspect current and legacy Cloudflare routing state
         shell: bash
         run: |
           set -u
           api='https://api.cloudflare.com/client/v4'
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
 
-          cfget() {
-            curl --silent --show-error --location "$1" -H "$auth"
-          }
-
-          scripts="$(cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts")"
+          echo '=== CURRENT ACCOUNT: dubflow worker ==='
+          scripts="$(cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/scripts")"
+          printf '%s' "$scripts" | jq -c '{success,errors,result:[.result[]? | select(.id == "dubflow") | {id,tag,modified_on,created_on}]}'
           tag="$(printf '%s' "$scripts" | jq -r '.result[]? | select(.id == "dubflow") | .tag' | head -n1)"
-          echo "worker=dubflow tag=$tag"
 
-          echo '=== trigger ==='
-          triggers="$(cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$tag/triggers")"
-          printf '%s' "$triggers" | jq -c '.result[]? | {trigger_uuid,trigger_name,build_command,deploy_command,root_directory,branch_includes,branch_excludes,path_includes,path_excludes,build_token_name,build_token_uuid}'
+          echo '=== CURRENT ACCOUNT: production trigger ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/workers/$tag/triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,build_command,deploy_command,branch_includes,build_token_name,build_token_uuid}]}'
 
-          echo '=== recent builds ==='
-          builds="$(cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$tag/builds")"
-          printf '%s' "$builds" | jq -c '.result[:10][]? | {build_uuid,status,build_outcome,created_on,running_on,stopped_on,branch:.build_trigger_metadata.branch,commit_hash:.build_trigger_metadata.commit_hash,build_command:.build_trigger_metadata.build_command,deploy_command:.build_trigger_metadata.deploy_command,source:.build_trigger_metadata.build_trigger_source}'
+          echo '=== CURRENT ACCOUNT: target build ==='
+          builds="$(cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/workers/$tag/builds")"
+          printf '%s' "$builds" | jq -c --arg sha "$TARGET_SHA" '{success,errors,result:[.result[]? | select(.build_trigger_metadata.commit_hash == $sha) | {build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata}]}'
 
-          target_uuid="$(printf '%s' "$builds" | jq -r --arg sha "$TARGET_SHA" '.result[]? | select(.build_trigger_metadata.commit_hash == $sha) | .build_uuid' | head -n1)"
-          echo "target_build_uuid=$target_uuid"
-          if [[ -n "$target_uuid" && "$target_uuid" != 'null' ]]; then
-            echo '=== target build detail ==='
-            cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/builds/$target_uuid" | jq -c '.result | {build_uuid,status,build_outcome,created_on,running_on,stopped_on,build_trigger_metadata,trigger:{trigger_uuid:.trigger.trigger_uuid,trigger_name:.trigger.trigger_name,build_command:.trigger.build_command,deploy_command:.trigger.deploy_command}}'
-            echo '=== target build logs ==='
-            cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/builds/$target_uuid/logs" | jq -r '.result.lines[]? | if type == "array" then (map(tostring) | join("\t")) else tostring end'
-          fi
+          echo '=== CURRENT ACCOUNT: latest active deployment ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/scripts/dubflow/deployments" | jq -c '{success,errors,latest:(.result.deployments[0] // null)}'
 
-          echo '=== active deployments for dubflow ==='
-          cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/dubflow/deployments" | jq -c '.result.deployments[:10][]? | {id,created_on,source,versions,annotations,author_email}' || true
+          echo '=== CURRENT ACCOUNT: yupvox custom domain ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/domains?hostname=yupvox.qs3d.site" | jq -c '{success,errors,result}'
 
-          echo '=== latest versions for dubflow ==='
-          cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/dubflow/versions?per_page=10" | jq -c '.result[:10][]? | {id,number,metadata}' || true
+          echo '=== LEGACY ACCOUNT: dubflow worker ==='
+          legacy_scripts="$(cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/scripts")"
+          printf '%s' "$legacy_scripts" | jq -c '{success,errors,result:[.result[]? | select(.id == "dubflow") | {id,tag,modified_on,created_on}]}'
 
-          echo '=== yupvox custom-domain binding ==='
-          cfget "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains?hostname=yupvox.qs3d.site" | jq -c '{success,result}' || true
+          echo '=== LEGACY ACCOUNT: yupvox custom domain ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/domains?hostname=yupvox.qs3d.site" | jq -c '{success,errors,result}'
 
-          echo '=== live API snapshot ==='
+          echo '=== LEGACY ACCOUNT: latest dubflow deployment ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/scripts/dubflow/deployments" | jq -c '{success,errors,latest:(.result.deployments[0] // null)}'
+
+          echo '=== LIVE API snapshot ==='
           for path in /api/ready /api/projects /api/usage; do
             body="$(mktemp)"
             code="$(curl --silent --show-error --location --output "$body" --write-out '%{http_code}' --max-time 20 "https://yupvox.qs3d.site$path" || printf '000')"
