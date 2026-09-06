@@ -2,13 +2,11 @@
 
 Canonical production hostname: `yupvox.qs3d.site`
 
-Cloudflare account: `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`
+Cloudflare account: `6c5207813df3d5b83b9508125e0e9e12`
 
-Deployment is fail-closed. `npm run deploy` verifies source, performs the Wrangler checks, applies D1 migrations by binding, deploys the Worker/Static Assets/FFmpeg Container, and reports success only after `/api/ready` confirms the production schema is ready.
+Production deployment topology is intentionally simple: `main` is the only production source of truth. GitHub Actions is CI only. The old **manual-only** GitHub production deployment workflow has been removed. Cloudflare Workers Builds watches `main`; when `main` changes, Cloudflare automatically builds and deploys the Worker/Static Assets/FFmpeg Container from that commit. The repository-level rule is documented in `docs/DEPLOYMENT-POLICY.md`.
 
-GitHub Actions is enabled for this public repository. CI installs dependencies, runs the complete source/test/build verification, performs a Wrangler dry-run, and captures the Studio reference screenshots from the exact tested SHA. Production deployment is **manual-only** through `workflow_dispatch` and requires the `CLOUDFLARE_API_TOKEN` GitHub secret. The token must include Cloudflare **Containers Write** (or equivalent Containers Edit) permission in addition to the permissions needed for Workers and the bound resources.
-
-A previous live Container deployment reached the Worker deployment path but returned `Unauthorized` when Wrangler moved into Container image deployment. Until a later separately authorized manual deploy proves that credential boundary has been corrected, production runtime status remains **UNQUALIFIED**. Do not bypass the credential check or repeatedly auto-deploy `main` after the same deterministic authentication failure.
+A previous Cloudflare Workers Build reached Worker upload and Container image build but returned `Unauthorized` while Wrangler moved into Container deployment. That failure does not create a second deployment lane: fixes belong in repository/configuration or the Cloudflare build environment, then get committed and merged to `main` so Cloudflare Workers Builds retries through the normal automatic flow.
 
 ## Reconciled live dubbing source path
 
@@ -30,7 +28,7 @@ The five original isolated one-minute admission lanes remain present and unchang
 
 Export sharing remains owner-managed and revocable. Plaintext bearer tokens are returned only on creation while D1 stores the SHA-256 hash and a non-secret hint. Invalid, missing, expired, revoked and wrong-token anonymous access converges on `SHARE_NOT_FOUND`. Owner and anonymous media reads use the common Range implementation and retain 200/206/416 behavior. Public responses preserve `Referrer-Policy: no-referrer`.
 
-This remains source/configuration qualification; production deployment is manual-only and runtime status remains **UNQUALIFIED** until the documented deployment and real provider/media fixture gates pass.
+This remains source/configuration qualification. Production deployment is performed automatically by Cloudflare Workers Builds after `main` changes, while runtime status remains **UNQUALIFIED** until the documented deployment and real provider/media fixture gates pass.
 
 ## Phase 4A translation context qualification
 
@@ -50,7 +48,7 @@ Phase 4B is **source/CI qualification only** for managed ElevenLabs Instant Voic
 
 Temporary user-supplied samples are bounded and cleaned from R2 after provider attempts. Only a durable `ready` clone may be assigned. Provider/sample cleanup failures remain fail-closed, and managed deletion does not claim success before required provider/local cleanup succeeds. `RATE_LIMIT_VOICE_CLONE` is additive abuse control and not billing state.
 
-Production runtime remains **UNQUALIFIED** for managed IVC until a real authorized sample/consent fixture proves enrollment, state handling, assignment, cleanup and provider deletion. Production deployment remains manual-only.
+Production runtime remains **UNQUALIFIED** for managed IVC until a real authorized sample/consent fixture proves enrollment, state handling, assignment, cleanup and provider deletion. Production deployment itself is automatic through Cloudflare Workers Builds after `main` changes.
 
 ## Phase 4C multi-language batch export qualification
 
@@ -64,7 +62,7 @@ Owner downloads can select a concrete completed export variant. New multi-langua
 
 A GREEN Phase 4C source/CI run and Wrangler dry-run do not prove real multi-language production behavior. Production runtime remains **UNQUALIFIED** until a real authorized provider/media fixture demonstrates at least two distinct targets end-to-end through translation, target-language ElevenLabs TTS, target-scoped FFmpeg rendering, persisted export variants, owner retrieval and concrete-variant sharing. A successful deployment by itself is not that fixture.
 
-Phase 4C does **not** trigger production deployment. This implementation phase stops at feature exact-head CI, PR/merge verification and post-merge CI. Any later production deployment is a separate, manually authorized qualification action and remains fail-closed on the Cloudflare Containers credential boundary.
+Merging Phase 4C or later fixes to `main` triggers Cloudflare Workers Builds automatically. There is no separate GitHub production deploy action. Runtime qualification remains fail-closed on real Cloudflare/provider/media evidence even though deployment is automatic.
 
 ## Studio reference qualification
 
@@ -72,6 +70,6 @@ Studio CI continues to capture the canonical desktop/reference viewports from th
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment remains manual-only. This Phase 4C implementation stops after a fully green merge and post-merge CI; it does not dispatch the production deployment workflow.
+A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment is automatic through Cloudflare Workers Builds whenever `main` changes; GitHub Actions remains CI only and must not deploy production.
 
-A separately authorized future deployment must still satisfy the Containers credential boundary and `/api/ready`. Final runtime qualification additionally requires real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
+Final runtime qualification still requires the deployed application and real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
