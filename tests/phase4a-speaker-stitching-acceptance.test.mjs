@@ -36,7 +36,7 @@ test('Phase 4A source gates expose only the 15-second canonical window policy an
   assert.match(packageJson, /audio-chunks\.test\.mjs/);
   assert.doesNotMatch(packageJson, /audio-windows\.test\.mjs/);
   assert.match(deploymentStatus, /300(?:-second|s).*15(?:-second|s).*overlap/is);
-  assert.match(deploymentStatus, /285(?:-second|s)/is);
+  assert.match(deploymentStatus, /285(?:-second|\s+seconds?|s)/is);
   assert.match(deploymentStatus, /rerun/i);
   assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/i);
 });
