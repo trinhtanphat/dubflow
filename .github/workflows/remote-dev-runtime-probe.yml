@@ -28,6 +28,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Build assets
+        run: npm run build
+
       - name: Reproduce API reads in remote development runtime
         shell: bash
         run: |
@@ -57,7 +60,7 @@ jobs:
 
           if [ "$ready" -ne 1 ]; then
             echo '--- remote dev startup log ---'
-            sed -n '1,240p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
+            sed -n '1,260p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
             exit 2
           fi
 
@@ -71,4 +74,4 @@ jobs:
 
           sleep 2
           echo '--- remote dev runtime log (sanitized) ---'
-          sed -n '1,320p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
+          sed -n '1,420p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
