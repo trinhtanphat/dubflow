@@ -111,14 +111,16 @@ Ducking windows are derived from the same canonical export clips used for dubbed
 Rules:
 
 - Each clip contributes `[startMs, endMs)`.
-- Overlapping or adjacent windows are merged before building the FFmpeg expression/filter graph.
-- A small deterministic attack/release envelope may be used to avoid hard gain edges, but it must be bounded and unit-tested.
-- Gain values are constants/configurable code defaults, not user-provided arbitrary FFmpeg expressions.
+- Overlapping or adjacent windows are merged before building the FFmpeg filter graph.
+- Each merged speech window uses an 80 ms attack lead and a 120 ms release tail, clipped to `[0, projectDurationMs]`.
+- The gain ramps linearly from 1.0 to the duck gain over the 80 ms attack, remains at duck gain for the canonical speech interval, then ramps linearly back to 1.0 over the 120 ms release.
+- The duck gain is exactly `10^(-18/20)` (approximately `0.1258925412`), equivalent to -18 dB.
+- Gain values are code constants, not user-provided FFmpeg expressions.
 - The source bed is normalized/resampled to 48 kHz stereo before ducking and mixing.
 - No clip or source path from another project may be accepted.
 - Output duration remains bounded to canonical project duration.
 
-Initial default attenuation: approximately -18 dB during dubbed speech windows. The exact linear gain constant is implementation detail but must be locked by tests so changes are deliberate.
+These constants are part of the initial Phase 4D contract and must be locked by tests so later tuning is deliberate and reviewable.
 
 ## 7. Separation provider boundary
 
@@ -161,9 +163,7 @@ Provider qualification is explicit. `configured=true` is not sufficient for `sep
 
 ## 8. Persistence and source generation
 
-Create a forward D1 migration for separation artifacts. Use one canonical table, for example:
-
-`project_audio_stems`
+Create a forward D1 migration with one canonical table named `project_audio_stems`.
 
 Required fields:
 
@@ -180,7 +180,7 @@ Required fields:
 - `created_at`
 - `updated_at`
 
-Uniqueness must prevent two completed canonical stems of the same kind/provider/source generation from becoming competing sources of truth.
+Use a partial unique index for completed canonical stems on `(project_id, source_generation, kind, provider)` where `status='completed'`. This prevents competing completed sources of truth while still allowing immutable failed/pending attempt history.
 
 The project source generation must change whenever the uploaded source media is replaced/recompleted. If the repo already has an equivalent source-version field after latest-main reconciliation, use that instead of introducing a duplicate counter.
 
@@ -246,7 +246,7 @@ Rules:
 - omitted `audioMode` -> `dubbed_only`;
 - `duck_original` forbids `backgroundObjectKey`;
 - `separated_background` requires a validated project-scoped background stem key;
-- `dubbed_only` ignores/forbids background stem input;
+- `dubbed_only` forbids background stem input;
 - modern output key naming remains unchanged;
 - legacy render path remains backward-compatible.
 
@@ -268,7 +268,7 @@ Inputs:
 Filter graph:
 
 - map original audio to normalized source bed;
-- apply gain automation based on merged dialogue windows;
+- apply the exact ducking envelope from section 6;
 - place/tempo-fit dubbed clips exactly as current implementation;
 - mix attenuated source bed and dubbed clips;
 - encode AAC 48 kHz stereo.
@@ -404,7 +404,7 @@ Existing clients that omit `audioMode` retain `dubbed_only` behavior.
 ### Container
 
 - `dubbed_only` retains current argument/filter graph contract;
-- `duck_original` maps source audio and applies attenuation windows;
+- `duck_original` maps source audio and applies the exact section-6 envelope;
 - overlapping dialogue windows merge deterministically;
 - source audio absent -> stable failure;
 - `separated_background` consumes background stem and does not mix source audio;
@@ -480,7 +480,7 @@ After Phase 4D is merged and post-merge CI is green, Phase 4E will get a separat
 Phase 4D is complete when all of the following are true:
 
 1. Existing clients still produce `dubbed_only` exports unchanged when `audioMode` is omitted.
-2. `duck_original` produces a render contract that preserves source audio and attenuates it only around dubbed speech windows.
+2. `duck_original` preserves source audio and attenuates it using the exact section-6 envelope only around dubbed speech windows.
 3. `separated_background` is impossible to request successfully unless a qualified provider/stem path exists.
 4. A valid background stem is reusable across all enabled target languages for the same source generation.
 5. Replacing source media prevents reuse of old stems.
