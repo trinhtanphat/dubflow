@@ -133,7 +133,7 @@ test('Phase 3C safety gate locks validation-before-limit and limiter-before-expe
     'launchValidated(',
   ]);
   assertInOrder(exportLaunchSource, [
-    'exportsStore.create(projectId, userId, targetLanguage, output, batchId)',
+    'exportsStore.create(projectId, userId, targetLanguage, output, batchId, audioMode)',
     'jobs.create(projectId, legacy ? \'export\'',
     "setStatus(projectId, userId, 'processing')",
     'EXPORT_WORKFLOW.create',
