@@ -2,11 +2,13 @@
 
 Canonical production hostname: `yupvox.qs3d.site`
 
-Cloudflare account: `6c5207813df3d5b83b9508125e0e9e12`
+Cloudflare production account: `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`
 
-Production deployment topology is intentionally simple: `main` is the only production source of truth. GitHub Actions is CI only. The old **manual-only** GitHub production deployment workflow has been removed. Cloudflare Workers Builds watches `main`; when `main` changes, Cloudflare automatically builds and deploys the Worker/Static Assets/FFmpeg Container from that commit. The repository-level rule is documented in `docs/DEPLOYMENT-POLICY.md`.
+That account owns the live `yupvox.qs3d.site` custom domain and the persisted production projects/data. A separate Cloudflare account also contains a Worker named `dubflow`, but it does not own the public hostname or the four production projects and is not the canonical production target.
 
-A previous Cloudflare Workers Build reached Worker upload and Container image build but returned `Unauthorized` while Wrangler moved into Container deployment. That failure does not create a second deployment lane: fixes belong in repository/configuration or the Cloudflare build environment, then get committed and merged to `main` so Cloudflare Workers Builds retries through the normal automatic flow.
+Production deployment topology is intentionally simple: `main` is the only production source of truth. GitHub Actions is CI only. The old **manual-only** GitHub production deployment workflow has been removed. Cloudflare Workers Builds watches `main`; when `main` changes, Cloudflare automatically builds and deploys production from that commit. The repository-level rule is documented in `docs/DEPLOYMENT-POLICY.md`.
+
+On 2026-09-06 the public production incident was traced to account drift: repository/Workers Builds configuration targeted the second account while the custom domain and persisted D1 data remained on the canonical production account. The canonical D1 was backed up, migrated through `0010_multilanguage_variants.sql`, and the exact qualified main source was deployed in place. Live qualification then passed with `/api/ready` reporting `schemaRevision: 10`, `/api/projects` returning the four persisted projects, `/api/usage` returning HTTP 200, and the two previously failing project detail reads returning HTTP 200. Repository guards now pin the account topology and reject stale HTTP-200 readiness responses that lack the exact current schema revision.
 
 ## Reconciled live dubbing source path
 
@@ -28,7 +30,7 @@ The five original isolated one-minute admission lanes remain present and unchang
 
 Export sharing remains owner-managed and revocable. Plaintext bearer tokens are returned only on creation while D1 stores the SHA-256 hash and a non-secret hint. Invalid, missing, expired, revoked and wrong-token anonymous access converges on `SHARE_NOT_FOUND`. Owner and anonymous media reads use the common Range implementation and retain 200/206/416 behavior. Public responses preserve `Referrer-Policy: no-referrer`.
 
-This remains source/configuration qualification. Production deployment is performed automatically by Cloudflare Workers Builds after `main` changes, while runtime status remains **UNQUALIFIED** until the documented deployment and real provider/media fixture gates pass.
+Production API/schema deployment is live-qualified for the recovered production account, while provider/media runtime behavior remains **UNQUALIFIED** until the documented real provider/media fixture gates pass.
 
 ## Phase 4A translation context qualification
 
@@ -70,6 +72,6 @@ Studio CI continues to capture the canonical desktop/reference viewports from th
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment is automatic through Cloudflare Workers Builds whenever `main` changes; GitHub Actions remains CI only and must not deploy production.
+The production API/schema layer is live-qualified after the 2026-09-06 recovery: readiness reports schema revision 10 and persisted project/usage reads are healthy on `yupvox.qs3d.site`. A GREEN source CI and Wrangler dry-run qualify repository source/configuration. Production deployment is intended to be automatic through Cloudflare Workers Builds whenever `main` changes; GitHub Actions remains CI only and must not deploy production.
 
-Final runtime qualification still requires the deployed application and real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
+Final provider/media runtime qualification still requires real supported fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, those runtime capabilities remain **UNQUALIFIED** rather than PASS.
