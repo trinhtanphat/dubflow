@@ -86,6 +86,7 @@ function baseInfra(persisted: ReturnType<typeof persistedSegment>[], usageEvents
         return input as never;
       },
     },
+    telemetry: { write() {} },
   };
 }
 
