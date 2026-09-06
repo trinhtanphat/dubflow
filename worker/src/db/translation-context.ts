@@ -55,7 +55,7 @@ type ProjectContextRow = {
 type GlossaryRow = {
   id: string;
   project_id: string;
-  target_language: TargetLanguage;
+  target_language?: TargetLanguage;
   source_term: string;
   preferred_translation: string;
   note: string | null;
@@ -69,11 +69,11 @@ function affectedRows(result: D1RunResultLike): number {
   return Number.isFinite(changes) ? Math.max(0, Number(changes)) : 0;
 }
 
-function glossaryFromRow(row: GlossaryRow): GlossaryEntry {
+function glossaryFromRow(row: GlossaryRow, targetLanguage: TargetLanguage): GlossaryEntry {
   return {
     id: row.id,
     projectId: row.project_id,
-    targetLanguage: row.target_language,
+    targetLanguage: row.target_language ?? targetLanguage,
     sourceTerm: row.source_term,
     preferredTranslation: row.preferred_translation,
     note: row.note ?? null,
@@ -105,6 +105,16 @@ function requireExpectedRevision(expectedRevision: number): void {
   }
 }
 
+function targetSqlLiteral(targetLanguage: TargetLanguage): string {
+  switch (targetLanguage) {
+    case 'vi': return "'vi'";
+    case 'en': return "'en'";
+    case 'zh': return "'zh'";
+    case 'ja': return "'ja'";
+    case 'ko': return "'ko'";
+  }
+}
+
 export class TranslationContextRepository implements TranslationContextStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
@@ -131,7 +141,7 @@ export class TranslationContextRepository implements TranslationContextStore {
     return {
       revision: Number(project.translation_context_revision),
       style: project.translation_style,
-      glossary: (glossary.results ?? []).map(glossaryFromRow),
+      glossary: (glossary.results ?? []).map((row) => glossaryFromRow(row, targetLanguage)),
     };
   }
 
@@ -187,13 +197,14 @@ export class TranslationContextRepository implements TranslationContextStore {
     requireExpectedRevision(expectedRevision);
     const normalized = normalizeGlossaryInput(input);
     const id = crypto.randomUUID();
+    const targetLiteral = targetSqlLiteral(normalized.targetLanguage);
 
     try {
       const result = await this.db.prepare(
         `INSERT INTO project_glossary_entries (
            id, project_id, target_language, source_term, source_term_key, preferred_translation, note, case_sensitive
          )
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, ?, ${targetLiteral}, ?, ?, ?, ?, ?
          WHERE EXISTS (
            SELECT 1 FROM projects
            WHERE id = ? AND user_id = ? AND translation_context_revision = ?
@@ -202,7 +213,6 @@ export class TranslationContextRepository implements TranslationContextStore {
       ).bind(
         id,
         projectId,
-        normalized.targetLanguage,
         normalized.sourceTerm,
         normalized.sourceTermKey,
         normalized.preferredTranslation,
@@ -264,6 +274,7 @@ export class TranslationContextRepository implements TranslationContextStore {
   ): Promise<{ entry: GlossaryEntry; context: TranslationContext }> {
     requireExpectedRevision(expectedRevision);
     const normalized = normalizeGlossaryInput(input);
+    const targetLiteral = targetSqlLiteral(normalized.targetLanguage);
 
     try {
       const result = await this.db.prepare(
@@ -276,7 +287,7 @@ export class TranslationContextRepository implements TranslationContextStore {
              updated_at = datetime('now')
          WHERE id = ?
            AND project_id = ?
-           AND target_language = ?
+           AND target_language = ${targetLiteral}
            AND EXISTS (
              SELECT 1 FROM projects
              WHERE id = ? AND user_id = ? AND translation_context_revision = ?
@@ -296,7 +307,6 @@ export class TranslationContextRepository implements TranslationContextStore {
         normalized.caseSensitive ? 1 : 0,
         entryId,
         projectId,
-        normalized.targetLanguage,
         projectId,
         userId,
         expectedRevision,
@@ -358,16 +368,17 @@ export class TranslationContextRepository implements TranslationContextStore {
     targetLanguage: TargetLanguage = 'vi',
   ): Promise<TranslationContext> {
     requireExpectedRevision(expectedRevision);
+    const targetLiteral = targetSqlLiteral(targetLanguage);
     const result = await this.db.prepare(
       `DELETE FROM project_glossary_entries
        WHERE id = ?
          AND project_id = ?
-         AND target_language = ?
+         AND target_language = ${targetLiteral}
          AND EXISTS (
            SELECT 1 FROM projects
            WHERE id = ? AND user_id = ? AND translation_context_revision = ?
          )`,
-    ).bind(entryId, projectId, targetLanguage, projectId, userId, expectedRevision).run();
+    ).bind(entryId, projectId, projectId, userId, expectedRevision).run();
 
     if (affectedRows(result) > 0) return this.requireCanonical(projectId, userId, targetLanguage);
 
@@ -389,12 +400,12 @@ export class TranslationContextRepository implements TranslationContextStore {
   }
 
   private async countProjectEntries(projectId: string): Promise<number> {
-    const row = await this.db.prepare(
-      `SELECT COUNT(*) AS entry_count
+    const result = await this.db.prepare(
+      `SELECT project_id
        FROM project_glossary_entries
        WHERE project_id = ?`,
-    ).bind(projectId).first<{ entry_count: number }>();
-    return Math.max(0, Number(row?.entry_count ?? 0));
+    ).bind(projectId).all<{ project_id: string }>();
+    return result.results?.length ?? 0;
   }
 
   private async requireCanonical(
