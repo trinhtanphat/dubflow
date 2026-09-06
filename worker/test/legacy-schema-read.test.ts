@@ -110,6 +110,7 @@ describe('legacy production schema read compatibility', () => {
         sourceLanguage: 'en',
         targetLanguage: 'vi',
         targetLanguagesRevision: 1,
+        sourceGeneration: 1,
         status: 'draft',
         sourceObjectKey: 'projects/p1/source.mp4',
         exportObjectKey: null,
@@ -122,6 +123,7 @@ describe('legacy production schema read compatibility', () => {
     await expect(repo.getByIdForUser('p1', 'dev-user')).resolves.toMatchObject({
       id: 'p1',
       targetLanguagesRevision: 1,
+      sourceGeneration: 1,
       exportObjectKey: null,
     });
   });
