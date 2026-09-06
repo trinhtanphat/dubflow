@@ -1,0 +1,102 @@
+name: Cross Account Routing Probe
+
+on:
+  push:
+    branches:
+      - 'fix/runtime-qualification-probe'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      EXPECTED_WORKER_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+    steps:
+      - name: Resolve qs3d.site routing across authorized accounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const expectedWorkerAccount = process.env.EXPECTED_WORKER_ACCOUNT_ID;
+          if (!token || !expectedWorkerAccount) throw new Error('Cloudflare probe credentials are unavailable.');
+          const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+
+          async function cf(url, strict = true) {
+            const response = await fetch(url, { headers });
+            const text = await response.text();
+            let body;
+            try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 500) }; }
+            if (strict && (!response.ok || body?.success === false)) {
+              throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 800)}`);
+            }
+            return { response, body };
+          }
+
+          const { body: accountsBody } = await cf('https://api.cloudflare.com/client/v4/accounts?per_page=50');
+          const accounts = Array.isArray(accountsBody?.result) ? accountsBody.result : [];
+          console.log(`authorized account count=${accounts.length}`);
+          if (accounts.length === 0) throw new Error('No authorized Cloudflare accounts returned.');
+
+          const matches = [];
+          for (const account of accounts) {
+            const accountId = account?.id;
+            if (!accountId) continue;
+            const zonesUrl = `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent('qs3d.site')}&account.id=${encodeURIComponent(accountId)}`;
+            const { response: zoneResponse, body: zoneBody } = await cf(zonesUrl, false);
+            const zones = Array.isArray(zoneBody?.result) ? zoneBody.result : [];
+            for (const zone of zones) {
+              const zoneId = zone?.id;
+              if (!zoneId) continue;
+              const entry = {
+                accountId,
+                accountMatchesWorker: accountId === expectedWorkerAccount,
+                zoneId,
+                zoneName: zone?.name ?? '',
+                zoneStatus: zone?.status ?? '',
+                routes: [],
+                dns: [],
+                domains: [],
+              };
+
+              const { body: routeBody } = await cf(`https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`, false);
+              const routes = Array.isArray(routeBody?.result) ? routeBody.result : [];
+              entry.routes = routes
+                .filter((r) => String(r?.pattern ?? '').includes('yupvox.qs3d.site'))
+                .map((r) => ({ pattern: r?.pattern ?? '', script: r?.script ?? '' }));
+
+              const { body: dnsBody } = await cf(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?name=${encodeURIComponent('yupvox.qs3d.site')}&per_page=100`, false);
+              const dns = Array.isArray(dnsBody?.result) ? dnsBody.result : [];
+              entry.dns = dns.map((r) => ({
+                type: r?.type ?? '', name: r?.name ?? '', proxied: r?.proxied ?? null,
+                content: ['CNAME','A','AAAA'].includes(r?.type) ? String(r?.content ?? '').slice(0, 250) : '[redacted-non-routing-record]'
+              }));
+
+              const { body: domainBody } = await cf(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`, false);
+              const domains = Array.isArray(domainBody?.result) ? domainBody.result : [];
+              entry.domains = domains
+                .filter((d) => d?.hostname === 'yupvox.qs3d.site')
+                .map((d) => ({ hostname: d?.hostname ?? '', service: d?.service ?? '', environment: d?.environment ?? '' }));
+
+              matches.push(entry);
+            }
+          }
+
+          console.log(`qs3d.site zone matches=${matches.length}`);
+          for (const match of matches) {
+            console.log(JSON.stringify({
+              accountMatchesWorker: match.accountMatchesWorker,
+              zoneName: match.zoneName,
+              zoneStatus: match.zoneStatus,
+              routes: match.routes,
+              dns: match.dns,
+              customDomains: match.domains,
+            }));
+          }
+          if (matches.length === 0) process.exit(2);
+          NODE
