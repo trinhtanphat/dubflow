@@ -233,7 +233,7 @@ describe('Phase 4A translation context primitives', () => {
     expect(isTranslationContextActive({
       ...neutral,
       glossary: [{
-        id: 'g1', projectId: 'p1', sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null,
+        id: 'g1', projectId: 'p1', targetLanguage: 'vi', sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null,
         caseSensitive: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z',
       }],
     })).toBe(true);
