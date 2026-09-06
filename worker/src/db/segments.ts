@@ -230,9 +230,8 @@ export class SegmentRepository implements SegmentStore {
     const invalidatesVoice = sourceChanged || timingChanged || translationChanged || speakerChanged;
     const voiceStatus = invalidatesVoice ? 'pending' : current.voiceStatus;
     const dubbedObjectKey = invalidatesVoice ? null : current.dubbedObjectKey;
-    const translationStatus = sourceChanged ? 'pending' : current.translationStatus;
     const result = await this.db.prepare(`UPDATE segments
-      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, translation_status = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
+      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
       WHERE id = ? AND project_id = ?
       AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
       AND version = ?`)
@@ -242,7 +241,6 @@ export class SegmentRepository implements SegmentStore {
         next.speakerId,
         next.startMs,
         next.endMs,
-        translationStatus,
         voiceStatus,
         dubbedObjectKey,
         segmentId,
