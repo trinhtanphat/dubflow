@@ -38,6 +38,84 @@ jobs:
       - name: Wrangler dry-run
         run: npx wrangler deploy --dry-run
 
+      - name: Probe deployed production runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+          const checks = [
+            {
+              name: 'ready',
+              url: 'https://yupvox.qs3d.site/api/ready',
+              validate(status, body) {
+                return status === 200 && body?.ready === true && body?.service === 'dubflow' && body?.database === 'ready';
+              },
+              describe(body) {
+                return JSON.stringify(body);
+              },
+            },
+            {
+              name: 'projects',
+              url: 'https://yupvox.qs3d.site/api/projects',
+              validate(status, body) {
+                return status === 200 && Array.isArray(body);
+              },
+              describe(body) {
+                return Array.isArray(body) ? `array(length=${body.length})` : `error=${body?.error?.code ?? 'unexpected-body'}`;
+              },
+            },
+            {
+              name: 'usage',
+              url: 'https://yupvox.qs3d.site/api/usage',
+              validate(status, body) {
+                return status === 200 && body !== null && typeof body === 'object' && !Array.isArray(body);
+              },
+              describe(body) {
+                return body && typeof body === 'object' ? `object(keys=${Object.keys(body).sort().join(',')})` : 'unexpected-body';
+              },
+            },
+          ];
+
+          let lastFailure = 'no attempts executed';
+          for (let attempt = 1; attempt <= 12; attempt += 1) {
+            let allOk = true;
+            const failures = [];
+            for (const check of checks) {
+              try {
+                const response = await fetch(check.url, {
+                  headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+                  redirect: 'follow',
+                });
+                const text = await response.text();
+                let body;
+                try {
+                  body = JSON.parse(text);
+                } catch {
+                  body = null;
+                }
+                const ok = check.validate(response.status, body);
+                console.log(`[attempt ${attempt}] ${check.name}: status=${response.status} ok=${ok} ${check.describe(body)}`);
+                if (!ok) {
+                  allOk = false;
+                  failures.push(`${check.name}:status=${response.status}:${check.describe(body)}`);
+                }
+              } catch (error) {
+                allOk = false;
+                failures.push(`${check.name}:network=${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+            if (allOk) {
+              console.log('Production runtime smoke PASS: readiness, projects, and usage are healthy.');
+              process.exit(0);
+            }
+            lastFailure = failures.join(' | ');
+            if (attempt < 12) await sleep(5000);
+          }
+          console.error(`Production runtime smoke FAILED: ${lastFailure}`);
+          process.exit(1);
+          NODE
+
       - name: Install CJK screenshot font
         shell: bash
         run: |
