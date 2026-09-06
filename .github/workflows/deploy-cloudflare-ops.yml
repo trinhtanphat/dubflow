@@ -1,4 +1,4 @@
-name: Cloudflare Container Auth Probe
+name: Cloudflare Container Entitlement Probe
 
 on:
   push:
@@ -13,23 +13,12 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     environment: production
     env:
       CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
       - name: Require Cloudflare token
         shell: bash
         run: |
@@ -38,8 +27,28 @@ jobs:
             exit 1
           fi
 
-      - name: Show Wrangler identity and token permissions
-        run: npx wrangler whoami
+      - name: Read Workers account settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --output /tmp/workers-settings.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/account-settings" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          echo "Workers account settings HTTP status: ${code}"
+          cat /tmp/workers-settings.json
+          echo
+          test "$code" = "200"
 
-      - name: Probe Container registry read access
-        run: npx wrangler containers images list
+      - name: Probe Containers identity endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --output /tmp/containers-me.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/me" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          echo "Containers identity HTTP status: ${code}"
+          cat /tmp/containers-me.json
+          echo
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            exit 1
+          fi
