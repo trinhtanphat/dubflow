@@ -6,7 +6,12 @@ export type EditorPatchDeps = {
 };
 
 export type EditorRetranslateDeps = {
-  retranslateSegment: (projectId: string, segmentId: string, expectedVersion: number, mode: TranslationMode) => Promise<RetranslateResult>;
+  retranslateSegment: (
+    projectId: string,
+    segmentId: string,
+    expectedVersion: number,
+    mode?: TranslationMode,
+  ) => Promise<RetranslateResult>;
 };
 
 export type EditorRetranslateResult =
@@ -37,7 +42,7 @@ export async function retranslateEditorSegment(
   projectId: string,
   segmentId: string,
   expectedVersion: number,
-  mode: TranslationMode,
+  mode: TranslationMode | undefined = undefined,
   deps: EditorRetranslateDeps = defaultRetranslateDeps,
 ): Promise<EditorRetranslateResult> {
   const result = await deps.retranslateSegment(projectId, segmentId, expectedVersion, mode);
