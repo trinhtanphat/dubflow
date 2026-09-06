@@ -4,7 +4,8 @@ export type UsageKind =
   | 'asr_audio_second'
   | 'translation_character'
   | 'tts_audio_second'
-  | 'render_second';
+  | 'render_second'
+  | 'audio_separation_minute';
 
 export type UsagePhase = 'started' | 'completed';
 
@@ -29,6 +30,7 @@ export type UsageTotals = {
   translationCharacters: number;
   ttsAudioSeconds: number;
   renderSeconds: number;
+  audioSeparationMinutes: number;
 };
 
 export type UsageSummary = {
@@ -73,6 +75,7 @@ const USAGE_KINDS = new Set<UsageKind>([
   'translation_character',
   'tts_audio_second',
   'render_second',
+  'audio_separation_minute',
 ]);
 
 function fromRow(row: UsageRow): UsageEvent {
@@ -97,6 +100,7 @@ function emptyTotals(): UsageTotals {
     translationCharacters: 0,
     ttsAudioSeconds: 0,
     renderSeconds: 0,
+    audioSeparationMinutes: 0,
   };
 }
 
@@ -104,7 +108,8 @@ function addUnits(totals: UsageTotals, kind: UsageKind, units: number): void {
   if (kind === 'asr_audio_second') totals.asrAudioSeconds += units;
   else if (kind === 'translation_character') totals.translationCharacters += units;
   else if (kind === 'tts_audio_second') totals.ttsAudioSeconds += units;
-  else totals.renderSeconds += units;
+  else if (kind === 'render_second') totals.renderSeconds += units;
+  else totals.audioSeparationMinutes += units;
 }
 
 function summarize(rows: UsageAggregateRow[]): UsageSummary {

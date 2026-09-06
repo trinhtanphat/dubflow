@@ -1,7 +1,7 @@
 import type { AudioSeparation } from '../db/audio-separation';
 import { separationObjectPrefix } from '../db/audio-separation';
 import type { AudioSeparationProvider, SeparationCapabilities, SeparationResult } from '../services/separation/types';
-import { assertJobActive, isJobCancelledError, type JobStatusReader } from './jobCancellation';
+import { assertJobActive, type JobStatusReader } from './jobCancellation';
 
 export type SeparationWorkflowParams = {
   projectId: string;
@@ -14,6 +14,7 @@ type ProjectSnapshot = {
   sourceObjectKey: string | null;
   sourceRevision: number;
   sizeBytes?: number | null;
+  durationMs?: number | null;
 };
 
 type ProjectReader = {
@@ -51,13 +52,13 @@ type SeparationStore = {
 };
 
 type SeparationUsageEvent = {
-  phase: 'started' | 'completed' | 'failed';
+  phase: 'started' | 'completed';
   operationKey: string;
   units?: number;
 };
 
 type SeparationUsageStore = {
-  getByOperation(operationKey: string, phase: 'started' | 'completed' | 'failed'): Promise<SeparationUsageEvent | null>;
+  getByOperation(operationKey: string, phase: 'started' | 'completed'): Promise<SeparationUsageEvent | null>;
   record(input: {
     userId: string;
     projectId: string;
@@ -65,7 +66,7 @@ type SeparationUsageStore = {
     kind: 'audio_separation_minute';
     units: number;
     provider: string;
-    phase: 'started' | 'completed' | 'failed';
+    phase: 'started' | 'completed';
     operationKey: string;
   }): Promise<SeparationUsageEvent>;
 };
@@ -101,16 +102,20 @@ function canonicalKeys(projectId: string, sourceRevision: number, capabilities: 
   };
 }
 
-function assertValidProviderResult(
-  result: SeparationResult,
-  expected: ReturnType<typeof canonicalKeys>,
-): void {
+function assertValidProviderResult(result: SeparationResult, expected: ReturnType<typeof canonicalKeys>): void {
   if (!Number.isFinite(result.durationMs) || result.durationMs <= 0) {
     throw new Error('SEPARATION_RESPONSE_INVALID: provider returned an invalid duration.');
   }
   if (result.dialogueObjectKey !== expected.dialogueObjectKey || result.backgroundObjectKey !== expected.backgroundObjectKey) {
     throw new Error('SEPARATION_RESPONSE_INVALID: provider returned non-canonical artifact keys.');
   }
+}
+
+function sourceMinutes(project: ProjectSnapshot): number {
+  if (!Number.isFinite(project.durationMs) || (project.durationMs ?? 0) <= 0) {
+    throw new Error('SEPARATION_USAGE_RECOVERY_UNAVAILABLE: project duration is missing or invalid.');
+  }
+  return project.durationMs! / 60_000;
 }
 
 function errorCode(error: unknown): string {
@@ -137,6 +142,7 @@ export async function runSeparationPipeline(
 
   const capabilities = await step.do('resolve-separation-provider', async () => deps.provider.capabilities());
   if (!capabilities.configured) throw new Error('SEPARATION_PROVIDER_UNAVAILABLE: provider is not configured.');
+  if (!capabilities.qualified) throw new Error('SEPARATION_PROVIDER_UNQUALIFIED: provider is not runtime-qualified.');
 
   const opKey = operationKey(project.id, project.sourceRevision, capabilities);
   const expectedKeys = canonicalKeys(project.id, project.sourceRevision, capabilities);
@@ -148,31 +154,30 @@ export async function runSeparationPipeline(
     capabilities.provider,
     capabilities.modelDigest,
   ));
+  const completedUsage = await step.do('load-completed-usage', async () => deps.usage.getByOperation(opKey, 'completed'));
 
   if (separation?.status === 'completed') {
     if (separation.dialogueObjectKey !== expectedKeys.dialogueObjectKey || separation.backgroundObjectKey !== expectedKeys.backgroundObjectKey) {
       throw new Error('SEPARATION_ARTIFACT_MISSING: completed separation does not contain canonical stems.');
     }
+    if (!completedUsage) {
+      await step.do('recover-completed-usage-from-durable-separation', async () => deps.usage.record({
+        userId: params.userId,
+        projectId: project.id,
+        jobId: separation!.jobId ?? params.jobId,
+        kind: 'audio_separation_minute',
+        units: sourceMinutes(project),
+        provider: capabilities.provider,
+        phase: 'completed',
+        operationKey: opKey,
+      }));
+      return { status: 'completed', separationId: separation.id, reused: true, recovered: true };
+    }
     return { status: 'completed', separationId: separation.id, reused: true };
   }
 
-  const completedUsage = await step.do('recover-completed-usage', async () => deps.usage.getByOperation(opKey, 'completed'));
-  if (completedUsage && separation) {
-    await step.do('recover-separation-completion', async () => deps.separations.complete(
-      project.id,
-      separation!.id,
-      params.userId,
-      {
-        sourceRevision: project.sourceRevision,
-        provider: capabilities.provider,
-        modelDigest: capabilities.modelDigest,
-      },
-      expectedKeys,
-    ));
-    return { status: 'completed', separationId: separation.id, reused: true, recovered: true };
-  }
-  if (completedUsage && !separation) {
-    throw new Error('SEPARATION_INVARIANT_VIOLATION: completed usage exists without durable separation state.');
+  if (completedUsage) {
+    throw new Error('SEPARATION_INVARIANT_VIOLATION: completed usage exists without durable completed stems.');
   }
 
   if (!separation) {
@@ -199,7 +204,7 @@ export async function runSeparationPipeline(
       projectId: project.id,
       jobId: params.jobId,
       kind: 'audio_separation_minute',
-      units: 0,
+      units: Number.isFinite(project.durationMs) && (project.durationMs ?? 0) > 0 ? project.durationMs! / 60_000 : 0,
       provider: capabilities.provider,
       phase: 'started',
       operationKey: opKey,
@@ -228,26 +233,7 @@ export async function runSeparationPipeline(
     throw error;
   }
 
-  const completed = await step.do('load-completed-usage-after-provider', async () => deps.usage.getByOperation(opKey, 'completed'));
-  if (!completed) {
-    await step.do('record-separation-completed-usage', async () => deps.usage.record({
-      userId: params.userId,
-      projectId: project.id,
-      jobId: params.jobId,
-      kind: 'audio_separation_minute',
-      units: providerResult.durationMs / 60_000,
-      provider: capabilities.provider,
-      phase: 'completed',
-      operationKey: opKey,
-    }));
-  }
-
-  try {
-    await step.do('check-cancellation-before-completion', async () => assertJobActive(deps.jobs, project.id, params.jobId, params.userId));
-  } catch (error) {
-    if (isJobCancelledError(error)) throw error;
-    throw error;
-  }
+  await step.do('check-cancellation-before-completion', async () => assertJobActive(deps.jobs, project.id, params.jobId, params.userId));
 
   await step.do('persist-separation-completion', async () => deps.separations.complete(
     project.id,
@@ -260,6 +246,20 @@ export async function runSeparationPipeline(
     },
     expectedKeys,
   ));
+
+  const completedAfterPersist = await step.do('load-completed-usage-after-persist', async () => deps.usage.getByOperation(opKey, 'completed'));
+  if (!completedAfterPersist) {
+    await step.do('record-separation-completed-usage', async () => deps.usage.record({
+      userId: params.userId,
+      projectId: project.id,
+      jobId: params.jobId,
+      kind: 'audio_separation_minute',
+      units: providerResult.durationMs / 60_000,
+      provider: capabilities.provider,
+      phase: 'completed',
+      operationKey: opKey,
+    }));
+  }
 
   return { status: 'completed', separationId: separation.id, reused: false };
 }
