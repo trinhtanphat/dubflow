@@ -171,7 +171,7 @@ describe('Phase 4D separation retry safety', () => {
       audioMode: 'separated_background',
     }, deps as never, step() as never)).rejects.toMatchObject({ code: 'DIALOGUE_SEPARATION_FAILED' });
 
-    expect(stem?.status).toBe('failed');
+    expect(stem).toMatchObject({ status: 'failed' });
 
     await expect(runExportPipeline({
       projectId: 'p1',
