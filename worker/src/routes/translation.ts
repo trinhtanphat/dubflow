@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
-import type { Env } from '../env';
 import { ProjectRepository } from '../db/projects';
 import { SegmentPersistenceError, SegmentRepository } from '../db/segments';
-import { getCurrentUserId } from '../security/current-user';
 import { errorBody } from '../http/json';
+import { createTelemetry, withProviderTelemetry } from '../observability/telemetry';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
+import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
 import { TranslationRouter, type TranslationMode } from '../services/translation/router';
@@ -12,7 +14,7 @@ import { TranslationProviderError } from '../services/translation/types';
 const MODES = new Set<TranslationMode>(['workers-ai', 'google', 'compare']);
 
 export function createTranslationRoutes() {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
 
   routes.post('/:id/segments/:segmentId/retranslate', async (c) => {
     const userId = getCurrentUserId();
@@ -39,12 +41,28 @@ export function createTranslationRoutes() {
       }, 409);
     }
 
+    const rateLimited = await enforceRateLimit(c, 'translate', userId, projectId);
+    if (rateLimited) return rateLimited;
+
     try {
       const router = new TranslationRouter(
         new WorkersAITranslationProvider(c.env.AI),
         new GoogleCloudTranslationProvider(c.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? ''),
       );
-      const result = await router.translate(mode, [{ id: segment.id, text: segment.sourceText }], project.sourceLanguage, 'vi');
+      const provider = mode === 'compare' ? 'translation-router' : mode;
+      const result = await withProviderTelemetry(createTelemetry(c.env), {
+        requestId: c.get('requestId'),
+        actorId: userId,
+        projectId,
+        operation: 'translate',
+        provider,
+        errorCode: 'TRANSLATION_PROVIDER_FAILED',
+      }, () => router.translate(
+        mode,
+        [{ id: segment.id, text: segment.sourceText }],
+        project.sourceLanguage,
+        'vi',
+      ));
       if (result.mode === 'compare') return c.json(result);
       const translated = result.primary[0];
       if (!translated) return c.json(errorBody('TRANSLATION_EMPTY', 'Translation provider returned no result.'), 502);

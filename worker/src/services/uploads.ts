@@ -1,6 +1,11 @@
 import type { R2BucketLike, R2UploadedPartLike, R2UploadValue } from '../cloudflare/r2';
 import type { ProjectStore } from '../db/projects';
-import { normalizeUploadInput, type BeginUploadInput, UploadInputError } from '../domain/upload';
+import {
+  normalizeUploadInput,
+  type BeginUploadInput,
+  type NormalizedUploadInput,
+  UploadInputError,
+} from '../domain/upload';
 
 export const MULTIPART_PART_SIZE_BYTES = 25 * 1024 * 1024;
 
@@ -31,16 +36,17 @@ export class UploadService {
     }
   }
 
-  async begin(projectId: string, userId: string, rawInput: BeginUploadInput) {
+  async validateBegin(projectId: string, userId: string, rawInput: BeginUploadInput): Promise<NormalizedUploadInput> {
     await this.requireProject(projectId, userId);
-    let input;
     try {
-      input = normalizeUploadInput(rawInput);
+      return normalizeUploadInput(rawInput);
     } catch (error) {
       if (error instanceof UploadInputError) throw error;
       throw new UploadServiceError('UPLOAD_MEDIA_INVALID', 'Invalid media input.');
     }
+  }
 
+  async beginValidated(projectId: string, input: NormalizedUploadInput) {
     const objectKey = `projects/${projectId}/source/${this.createId()}.${input.extension}`;
     const multipart = await this.bucket.createMultipartUpload(objectKey);
     return {
@@ -48,6 +54,10 @@ export class UploadService {
       objectKey,
       partSizeBytes: MULTIPART_PART_SIZE_BYTES,
     };
+  }
+
+  async begin(projectId: string, userId: string, rawInput: BeginUploadInput) {
+    return this.beginValidated(projectId, await this.validateBegin(projectId, userId, rawInput));
   }
 
   async uploadPart(

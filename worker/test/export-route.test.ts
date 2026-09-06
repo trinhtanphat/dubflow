@@ -3,6 +3,9 @@ import { Hono } from 'hono';
 import type { Env } from '../src/env';
 import { createExportRoutes } from '../src/routes/export';
 
+const allowExport = { async limit() { return { success: true }; } };
+const analytics = { writeDataPoint() {} };
+
 describe('export route', () => {
   it('locks the project before creating the Workflow instance for an owned review-ready project', async () => {
     const calls: string[] = [];
@@ -30,6 +33,8 @@ describe('export route', () => {
       makeJobs: () => jobs as never,
     }));
     const env = {
+      ANALYTICS: analytics,
+      RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
       EXPORT_WORKFLOW: {
@@ -58,6 +63,8 @@ describe('export route', () => {
       }) as never,
     }));
     const env = {
+      ANALYTICS: analytics,
+      RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key', ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); throw new Error('workflow unavailable'); } },
     } as unknown as Env;

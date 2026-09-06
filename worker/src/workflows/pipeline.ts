@@ -4,13 +4,15 @@ import type { DubbingJob, JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
 import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
+import type { TelemetrySink } from '../observability/telemetry';
+import { withProviderTelemetry } from '../observability/telemetry';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
 import { normalizeAsrChunks } from '../services/asr/normalize';
 import type { TranslationProvider } from '../services/translation/types';
 import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
-export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
+export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string; requestId?: string };
 
 export interface WorkflowStepLike {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
@@ -42,6 +44,7 @@ export type DubbingPipelineDeps = {
   translation: TranslationProvider;
   translationProviderId: string;
   usage: UsageMeter;
+  telemetry: TelemetrySink;
 };
 
 function asMessage(error: unknown): string {
@@ -132,7 +135,15 @@ export async function runDubbingPipeline(
           operationKey: key,
         };
         await deps.usage.record({ ...common, phase: 'started' });
-        const result = await deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+        const result = await withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'asr',
+          provider: asrProvider,
+          errorCode: 'ASR_FAILED',
+        }, () => deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage }));
         await deps.usage.record({ ...common, phase: 'completed' });
         return result;
       });
@@ -177,7 +188,15 @@ export async function runDubbingPipeline(
           operationKey: key,
         };
         await deps.usage.record({ ...common, phase: 'started' });
-        const results = await deps.translation.translateBatch(items, project.sourceLanguage, 'vi');
+        const results = await withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'translate',
+          provider: translationProvider,
+          errorCode: 'TRANSLATION_FAILED',
+        }, () => deps.translation.translateBatch(items, project.sourceLanguage, 'vi'));
         const unexpected = results.find((result) => result.provider !== translationProvider);
         if (unexpected) {
           throw new Error(`Translation provider mismatch: expected ${translationProvider}, received ${unexpected.provider}.`);

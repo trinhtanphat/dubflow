@@ -3,9 +3,12 @@ import type { Env } from '../env';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
-import { getCurrentUserId } from '../security/current-user';
 import { errorBody } from '../http/json';
-import { parseByteRange } from '../services/media';
+import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
+import { createTelemetry, emitTelemetry } from '../observability/telemetry';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
+import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 
 export type ExportRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
@@ -31,7 +34,7 @@ function readableBucket(env: Env): R2ReadableBucketLike {
 }
 
 export function createExportRoutes(deps: ExportRouteDeps = {}) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeJobs = deps.makeJobs ?? ((env: Env) => new JobRepository(env.DB));
   const makeBucket = deps.makeBucket ?? readableBucket;
@@ -53,10 +56,15 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'ElevenLabs voice credentials are required before export.'), 503);
       }
 
+      const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
+      if (rateLimited) return rateLimited;
+
       const job = await jobs.create(projectId, 'export');
       await projects.setStatus(projectId, userId, 'processing');
       try {
-        const instance = await c.env.EXPORT_WORKFLOW.create({ params: { projectId, userId, jobId: job.id } });
+        const instance = await c.env.EXPORT_WORKFLOW.create({
+          params: { projectId, userId, jobId: job.id, requestId: c.get('requestId') },
+        });
         return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
@@ -70,43 +78,36 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   });
 
   routes.get('/:id/export/media', async (c) => {
-    const project = await makeProjects(c.env).getByIdForUser(c.req.param('id'), getCurrentUserId());
+    const userId = getCurrentUserId();
+    const projectId = c.req.param('id');
+    const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
     if (!project.exportObjectKey) return c.json(errorBody('EXPORT_NOT_READY', 'Final dubbing export is not ready.'), 409);
 
-    const bucket = makeBucket(c.env);
-    const rangeHeader = c.req.header('range') ?? null;
-    let parsedRange = null as ReturnType<typeof parseByteRange>;
-    let totalSize = 0;
-
-    if (rangeHeader) {
-      const metadata = bucket.head ? await bucket.head(project.exportObjectKey) : null;
-      if (!metadata) return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Final export object not found.'), 404);
-      totalSize = metadata.size;
-      parsedRange = parseByteRange(rangeHeader, totalSize);
-      if (!parsedRange) {
-        return new Response(null, {
-          status: 416,
-          headers: { 'Content-Range': `bytes */${totalSize}`, 'Accept-Ranges': 'bytes' },
-        });
+    try {
+      const response = await streamMediaObject(
+        makeBucket(c.env),
+        project.exportObjectKey,
+        c.req.raw,
+        `${project.id}-dubbed.mp4`,
+      );
+      emitTelemetry(createTelemetry(c.env), {
+        name: 'export_download',
+        requestId: c.get('requestId'),
+        actorId: userId,
+        projectId,
+        accessMode: 'owner',
+        httpStatus: response.status,
+        rangeRequest: Boolean(c.req.header('range')),
+        status: response.status < 400 ? 'success' : 'rejected',
+      });
+      return response;
+    } catch (error) {
+      if (error instanceof MediaObjectNotFoundError) {
+        return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Final export object not found.'), 404);
       }
+      throw error;
     }
-
-    const object = await bucket.get(
-      project.exportObjectKey,
-      parsedRange ? { range: { offset: parsedRange.offset, length: parsedRange.length } } : undefined,
-    );
-    if (!object) return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Final export object not found.'), 404);
-    if (!rangeHeader) totalSize = object.size;
-
-    const headers = new Headers();
-    headers.set('Accept-Ranges', 'bytes');
-    headers.set('Content-Type', object.httpMetadata?.contentType ?? 'video/mp4');
-    headers.set('Content-Length', String(parsedRange?.length ?? object.size));
-    headers.set('Content-Disposition', `attachment; filename="${project.id}-dubbed.mp4"`);
-    if (object.httpEtag) headers.set('ETag', object.httpEtag);
-    if (parsedRange) headers.set('Content-Range', `bytes ${parsedRange.offset}-${parsedRange.end}/${totalSize}`);
-    return new Response(object.body, { status: parsedRange ? 206 : 200, headers });
   });
 
   return routes;
