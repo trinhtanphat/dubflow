@@ -5,7 +5,7 @@ export type ShareStatus = 'active' | 'expired' | 'revoked';
 export type ExportShare = {
   id: string;
   projectId: string;
-  exportId: string | null;
+  exportId?: string | null;
   tokenHint: string;
   exportObjectKey: string;
   expiresAt: string;
