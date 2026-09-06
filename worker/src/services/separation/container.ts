@@ -18,7 +18,7 @@ function expectedKeys(input: StemSeparationInput): StemSeparationResult {
 }
 
 export class ContainerStemSeparationProvider implements StemSeparationProvider {
-  readonly id = 'elevenlabs-two-stems';
+  readonly id = 'elevenlabs-stems-v1';
   readonly available: boolean;
 
   constructor(
