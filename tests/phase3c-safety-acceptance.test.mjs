@@ -130,7 +130,7 @@ test('Phase 3C safety gate locks validation-before-limit and limiter-before-expe
     'MODES.has(input.mode)',
     'segment.version !== expectedVersion',
     "enforceRateLimit(c, 'translate'",
-    'router.translate(',
+    'makeRouter(c.env).translate(',
   ]);
   assertInOrder(voiceRouteSource, [
     'payload = await c.req.json()',
