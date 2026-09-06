@@ -18,7 +18,21 @@ test('Phase 4C exposes one bounded target-language authority and batch limit', a
   const domain = await read('worker/src/domain/target-language.ts');
   assert.match(domain, /SUPPORTED_TARGET_LANGUAGES\s*=\s*\['vi',\s*'en',\s*'ja',\s*'ko',\s*'zh'\]/);
   assert.match(domain, /MAX_BATCH_TARGET_LANGUAGES\s*=\s*4/);
+  assert.match(domain, /parseProjectTargetLanguages/);
   assert.match(domain, /fallback[^=]*=\s*'vi'/);
+});
+
+test('Phase 4C translation provider contracts accept the bounded target-language type', async () => {
+  const types = await read('worker/src/services/translation/types.ts');
+  const map = await read('worker/src/services/translation/language-map.ts');
+  const workers = await read('worker/src/services/translation/workers-ai.ts');
+  assert.match(types, /target:\s*TargetLanguage/);
+  assert.match(map, /workersAITargetLanguage/);
+  for (const marker of ["vi: 'vietnamese'", "en: 'english'", "ja: 'japanese'", "ko: 'korean'", "zh: 'chinese'"]) {
+    assert.match(map, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(workers, /target_lang:\s*workersAITargetLanguage\(target\)/);
+  assert.doesNotMatch(workers, /Vietnamese is the only supported target/);
 });
 
 test('Phase 4C adds an isolated batch-export limiter without replacing existing lanes', async () => {
@@ -48,6 +62,7 @@ test('Phase 4C mounts owner-scoped target and batch export routes', async () => 
   assert.match(app, /createProjectTargetRoutes/);
   assert.match(app, /createBatchExportRoutes/);
   assert.match(targets, /\/:id\/targets/);
+  assert.match(targets, /parseProjectTargetLanguages/);
   assert.match(batch, /\/:id\/exports\/batch/);
   assert.match(batch, /parseBatchTargetLanguages/);
   assert.match(batch, /enforceRateLimit\(c,\s*'batch-export'/);
