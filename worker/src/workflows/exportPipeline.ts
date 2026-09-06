@@ -1,10 +1,12 @@
 import type { ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
 import type { UsageStore } from '../db/usage';
+import type { TelemetrySink } from '../observability/telemetry';
+import { withProviderTelemetry } from '../observability/telemetry';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
-export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string };
+export type ExportWorkflowParams = { projectId: string; userId: string; jobId: string; requestId?: string };
 
 export type ExportClip = {
   segmentId: string;
@@ -74,6 +76,7 @@ export type ExportPipelineDeps = {
     renderExport(projectId: string, sourceObjectKey: string, clips: ExportClip[]): Promise<{ exportObjectKey: string }>;
   };
   usage: ExportUsage;
+  telemetry: TelemetrySink;
 };
 
 function errorMessage(error: unknown): string {
@@ -207,7 +210,15 @@ export async function runExportPipeline(
           const input: VoiceGenerateInput = voice
             ? { text, language: 'vi', voice }
             : { text, language: 'vi' };
-          const generated = await deps.voice.generate(input);
+          const generated = await withProviderTelemetry(deps.telemetry, {
+            requestId: params.requestId,
+            actorId: params.userId,
+            projectId: params.projectId,
+            jobId: params.jobId,
+            operation: 'voice',
+            provider: ttsProvider,
+            errorCode: 'VOICE_PROVIDER_FAILED',
+          }, () => deps.voice.generate(input));
           if (!(generated instanceof Response)) throw new Error('Voice provider returned an unsupported response.');
           if (!generated.ok) throw new Error(`Voice provider failed (${generated.status}).`);
           const audio = await generated.arrayBuffer();
@@ -263,7 +274,15 @@ export async function runExportPipeline(
         operationKey: renderKey,
       };
       await deps.usage.record({ ...common, phase: 'started' });
-      const result = await deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips);
+      const result = await withProviderTelemetry(deps.telemetry, {
+        requestId: params.requestId,
+        actorId: params.userId,
+        projectId: params.projectId,
+        jobId: params.jobId,
+        operation: 'render',
+        provider: renderProvider,
+        errorCode: 'MEDIA_RENDER_FAILED',
+      }, () => deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips));
       if (!result.exportObjectKey?.startsWith(`projects/${params.projectId}/export/`)) {
         throw new Error('Media processor returned an invalid export object key.');
       }
