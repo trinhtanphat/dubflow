@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS segment_translations (
   translation_status TEXT NOT NULL DEFAULT 'pending',
   translation_context_revision INTEGER
     CHECK (translation_context_revision IS NULL OR translation_context_revision >= 1),
+  voice_status TEXT NOT NULL DEFAULT 'pending',
+  dubbed_object_key TEXT,
   version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -63,6 +65,8 @@ INSERT OR IGNORE INTO segment_translations (
   translation_engine,
   translation_status,
   translation_context_revision,
+  voice_status,
+  dubbed_object_key,
   version,
   created_at,
   updated_at
@@ -75,6 +79,8 @@ SELECT
   translation_engine,
   translation_status,
   translation_context_revision,
+  voice_status,
+  dubbed_object_key,
   1,
   datetime('now'),
   datetime('now')
@@ -84,9 +90,10 @@ CREATE TABLE IF NOT EXISTS project_exports (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   target_language TEXT NOT NULL CHECK (target_language IN ('vi','en','zh','ja','ko')),
-  output_mode TEXT NOT NULL CHECK (output_mode IN ('dubbed','subtitles')),
+  output TEXT NOT NULL CHECK (output IN ('dubbed','subtitles')),
+  batch_id TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','exporting','completed','failed')),
+    CHECK (status IN ('pending','exporting','completed','failed','invalidated')),
   export_object_key TEXT,
   subtitle_object_key TEXT,
   error_code TEXT,
@@ -96,13 +103,16 @@ CREATE TABLE IF NOT EXISTS project_exports (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_exports_latest
-  ON project_exports(project_id, target_language, output_mode, created_at DESC, id DESC);
+  ON project_exports(project_id, target_language, output, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_project_exports_batch
+  ON project_exports(project_id, batch_id, target_language, output, id);
 
 INSERT OR IGNORE INTO project_exports (
   id,
   project_id,
   target_language,
-  output_mode,
+  output,
   status,
   export_object_key,
   created_at,
