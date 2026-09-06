@@ -60,6 +60,9 @@ function providerConfigured(env: Env): boolean {
 
 function routeError(error: unknown): { code: string; message: string; status: 400 | 404 | 409 | 500 | 502 | 503 } {
   if (error instanceof VoiceCloneRouteError) return error;
+  if (error instanceof SyntaxError) {
+    return { code: 'INVALID_JSON', message: 'Voice clone body must be valid JSON.', status: 400 };
+  }
   if (error instanceof VoiceClonePersistenceError) {
     if (error.code === 'PROJECT_NOT_FOUND' || error.code === 'VOICE_CLONE_NOT_FOUND') {
       return { code: 'VOICE_CLONE_NOT_FOUND', message: 'Voice clone not found.', status: 404 };
@@ -84,9 +87,14 @@ export function createVoiceCloneRoutes(
   const routes = new Hono<WorkerHonoEnv>();
 
   routes.get('/:id/voice-clones', async (c) => {
-    const userId = getCurrentUserId();
-    const clones = await makeStore(c.env).list(c.req.param('id'), userId);
-    return c.json(clones);
+    try {
+      const userId = getCurrentUserId();
+      const clones = await makeStore(c.env).list(c.req.param('id'), userId);
+      return c.json(clones);
+    } catch (error) {
+      const safe = routeError(error);
+      return c.json(errorBody(safe.code, safe.message), safe.status);
+    }
   });
 
   routes.post('/:id/voice-clones', async (c) => {
@@ -202,6 +210,20 @@ export function createVoiceCloneRoutes(
       if (clone.status === 'deleted') return c.json(clone);
 
       await store.markDeleting(projectId, cloneId, userId);
+
+      const key = voiceCloneSampleKey(projectId, cloneId);
+      try {
+        if (!c.env.MEDIA.delete) throw new Error('R2 delete unavailable');
+        await c.env.MEDIA.delete(key);
+      } catch {
+        await store.markFailed(projectId, cloneId, userId, 'VOICE_CLONE_SAMPLE_CLEANUP_FAILED');
+        throw new VoiceCloneRouteError(
+          'VOICE_CLONE_SAMPLE_CLEANUP_FAILED',
+          'Temporary voice clone sample cleanup failed.',
+          502,
+        );
+      }
+
       if (clone.providerVoiceId) {
         const speakers = await new SpeakerRepository(c.env.DB).list(projectId, userId);
         for (const speaker of speakers) {
@@ -224,8 +246,6 @@ export function createVoiceCloneRoutes(
         }
       }
 
-      const key = voiceCloneSampleKey(projectId, cloneId);
-      await c.env.MEDIA.delete?.(key).catch(() => undefined);
       return c.json(await store.markDeleted(projectId, cloneId, userId));
     } catch (error) {
       const safe = routeError(error);
