@@ -101,7 +101,7 @@ export function TranslationSettingsPanel({ projectId, services, targetLanguages 
     getProjectLanguages(projectId).then((config) => {
       if (!active) return;
       const next = config.languages.map((entry) => entry.targetLanguage);
-      const safe = next.length ? next : ['vi'];
+      const safe: TargetLanguage[] = next.length ? next : ['vi'];
       setTargets(safe);
       setTarget((current) => safe.includes(current) ? current : safe[0]!);
     }).catch(() => {
