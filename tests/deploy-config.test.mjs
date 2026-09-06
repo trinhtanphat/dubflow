@@ -6,7 +6,7 @@ const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.me
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const deployWorkflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
 
-const productionAccountId = '50afb4fd3c4c7a1f3e1bdb7f22d4af7f';
+const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
 
 test('deployment config contains no fake resource placeholder', () => {
   const d1 = config.d1_databases?.find((item) => item.binding === 'DB');
