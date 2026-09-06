@@ -1,0 +1,25 @@
+name: Cloudflare token presence probe
+
+on:
+  push:
+    branches:
+      - probe/cloudflare-token-presence
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Report secret presence only
+        shell: bash
+        run: |
+          if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo 'CLOUDFLARE_API_TOKEN=SET'
+          else
+            echo 'CLOUDFLARE_API_TOKEN=UNSET'
+            exit 1
+          fi
