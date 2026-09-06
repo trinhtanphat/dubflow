@@ -62,6 +62,11 @@ function readableBucket(env: Env): R2ReadableBucketLike {
   };
 }
 
+function noReferrer(response: Response): Response {
+  response.headers.set('Referrer-Policy', 'no-referrer');
+  return response;
+}
+
 export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
   const routes = new Hono<{ Bindings: Env }>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
@@ -151,7 +156,7 @@ export function createPublicShareRoutes(deps: PublicShareRouteDeps = {}) {
         httpStatus: 404,
         status: 'not_found',
       });
-      return c.json(errorBody('SHARE_NOT_FOUND', 'Share not found.'), 404);
+      return noReferrer(c.json(errorBody('SHARE_NOT_FOUND', 'Share not found.'), 404));
     };
 
     if (!rawToken) return notFound();
@@ -191,7 +196,7 @@ export function createPublicShareRoutes(deps: PublicShareRouteDeps = {}) {
           status: 'success',
         });
       }
-      return response;
+      return noReferrer(response);
     } catch (error) {
       if (error instanceof MediaObjectNotFoundError) return notFound();
       throw error;
