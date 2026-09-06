@@ -26,6 +26,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
+      schemaRevision: 10,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -49,6 +50,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
+      schemaRevision: 10,
       asr: {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',
@@ -79,6 +81,7 @@ describe('checkReadiness', () => {
       ready: false,
       service: 'dubflow',
       database: 'missing-schema',
+      schemaRevision: null,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -102,6 +105,7 @@ describe('checkReadiness', () => {
       ready: false,
       service: 'dubflow',
       database: 'missing-schema',
+      schemaRevision: null,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -125,6 +129,7 @@ describe('checkReadiness', () => {
       ready: false,
       service: 'dubflow',
       database: 'unavailable',
+      schemaRevision: null,
       asr: {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',
