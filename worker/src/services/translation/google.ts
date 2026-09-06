@@ -1,4 +1,5 @@
 import type { SourceLanguage } from '../../domain/project';
+import { isTranslationContextActive, type TranslationContext } from './context';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
 
@@ -18,13 +19,28 @@ function decodeHtmlEntities(value: string): string {
 }
 
 export class GoogleCloudTranslationProvider implements TranslationProvider {
+  readonly capabilities: { contextual: false; available: boolean };
+
   constructor(
     private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
-  ) {}
+  ) {
+    this.capabilities = { contextual: false, available: Boolean(apiKey.trim()) };
+  }
 
-  async translateBatch(items: TranslationItem[], source: SourceLanguage, target: 'vi'): Promise<TranslationResult[]> {
+  async translateBatch(
+    items: TranslationItem[],
+    source: SourceLanguage,
+    target: 'vi',
+    context?: TranslationContext,
+  ): Promise<TranslationResult[]> {
+    if (context && isTranslationContextActive(context)) {
+      throw new TranslationProviderError(
+        'TRANSLATION_CONTEXT_UNSUPPORTED',
+        'Raw translation provider cannot apply active project context.',
+      );
+    }
     if (!this.apiKey.trim()) {
       throw new TranslationProviderError('GOOGLE_TRANSLATE_SECRET_MISSING', 'Google Cloud Translation API key is not configured.');
     }
