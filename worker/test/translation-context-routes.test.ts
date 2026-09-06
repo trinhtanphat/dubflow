@@ -14,6 +14,7 @@ import {
 const initialEntry: GlossaryEntry = {
   id: 'entry-1',
   projectId: 'project-1',
+  targetLanguage: 'vi',
   sourceTerm: 'DubFlow',
   preferredTranslation: 'DubFlow',
   note: null,
@@ -102,6 +103,7 @@ class ContextStoreFake implements TranslationContextStore {
     const entry: GlossaryEntry = {
       id: 'entry-new',
       projectId,
+      targetLanguage: normalized.targetLanguage,
       sourceTerm: normalized.sourceTerm,
       preferredTranslation: normalized.preferredTranslation,
       note: normalized.note,
@@ -139,6 +141,7 @@ class ContextStoreFake implements TranslationContextStore {
     }
     const entry: GlossaryEntry = {
       ...this.context.glossary[index],
+      targetLanguage: normalized.targetLanguage,
       sourceTerm: normalized.sourceTerm,
       preferredTranslation: normalized.preferredTranslation,
       note: normalized.note,
