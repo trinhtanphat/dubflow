@@ -153,7 +153,7 @@ describe('Phase 3C direct provider telemetry', () => {
     expect(events[0]?.blobs?.[0]).toBe('provider_success');
     expect(events[0]?.blobs?.[1]).toBeTruthy();
     expect(events[0]?.blobs?.[2]).toBe('dev-user');
-    expect(events[0]?.blobs?.[6]).toBe('voice-preview');
+    expect(events[0]?.blobs?.[6]).toBe('voice');
     expect(events[0]?.blobs?.[7]).toBe('elevenlabs');
     expect(JSON.stringify(events)).not.toContain('private preview sentence');
   });
@@ -170,7 +170,7 @@ describe('Phase 3C direct provider telemetry', () => {
     const events = providerEvents(points);
     expect(events).toHaveLength(1);
     expect(events[0]?.blobs?.[0]).toBe('provider_failure');
-    expect(events[0]?.blobs?.[6]).toBe('voice-preview');
+    expect(events[0]?.blobs?.[6]).toBe('voice');
     expect(events[0]?.blobs?.[7]).toBe('elevenlabs');
     expect(events[0]?.blobs?.[9]).toBe('VOICE_PROVIDER_FAILED');
     expect(JSON.stringify(events)).not.toContain('raw elevenlabs secret failure');
