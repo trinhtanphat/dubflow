@@ -5,6 +5,7 @@ import {
   normalizeSegmentPatch,
   type SegmentRestoreInput,
 } from '../domain/segment';
+import { MultilangRepository } from '../db/multilang';
 import {
   SegmentPersistenceError,
   SegmentRepository,
@@ -103,7 +104,7 @@ async function versionConflictResponse(
 }
 
 export function createSegmentRoutes(
-  makeStore: SegmentStoreFactory = (env) => new SegmentRepository(env.DB),
+  makeStore: SegmentStoreFactory = (env) => new SegmentRepository(env.DB, new MultilangRepository(env.DB)),
 ) {
   const routes = new Hono<{ Bindings: Env }>();
 
