@@ -1,6 +1,6 @@
 import type { AiBinding } from '../../cloudflare/ai';
+import { TARGET_LANGUAGES, type TargetLanguage } from '../../domain/language';
 import type { SourceLanguage } from '../../domain/project';
-import type { TargetLanguage } from '../../domain/target-language';
 import { isTranslationContextActive, type TranslationContext } from './context';
 import { workersAISourceLanguage, workersAITargetLanguage } from './language-map';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
@@ -17,7 +17,7 @@ function translatedText(response: unknown): string {
 }
 
 export class WorkersAITranslationProvider implements TranslationProvider {
-  readonly capabilities = { contextual: false, available: true } as const;
+  readonly capabilities = { contextual: false, available: true, targets: TARGET_LANGUAGES } as const;
 
   constructor(private readonly ai: AiBinding) {}
 

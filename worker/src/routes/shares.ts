@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
-import { MultilangRepository, type MultilangStore } from '../db/multilang';
+import { ProjectExportRepository } from '../db/project-exports';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { ShareRepository, type ShareStore } from '../db/shares';
 import { errorBody } from '../http/json';
@@ -16,10 +16,12 @@ const DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MIN_SHARE_TTL_SECONDS = 60 * 60;
 const MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+export type ProjectExportStore = Pick<ProjectExportRepository, 'get' | 'latestCompleted'>;
+
 export type ProjectShareRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
   makeShares?: (env: Env) => ShareStore;
-  makeMultilang?: (env: Env) => MultilangStore;
+  makeExports?: (env: Env) => ProjectExportStore;
   createToken?: typeof createShareToken;
   now?: () => Date;
 };
@@ -74,7 +76,7 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
   const routes = new Hono<{ Bindings: Env }>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeShares = deps.makeShares ?? ((env: Env) => new ShareRepository(env.DB));
-  const makeMultilang = deps.makeMultilang ?? ((env: Env) => new MultilangRepository(env.DB));
+  const makeExports = deps.makeExports ?? ((env: Env) => new ProjectExportRepository(env.DB));
   const makeToken = deps.createToken ?? createShareToken;
   const now = deps.now ?? (() => new Date());
 
@@ -102,27 +104,39 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     }
     const requestedExportId = typeof body.exportId === 'string' ? body.exportId.trim() : null;
 
-    let resolvedExportId = requestedExportId;
-    let exportObjectKey: string;
+    let resolvedExportId: string | null = null;
+    let exportObjectKey: string | null = null;
+    const exportsStore = makeExports(c.env);
+
     if (requestedExportId) {
-      const variant = await makeMultilang(c.env).getExport(projectId, requestedExportId, userId);
-      if (!variant) return c.json(errorBody('EXPORT_NOT_FOUND', 'Export not found.'), 404);
-      if (variant.status !== 'completed' || !variant.objectKey) {
+      const attempt = await exportsStore.get(projectId, requestedExportId, userId);
+      if (!attempt) return c.json(errorBody('EXPORT_NOT_FOUND', 'Export not found.'), 404);
+      const objectKey = attempt.output === 'subtitles' ? attempt.subtitleObjectKey : attempt.exportObjectKey;
+      if (attempt.status !== 'completed' || !objectKey) {
         return c.json(errorBody('EXPORT_NOT_READY', 'Selected export is not ready to share.'), 409);
       }
-      exportObjectKey = variant.objectKey;
+      resolvedExportId = attempt.id;
+      exportObjectKey = objectKey;
     } else {
-      if (!project.exportObjectKey) {
+      let latestVietnamese = null;
+      try {
+        latestVietnamese = await exportsStore.latestCompleted(projectId, userId, 'vi', 'dubbed');
+      } catch {
+        // Legacy callers can still share an already-published project-level Vietnamese artifact
+        // while a pre-0010 database is being reconciled.
+      }
+
+      if (project.exportObjectKey) {
+        exportObjectKey = project.exportObjectKey;
+        if (latestVietnamese?.exportObjectKey === project.exportObjectKey) resolvedExportId = latestVietnamese.id;
+      } else if (latestVietnamese?.exportObjectKey) {
+        exportObjectKey = latestVietnamese.exportObjectKey;
+        resolvedExportId = latestVietnamese.id;
+      }
+
+      if (!exportObjectKey) {
         return c.json(errorBody('EXPORT_NOT_READY', 'Final Vietnamese export is not ready to share.'), 409);
       }
-      exportObjectKey = project.exportObjectKey;
-      const variants = await makeMultilang(c.env).listExports(projectId, userId);
-      const currentVietnamese = variants.find((variant) => (
-        variant.targetLanguage === 'vi'
-        && variant.status === 'completed'
-        && variant.objectKey === project.exportObjectKey
-      ));
-      resolvedExportId = currentVietnamese?.id ?? null;
     }
 
     const createdAt = now();
@@ -199,7 +213,7 @@ export function createPublicShareRoutes(deps: PublicShareRouteDeps = {}) {
         makeBucket(c.env),
         share.exportObjectKey,
         c.req.raw,
-        `${share.projectId}-dubbed.mp4`,
+        share.exportObjectKey.endsWith('.srt') ? `${share.projectId}-subtitles.srt` : `${share.projectId}-dubbed.mp4`,
       );
       const rangeRequest = Boolean(c.req.header('range'));
       const success = response.status === 200 || response.status === 206;

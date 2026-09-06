@@ -1,9 +1,8 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { WorkflowEvent, WorkflowStep } from 'cloudflare:workers';
 import type { Env } from '../env';
-import { JobRepository } from '../db/jobs';
-import { MultilangRepository } from '../db/multilang';
 import { ProjectRepository } from '../db/projects';
+import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
@@ -19,7 +18,6 @@ import { runDubbingPipeline, type DubbingWorkflowParams } from './pipeline';
 export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowParams> {
   async run(event: WorkflowEvent<DubbingWorkflowParams>, step: WorkflowStep) {
     const contextStore = new TranslationContextRepository(this.env.DB);
-    const multilangStore = new MultilangRepository(this.env.DB);
     const translationRouter = new TranslationRouter(
       new WorkersAITranslationProvider(this.env.AI),
       new GoogleCloudTranslationProvider(this.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? ''),
@@ -38,7 +36,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         bucket: this.env.MEDIA,
         asr: createAsrProvider(this.env.AI, this.env.DEEPGRAM_API_KEY),
         asrProviderId: asrCapabilities(this.env.DEEPGRAM_API_KEY).provider,
-        segments: new SegmentRepository(this.env.DB, multilangStore),
+        segments: new SegmentRepository(this.env.DB),
         translationContext: contextStore,
         translationRouter,
         usage: new UsageRepository(this.env.DB),

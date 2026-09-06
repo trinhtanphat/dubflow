@@ -13,7 +13,6 @@ import { buildRenderExportArgs, validateRenderExportInput } from './render-expor
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT || 8080);
 const MAX_JSON_BYTES = 1024 * 1024;
-const TARGET_LANGUAGES = new Set(['vi', 'en', 'ja', 'ko', 'zh']);
 
 function json(response, status = 200) {
   return { status, body: JSON.stringify(response), headers: { 'content-type': 'application/json; charset=utf-8' } };
@@ -30,14 +29,6 @@ function assertProjectInput(input) {
   if (typeof input.objectKey !== 'string' || !input.objectKey.startsWith(`projects/${input.projectId}/source/`)) {
     throw new Error('Source object is outside the project.');
   }
-}
-
-function targetExportKey(input) {
-  const hasTarget = input.targetLanguage !== undefined || input.exportId !== undefined;
-  if (!hasTarget) return `projects/${input.projectId}/export/dubbed.mp4`;
-  if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
-  if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,160}$/.test(input.exportId)) throw new Error('Invalid exportId.');
-  return `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.mp4`;
 }
 
 async function readJson(request) {
@@ -156,7 +147,9 @@ async function renderExport(input) {
     });
     await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
 
-    const exportObjectKey = targetExportKey(input);
+    const exportObjectKey = input.targetLanguage && input.exportId
+      ? `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.mp4`
+      : `projects/${input.projectId}/export/dubbed.mp4`;
     await uploadFile(exportObjectKey, output, 'video/mp4');
     return { exportObjectKey };
   });

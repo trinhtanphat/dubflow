@@ -1,4 +1,4 @@
-import type { TargetLanguage } from '../../domain/target-language';
+import type { TargetLanguage } from '../../domain/language';
 
 export type AudioChunk = {
   objectKey: string;
@@ -15,7 +15,7 @@ export type ExportClip = {
   objectKey: string;
 };
 
-export type ExportRenderOptions = {
+export type RenderExportOptions = {
   targetLanguage: TargetLanguage;
   exportId: string;
 };
@@ -23,5 +23,10 @@ export type ExportRenderOptions = {
 export interface MediaProcessor {
   probe(objectKey: string): Promise<{ durationMs: number }>;
   extractAudioChunks(projectId: string, objectKey: string): Promise<AudioChunk[]>;
-  renderExport(projectId: string, objectKey: string, clips: ExportClip[], options?: ExportRenderOptions): Promise<{ exportObjectKey: string }>;
+  renderExport(
+    projectId: string,
+    objectKey: string,
+    clips: ExportClip[],
+    options?: RenderExportOptions,
+  ): Promise<{ exportObjectKey: string }>;
 }

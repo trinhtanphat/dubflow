@@ -1,4 +1,5 @@
 const MAX_EXPORT_CLIPS = 4096;
+const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
 
 function projectPrefix(projectId) {
   return `projects/${projectId}/`;
@@ -6,6 +7,18 @@ function projectPrefix(projectId) {
 
 function validProjectId(projectId) {
   return typeof projectId === 'string' && /^[A-Za-z0-9._-]{1,160}$/.test(projectId);
+}
+
+function renderOptions(input) {
+  const hasTarget = input?.targetLanguage !== undefined;
+  const hasExport = input?.exportId !== undefined;
+  if (hasTarget !== hasExport) throw new Error('targetLanguage and exportId must be provided together.');
+  if (!hasTarget) return null;
+  if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
+  if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
+    throw new Error('Invalid exportId.');
+  }
+  return { targetLanguage: input.targetLanguage, exportId: input.exportId };
 }
 
 export function validateRenderExportInput(input) {
@@ -17,6 +30,10 @@ export function validateRenderExportInput(input) {
     throw new Error(`clips must contain between 1 and ${MAX_EXPORT_CLIPS} items.`);
   }
 
+  const options = renderOptions(input);
+  const clipPrefix = options
+    ? `${projectPrefix(input.projectId)}voices/${options.targetLanguage}/`
+    : `${projectPrefix(input.projectId)}dubbed/`;
   const seen = new Set();
   for (const clip of input.clips) {
     if (
@@ -24,7 +41,7 @@ export function validateRenderExportInput(input) {
       typeof clip.segmentId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(clip.segmentId) ||
       !Number.isInteger(clip.startMs) || clip.startMs < 0 ||
       !Number.isInteger(clip.endMs) || clip.endMs <= clip.startMs ||
-      typeof clip.objectKey !== 'string' || !clip.objectKey.startsWith(`${projectPrefix(input.projectId)}dubbed/`)
+      typeof clip.objectKey !== 'string' || !clip.objectKey.startsWith(clipPrefix)
     ) {
       throw new Error('Invalid or cross-project dubbed clip.');
     }

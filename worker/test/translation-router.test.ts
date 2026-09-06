@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
+import { TARGET_LANGUAGES, type TargetLanguage } from '../src/domain/language';
 import type { SourceLanguage } from '../src/domain/project';
 import type { Env } from '../src/env';
 import { createTranslationRoutes } from '../src/routes/translation';
@@ -10,13 +11,13 @@ import { TranslationRouter } from '../src/services/translation/router';
 afterEach(() => vi.unstubAllGlobals());
 
 class StubProvider implements TranslationProvider {
-  readonly capabilities: { contextual: boolean; available: boolean };
+  readonly capabilities: { contextual: boolean; available: boolean; targets: readonly TargetLanguage[] };
 
   constructor(private readonly name: string, contextual = false, available = true) {
-    this.capabilities = { contextual, available };
+    this.capabilities = { contextual, available, targets: TARGET_LANGUAGES };
   }
 
-  async translateBatch(items: TranslationItem[], _source: SourceLanguage, _target: 'vi'): Promise<TranslationResult[]> {
+  async translateBatch(items: TranslationItem[], _source: SourceLanguage, _target: TargetLanguage): Promise<TranslationResult[]> {
     return items.map((item) => ({ id: item.id, text: `${this.name}:${item.text}`, provider: this.name }));
   }
 }

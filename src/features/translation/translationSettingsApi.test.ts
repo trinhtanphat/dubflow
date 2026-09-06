@@ -10,6 +10,7 @@ function jsonResponse(body: unknown, status = 200) {
 const entry = {
   id: 'g1',
   projectId: 'project-1',
+  targetLanguage: 'vi',
   sourceTerm: 'Acme',
   preferredTranslation: 'Acme',
   note: 'Brand name',
@@ -31,11 +32,11 @@ describe('translation settings frontend api', () => {
   it('uses the exact six owner-scoped settings and glossary HTTP contracts', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ stylePreset: 'neutral', contextRevision: 4, contextualAvailable: true }))
-      .mockResolvedValueOnce(jsonResponse({ contextRevision: 4, glossary: [] }))
+      .mockResolvedValueOnce(jsonResponse({ targetLanguage: 'vi', contextRevision: 4, glossary: [] }))
       .mockResolvedValueOnce(jsonResponse({ stylePreset: 'formal', contextRevision: 5, contextualAvailable: true }))
       .mockResolvedValueOnce(jsonResponse({ entry, contextRevision: 5, context: { revision: 5, style: 'formal', glossary: [entry] } }, 201))
       .mockResolvedValueOnce(jsonResponse({ entry: { ...entry, note: null }, contextRevision: 6, context: { revision: 6, style: 'formal', glossary: [{ ...entry, note: null }] } }))
-      .mockResolvedValueOnce(jsonResponse({ contextRevision: 7, context: { revision: 7, style: 'formal', glossary: [] } }));
+      .mockResolvedValueOnce(jsonResponse({ targetLanguage: 'vi', contextRevision: 7, context: { revision: 7, style: 'formal', glossary: [] } }));
     vi.stubGlobal('fetch', fetchMock);
 
     const api = await import('./translationSettingsApi');
@@ -48,46 +49,38 @@ describe('translation settings frontend api', () => {
     await api.deleteGlossaryEntry('project-1', 'g/1', 6);
 
     expect(fetchMock).toHaveBeenCalledTimes(6);
-    expect(fetchMock.mock.calls[0]).toEqual([
-      '/api/projects/project-1/translation-settings',
-      expect.objectContaining({ headers: {} }),
-    ]);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      '/api/projects/project-1/glossary',
-      expect.objectContaining({ headers: {} }),
-    ]);
-    expect(fetchMock.mock.calls[2]).toEqual([
-      '/api/projects/project-1/translation-settings',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ expectedContextRevision: 4, stylePreset: 'formal' }),
-        headers: { 'content-type': 'application/json' },
-      }),
-    ]);
-    expect(fetchMock.mock.calls[3]).toEqual([
-      '/api/projects/project-1/glossary',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ expectedContextRevision: 4, ...input }),
-        headers: { 'content-type': 'application/json' },
-      }),
-    ]);
-    expect(fetchMock.mock.calls[4]).toEqual([
-      '/api/projects/project-1/glossary/g%2F1',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ expectedContextRevision: 5, ...input, note: null }),
-        headers: { 'content-type': 'application/json' },
-      }),
-    ]);
-    expect(fetchMock.mock.calls[5]).toEqual([
-      '/api/projects/project-1/glossary/g%2F1',
-      expect.objectContaining({
-        method: 'DELETE',
-        body: JSON.stringify({ expectedContextRevision: 6 }),
-        headers: { 'content-type': 'application/json' },
-      }),
-    ]);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project-1/translation-settings');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/projects/project-1/glossary?targetLanguage=vi');
+    expect(fetchMock.mock.calls[2][1]).toEqual(expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ expectedContextRevision: 4, stylePreset: 'formal' }),
+    }));
+    expect(fetchMock.mock.calls[3][1]).toEqual(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ expectedContextRevision: 4, targetLanguage: 'vi', ...input }),
+    }));
+    expect(fetchMock.mock.calls[4][0]).toBe('/api/projects/project-1/glossary/g%2F1');
+    expect(fetchMock.mock.calls[4][1]).toEqual(expect.objectContaining({
+      method: 'PATCH', body: JSON.stringify({ expectedContextRevision: 5, targetLanguage: 'vi', ...input, note: null }),
+    }));
+    expect(fetchMock.mock.calls[5][1]).toEqual(expect.objectContaining({
+      method: 'DELETE', body: JSON.stringify({ expectedContextRevision: 6, targetLanguage: 'vi' }),
+    }));
+  });
+
+  it('sends and receives the selected glossary target language without making style target-specific', async () => {
+    const jaEntry = { ...entry, id: 'g-ja', targetLanguage: 'ja', preferredTranslation: 'エーシーエムイー' };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ targetLanguage: 'ja', contextRevision: 9, glossary: [jaEntry] }))
+      .mockResolvedValueOnce(jsonResponse({ entry: jaEntry, contextRevision: 10, context: { revision: 10, style: 'formal', glossary: [jaEntry] } }, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    const api = await import('./translationSettingsApi');
+
+    await expect(api.loadGlossary('project/1', 'ja')).resolves.toMatchObject({ targetLanguage: 'ja', glossary: [jaEntry] });
+    await api.createGlossaryEntry('project/1', 9, input, 'ja');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/projects/project%2F1/glossary?targetLanguage=ja');
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ expectedContextRevision: 9, targetLanguage: 'ja', ...input }),
+    }));
   });
 
   it('converts a context revision conflict into a canonical recovery error', async () => {

@@ -40,6 +40,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     title: 'Episode',
     sourceLanguage: 'zh',
     targetLanguage: 'vi',
+    targetLanguagesRevision: 1,
     status: 'ready',
     sourceObjectKey: 'projects/project-1/source/source.mp4',
     sizeBytes: 6,

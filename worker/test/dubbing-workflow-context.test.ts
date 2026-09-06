@@ -93,13 +93,14 @@ function baseInfra(persisted: ReturnType<typeof persistedSegment>[], usageEvents
 }
 
 describe('dubbing workflow translation context snapshot', () => {
-  it('loads one active context snapshot for two batches and preserves contextual provenance plus accounting', async () => {
+  it('loads one active Vietnamese context snapshot for two batches and preserves contextual provenance plus accounting', async () => {
     const persisted = Array.from({ length: 26 }, (_, index) =>
       persistedSegment(index, index === 0 ? 'A😀' : 'x'));
     const usageEvents: UsageRecordInput[] = [];
     const persistedTranslations: Array<{ id: string; engine: string; contextRevision: number | null | undefined }> = [];
     const routerContexts: unknown[] = [];
     const routerModes: unknown[] = [];
+    const contextTargets: unknown[] = [];
     let contextLoads = 0;
 
     const context = {
@@ -128,8 +129,9 @@ describe('dubbing workflow translation context snapshot', () => {
         },
       },
       translationContext: {
-        async getContext() {
+        async getContext(_projectId: string, _userId: string, targetLanguage?: string) {
           contextLoads += 1;
+          contextTargets.push(targetLanguage);
           return context;
         },
       },
@@ -164,6 +166,7 @@ describe('dubbing workflow translation context snapshot', () => {
     )).resolves.toEqual({ status: 'needs_review', segmentCount: 26 });
 
     expect(contextLoads).toBe(1);
+    expect(contextTargets).toEqual(['vi']);
     expect(routerModes).toEqual([undefined, undefined]);
     expect(routerContexts).toHaveLength(2);
     expect(routerContexts[0]).toBe(context);
@@ -201,10 +204,11 @@ describe('dubbing workflow translation context snapshot', () => {
     ]);
   });
 
-  it('keeps neutral empty context on raw workers-ai with null context provenance', async () => {
+  it('keeps neutral empty Vietnamese context on raw workers-ai with null context provenance', async () => {
     const persisted = [persistedSegment(0, 'x')];
     const usageEvents: UsageRecordInput[] = [];
     const revisions: Array<number | null | undefined> = [];
+    const contextTargets: unknown[] = [];
     let contextLoads = 0;
     const context = { revision: 1, style: 'neutral' as const, glossary: [] };
     const infra = baseInfra(persisted, usageEvents);
@@ -228,8 +232,9 @@ describe('dubbing workflow translation context snapshot', () => {
         },
       },
       translationContext: {
-        async getContext() {
+        async getContext(_projectId: string, _userId: string, targetLanguage?: string) {
           contextLoads += 1;
+          contextTargets.push(targetLanguage);
           return context;
         },
       },
@@ -259,6 +264,7 @@ describe('dubbing workflow translation context snapshot', () => {
     )).resolves.toEqual({ status: 'needs_review', segmentCount: 1 });
 
     expect(contextLoads).toBe(1);
+    expect(contextTargets).toEqual(['vi']);
     expect(revisions).toEqual([null]);
     const translationEvents = usageEvents.filter((event) => event.kind === 'translation_character');
     expect(translationEvents).toEqual([

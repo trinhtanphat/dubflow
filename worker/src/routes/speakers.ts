@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { errorBody } from '../http/json';
 import { getCurrentUserId } from '../security/current-user';
-import { MultilangRepository } from '../db/multilang';
 import {
   SpeakerPersistenceError,
   SpeakerRepository,
@@ -57,7 +56,7 @@ function statusFor(error: SpeakerPersistenceError): 400 | 404 | 409 {
 }
 
 export function createSpeakerRoutes(
-  makeStore: SpeakerStoreFactory = (env) => new SpeakerRepository(env.DB, new MultilangRepository(env.DB)),
+  makeStore: SpeakerStoreFactory = (env) => new SpeakerRepository(env.DB),
 ) {
   const routes = new Hono<{ Bindings: Env }>();
 

@@ -18,6 +18,7 @@ const [
   pipelineSource,
   settingsApiSource,
   settingsPanelSource,
+  settingsPanelBaseSource,
   packageSource,
   deploymentStatus,
 ] = await Promise.all([
@@ -32,9 +33,11 @@ const [
   source('worker/src/workflows/pipeline.ts'),
   source('src/features/translation/translationSettingsApi.ts'),
   source('src/features/translation/TranslationSettingsPanel.tsx'),
+  source('src/features/translation/TranslationSettingsPanelBase.tsx'),
   source('package.json'),
   source('docs/deployment-status.md'),
 ]);
+const settingsPanelComposedSource = `${settingsPanelSource}\n${settingsPanelBaseSource}`;
 
 test('Phase 4A keeps canonical translation-context storage and provider boundaries', () => {
   assert.match(migration, /translation_style/);
@@ -59,8 +62,8 @@ test('Phase 4A keeps revision-safe ownership, pipeline provenance and Phase 3B a
 test('Phase 4A Studio exposes server-backed glossary and style controls without Phase 3C implementation leakage', () => {
   assert.match(settingsApiSource, /translation-settings/);
   assert.match(settingsApiSource, /glossary/);
-  assert.match(settingsPanelSource, /translation-settings-panel/);
-  assert.match(settingsPanelSource, /200/);
+  assert.match(settingsPanelComposedSource, /translation-settings-panel/);
+  assert.match(settingsPanelComposedSource, /200/);
 
   const phase4aProductionSources = [
     migration,
@@ -69,7 +72,7 @@ test('Phase 4A Studio exposes server-backed glossary and style controls without 
     contextualSource,
     contextRoutesSource,
     settingsApiSource,
-    settingsPanelSource,
+    settingsPanelComposedSource,
   ];
   for (const phase4aSource of phase4aProductionSources) {
     assert.doesNotMatch(phase4aSource, /share[_-]?token|rate[_-]?limit/i);
