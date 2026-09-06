@@ -50,16 +50,17 @@ export function createBatchExportRoutes(deps: BatchExportRouteDeps = {}) {
 
     const jobs = makeJobs(c.env);
     const multilang = makeMultilang(c.env);
+    const batchId = crypto.randomUUID();
     const targets: Array<{ targetLanguage: string; exportId: string; jobId: string; workflowId?: string; status: 'queued' | 'failed'; errorCode?: string }> = [];
     await projects.setStatus(projectId, userId, 'processing');
 
     for (const targetLanguage of targetLanguages) {
       const job = await jobs.create(projectId, 'export');
       const exportId = crypto.randomUUID();
-      await multilang.createExport({ id: exportId, projectId, userId, targetLanguage, jobId: job.id, generation: job.retryCount ?? 0 });
+      await multilang.createExport({ id: exportId, projectId, batchId, userId, targetLanguage, jobId: job.id, generation: job.retryCount ?? 0 });
       try {
         const instance = await c.env.EXPORT_WORKFLOW.create({
-          params: { projectId, userId, jobId: job.id, exportId, targetLanguage, requestId: c.get('requestId') },
+          params: { projectId, userId, jobId: job.id, exportId, batchId, targetLanguage, requestId: c.get('requestId') },
         });
         targets.push({ targetLanguage, exportId, jobId: job.id, workflowId: instance.id, status: 'queued' });
       } catch {
@@ -70,7 +71,7 @@ export function createBatchExportRoutes(deps: BatchExportRouteDeps = {}) {
     }
 
     if (targets.every((target) => target.status === 'failed')) await projects.setStatus(projectId, userId, 'needs_review');
-    return c.json({ status: 'queued' as const, targets }, 202);
+    return c.json({ status: 'queued' as const, batchId, targets }, 202);
   });
 
   return routes;
