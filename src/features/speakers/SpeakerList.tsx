@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Panel } from '../../components/ui/Panel';
 import type { Speaker } from '../timeline/types';
+import { VoiceCloneManager } from '../voice/VoiceCloneManager';
 import { updateSpeaker } from './speakerApi';
 
 type SpeakerListProps = { speakers: Speaker[]; selectedSpeakerId?: string };
@@ -74,18 +75,24 @@ function SpeakerCard({ speaker, index, selected }: { speaker: Speaker; index: nu
 }
 
 export function SpeakerList({ speakers, selectedSpeakerId }: SpeakerListProps) {
+  const selectedSpeaker = speakers.find((speaker) => speaker.id === selectedSpeakerId);
   return (
-    <Panel title={`Nhân vật đã nhận diện (${speakers.length})`}>
-      <div className="speaker-list">
-        {speakers.map((speaker, index) => (
-          <SpeakerCard
-            key={speaker.id}
-            speaker={speaker}
-            index={index}
-            selected={speaker.id === selectedSpeakerId}
-          />
-        ))}
-      </div>
-    </Panel>
+    <>
+      <Panel title={`Nhân vật đã nhận diện (${speakers.length})`}>
+        <div className="speaker-list">
+          {speakers.map((speaker, index) => (
+            <SpeakerCard
+              key={speaker.id}
+              speaker={speaker}
+              index={index}
+              selected={speaker.id === selectedSpeakerId}
+            />
+          ))}
+        </div>
+      </Panel>
+      {selectedSpeaker?.projectId ? (
+        <VoiceCloneManager projectId={selectedSpeaker.projectId} speakerId={selectedSpeaker.id} />
+      ) : null}
+    </>
   );
 }
