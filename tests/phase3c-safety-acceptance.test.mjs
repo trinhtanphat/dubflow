@@ -105,16 +105,40 @@ test('Phase 3C safety gate locks validation-before-limit and limiter-before-expe
     "jobs.create(projectId, 'dubbing')",
     'DUBBING_WORKFLOW.create',
   ]);
-  assertInOrder(exportRouteSource, [
+
+  const exportValidationStart = exportRouteSource.indexOf('async function validateTarget(');
+  const exportLaunchStart = exportRouteSource.indexOf('async function launchValidated(', exportValidationStart);
+  const exportStartSingle = exportRouteSource.indexOf('async function startSingle(', exportLaunchStart);
+  const exportBatchRoute = exportRouteSource.indexOf("routes.post('/:id/exports/batch'", exportStartSingle);
+  assert.ok(
+    exportValidationStart >= 0 && exportLaunchStart > exportValidationStart
+      && exportStartSingle > exportLaunchStart && exportBatchRoute > exportStartSingle,
+    'export validation, launch, and single-start boundaries must remain identifiable',
+  );
+  const exportValidationSource = exportRouteSource.slice(exportValidationStart, exportLaunchStart);
+  const exportLaunchSource = exportRouteSource.slice(exportLaunchStart, exportStartSingle);
+  const exportSingleSource = exportRouteSource.slice(exportStartSingle, exportBatchRoute);
+
+  assertInOrder(exportValidationSource, [
     'getByIdForUser(projectId, userId)',
     'project.sourceObjectKey',
     "['needs_review', 'completed']",
-    'voiceConfigured(c.env)',
+    'makeLanguages(env).getConfig(projectId, userId)',
+    'translationsComplete(sourceSegments, variants)',
+    'voiceTargetError(getVoiceCapabilities(env), targetLanguage)',
+  ]);
+  assertInOrder(exportSingleSource, [
+    'validateTarget(c.env, projectId, userId, targetLanguage, output)',
     "enforceRateLimit(c, 'export'",
-    "jobs.create(projectId, 'export')",
+    'launchValidated(',
+  ]);
+  assertInOrder(exportLaunchSource, [
+    'exportsStore.create(projectId, userId, targetLanguage, output, batchId)',
+    'jobs.create(projectId, legacy ? \'export\'',
     "setStatus(projectId, userId, 'processing')",
     'EXPORT_WORKFLOW.create',
   ]);
+
   assertInOrder(uploadRouteSource, [
     'validateBegin(projectId, userId, await c.req.json())',
     "enforceRateLimit(c, 'upload'",
