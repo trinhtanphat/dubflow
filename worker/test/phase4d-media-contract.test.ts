@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ContainerMediaProcessor } from '../src/services/media/container';
+import type { RenderExportOptions } from '../src/services/media/types';
 
 describe('Phase 4D media render contract', () => {
   const clips = [{
@@ -39,15 +40,15 @@ describe('Phase 4D media render contract', () => {
       getByName() { return { async fetch() { calls += 1; return Response.json({}); } }; },
     });
 
-    const invalid = [
+    const invalid: RenderExportOptions[] = [
       { targetLanguage: 'ja', exportId: 'e1', audioMode: 'bad' as never },
-      { targetLanguage: 'ja', exportId: 'e2', audioMode: 'separated_background' as const },
+      { targetLanguage: 'ja', exportId: 'e2', audioMode: 'separated_background' },
       {
-        targetLanguage: 'ja', exportId: 'e3', audioMode: 'duck_original' as const,
+        targetLanguage: 'ja', exportId: 'e3', audioMode: 'duck_original',
         backgroundObjectKey: 'projects/project-1/stems/3/p/background.wav',
       },
       {
-        targetLanguage: 'ja', exportId: 'e4', audioMode: 'separated_background' as const,
+        targetLanguage: 'ja', exportId: 'e4', audioMode: 'separated_background',
         backgroundObjectKey: 'projects/other/stems/3/p/background.wav',
       },
     ];
