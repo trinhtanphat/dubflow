@@ -34,20 +34,23 @@ jobs:
           set -euo pipefail
           : > "$RUNNER_TEMP/dubflow-tail.jsonl"
           : > "$RUNNER_TEMP/dubflow-tail.err"
-          timeout 25s npx wrangler tail dubflow --format json --ip self \
+          timeout 30s npx wrangler tail dubflow --format json \
             > "$RUNNER_TEMP/dubflow-tail.jsonl" \
             2> "$RUNNER_TEMP/dubflow-tail.err" &
           TAIL_PID=$!
-          sleep 6
+          sleep 7
           for path in ready projects usage; do
             code="$(curl --silent --show-error --output "$RUNNER_TEMP/$path.body" --write-out '%{http_code}' \
               -H 'accept: application/json' -H 'cache-control: no-cache' \
               "https://yupvox.qs3d.site/api/$path")"
             echo "probe /api/$path status=$code"
           done
-          sleep 6
+          sleep 8
           kill "$TAIL_PID" 2>/dev/null || true
           wait "$TAIL_PID" 2>/dev/null || true
+
+          echo '--- tail stderr (sanitized first lines) ---'
+          sed -n '1,100p' "$RUNNER_TEMP/dubflow-tail.err" | sed -E 's/(Bearer|token)[^ ]*/\1 [redacted]/Ig' || true
 
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
@@ -68,13 +71,10 @@ jobs:
             const rendered = exceptions.map((exception) => ({
               name: String(exception?.name ?? '').slice(0, 120),
               message: String(exception?.message ?? '').slice(0, 700),
-              stack: String(exception?.stack ?? '').split('\n').slice(0, 8).join(' | ').slice(0, 1600),
+              stack: String(exception?.stack ?? '').split('\n').slice(0, 10).join(' | ').slice(0, 1800),
             }));
             console.log(JSON.stringify({ path: pathname, outcome: item?.outcome ?? 'unknown', exceptions: rendered }));
           }
           console.log(`matched production trace events=${matched}`);
           if (matched === 0) process.exit(3);
           NODE
-
-          echo '--- tail stderr (sanitized first lines) ---'
-          sed -n '1,80p' "$RUNNER_TEMP/dubflow-tail.err" | sed -E 's/(Bearer|token)[^ ]*/\1 [redacted]/Ig' || true
