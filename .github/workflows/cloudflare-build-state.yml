@@ -17,8 +17,10 @@ jobs:
       LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CURRENT_TAG: ed49a7dcf94c407aafa2bedf4311331f
       LEGACY_TAG: cec78627dd174827ab210bc09108fb1c
+      GITHUB_ACCOUNT_ID: '89531707'
+      GITHUB_REPO_ID: '1357840238'
     steps:
-      - name: Inspect Workers Builds triggers on both accounts
+      - name: Inspect legacy Builds prerequisites
         shell: bash
         run: |
           set -euo pipefail
@@ -26,14 +28,18 @@ jobs:
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
 
-          echo '=== CURRENT ACCOUNT BUILDS TRIGGERS ==='
+          echo '=== CURRENT BUILDS TOKENS ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/tokens" \
+            | jq -c '{success,errors,result:[.result[]? | {build_token_uuid,build_token_name,created_on,modified_on}]}'
+
+          echo '=== LEGACY BUILDS TOKENS ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/tokens" \
+            | jq -c '{success,errors,result:[.result[]? | {build_token_uuid,build_token_name,created_on,modified_on}]}'
+
+          echo '=== LEGACY GITHUB REPO CONFIG AUTOFILL ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/repos/github/$GITHUB_ACCOUNT_ID/$GITHUB_REPO_ID/config_autofill" \
+            | jq -c '{success,errors,messages,result}'
+
+          echo '=== CURRENT TRIGGER FULL CONNECTION METADATA ==='
           cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/workers/$CURRENT_TAG/triggers" \
-            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,repo_name,provider_account_name,provider_type,build_command,deploy_command,root_directory,branch_includes,branch_excludes,build_token_name,build_token_uuid}]}'
-
-          echo '=== LEGACY ACCOUNT BUILDS TRIGGERS ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/workers/$LEGACY_TAG/triggers" \
-            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,repo_name,provider_account_name,provider_type,build_command,deploy_command,root_directory,branch_includes,branch_excludes,build_token_name,build_token_uuid}]}'
-
-          echo '=== LEGACY RECENT BUILDS ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/workers/$LEGACY_TAG/builds" \
-            | jq -c '{success,errors,result:[.result[:10][]? | {build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata}]}'
+            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,build_token_uuid,build_token_name,repo_connection,external_script_id,build_command,deploy_command}]}'
