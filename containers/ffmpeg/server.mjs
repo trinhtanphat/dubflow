@@ -13,6 +13,7 @@ import { buildRenderExportArgs, validateRenderExportInput } from './render-expor
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT || 8080);
 const MAX_JSON_BYTES = 1024 * 1024;
+const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
 
 function json(response, status = 200) {
   return { status, body: JSON.stringify(response), headers: { 'content-type': 'application/json; charset=utf-8' } };
@@ -22,13 +23,34 @@ function r2Url(key) {
   return `http://media.r2/objects/${encodeURIComponent(key)}`;
 }
 
-function assertProjectInput(input) {
-  if (!input || typeof input.projectId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(input.projectId)) {
+function assertProjectId(projectId) {
+  if (typeof projectId !== 'string' || !/^[A-Za-z0-9._-]+$/.test(projectId)) {
     throw new Error('Invalid projectId.');
   }
+}
+
+function assertProjectInput(input) {
+  if (!input) throw new Error('Invalid project input.');
+  assertProjectId(input.projectId);
   if (typeof input.objectKey !== 'string' || !input.objectKey.startsWith(`projects/${input.projectId}/source/`)) {
     throw new Error('Source object is outside the project.');
   }
+}
+
+function assertExportAudioInput(input) {
+  if (!input) throw new Error('Invalid export audio input.');
+  assertProjectId(input.projectId);
+  if (!TARGET_LANGUAGES.has(input.targetLanguage)) {
+    throw new Error('Invalid target language.');
+  }
+  if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
+    throw new Error('Invalid exportId.');
+  }
+  const expectedObjectKey = `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.mp4`;
+  if (input.objectKey !== expectedObjectKey) {
+    throw new Error('Export audio source is not the exact canonical project export.');
+  }
+  return input;
 }
 
 async function readJson(request) {
@@ -120,6 +142,29 @@ async function extractAudioChunks(input) {
   });
 }
 
+async function extractExportAudio(input) {
+  assertExportAudioInput(input);
+  const root = await mkdtemp(join(tmpdir(), 'dubflow-export-audio-'));
+  const source = join(root, 'dubbed.mp4');
+  const output = join(root, 'dubbed-audio.wav');
+  try {
+    await downloadObject(input.objectKey, source);
+    await durationMs(source);
+    await execFileAsync('ffmpeg', [
+      '-nostdin', '-y', '-v', 'error',
+      '-i', source,
+      '-vn', '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+      output,
+    ], { maxBuffer: 4 * 1024 * 1024 });
+    await durationMs(output);
+    const audioObjectKey = `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.audio.wav`;
+    await uploadFile(audioObjectKey, output, 'audio/wav');
+    return { audioObjectKey };
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
 async function renderExport(input) {
   const validated = validateRenderExportInput(input);
   return withSource(validated, async ({ root, source }) => {
@@ -167,6 +212,7 @@ async function renderExport(input) {
 async function dispatch(pathname, input) {
   if (pathname === '/probe') return probe(input);
   if (pathname === '/extract-audio-chunks') return extractAudioChunks(input);
+  if (pathname === '/extract-export-audio') return extractExportAudio(input);
   if (pathname === '/render-export') return renderExport(input);
   throw Object.assign(new Error('Not found.'), { statusCode: 404 });
 }
