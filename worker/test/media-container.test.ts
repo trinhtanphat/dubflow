@@ -60,6 +60,48 @@ describe('ContainerMediaProcessor', () => {
     });
   });
 
+  it('extracts the exact final dubbed audio sidecar for visual lip-sync', async () => {
+    const requests: Request[] = [];
+    const namespace = {
+      getByName(name: string) {
+        expect(name).toBe('project-1');
+        return {
+          async fetch(request: Request) {
+            requests.push(request);
+            return Response.json({
+              audioObjectKey: 'projects/project-1/exports/ja/export-1.audio.wav',
+            });
+          },
+        };
+      },
+    };
+    const processor = new ContainerMediaProcessor(namespace) as ContainerMediaProcessor & {
+      extractExportAudio(
+        projectId: string,
+        exportObjectKey: string,
+        targetLanguage: 'ja',
+        exportId: string,
+      ): Promise<{ audioObjectKey: string }>;
+    };
+
+    await expect(processor.extractExportAudio(
+      'project-1',
+      'projects/project-1/exports/ja/export-1.mp4',
+      'ja',
+      'export-1',
+    )).resolves.toEqual({
+      audioObjectKey: 'projects/project-1/exports/ja/export-1.audio.wav',
+    });
+    expect(requests).toHaveLength(1);
+    expect(new URL(requests[0].url).pathname).toBe('/extract-export-audio');
+    expect(await requests[0].json()).toEqual({
+      projectId: 'project-1',
+      objectKey: 'projects/project-1/exports/ja/export-1.mp4',
+      targetLanguage: 'ja',
+      exportId: 'export-1',
+    });
+  });
+
   it('renders a project-scoped final export from timed dubbed clips', async () => {
     const requests: Request[] = [];
     const namespace = {
