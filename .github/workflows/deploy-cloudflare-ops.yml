@@ -1,4 +1,4 @@
-name: Cloudflare Container Entitlement Probe
+name: Cloudflare Workers Subscription Probe
 
 on:
   push:
@@ -27,27 +27,15 @@ jobs:
             exit 1
           fi
 
-      - name: Read Workers account settings
+      - name: Read account subscriptions
         shell: bash
         run: |
           set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/workers-settings.json --write-out '%{http_code}' \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/account-settings" \
+          code="$(curl --silent --show-error --output /tmp/subscriptions.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/subscriptions" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
-          echo "Workers account settings HTTP status: ${code}"
-          cat /tmp/workers-settings.json
-          echo
-          test "$code" = "200"
-
-      - name: Probe Containers identity endpoint
-        shell: bash
-        run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/containers-me.json --write-out '%{http_code}' \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/containers/me" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
-          echo "Containers identity HTTP status: ${code}"
-          cat /tmp/containers-me.json
+          echo "Account subscriptions HTTP status: ${code}"
+          cat /tmp/subscriptions.json
           echo
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             exit 1
