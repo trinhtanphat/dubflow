@@ -9,6 +9,7 @@ import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { buildAudioChunkWindows } from './audio-chunks.mjs';
 import { buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
+import { separateTwoStems, validateStemSeparationInput } from './stem-separation.mjs';
 
 const execFileAsync = promisify(execFile);
 const PORT = Number(process.env.PORT || 8080);
@@ -120,6 +121,16 @@ async function extractAudioChunks(input) {
   });
 }
 
+async function separateStems(input) {
+  const normalized = validateStemSeparationInput(input);
+  return withSource(normalized, async ({ root, source }) => separateTwoStems({
+    root,
+    sourcePath: source,
+    input: normalized,
+    uploadFile,
+  }));
+}
+
 async function renderExport(input) {
   validateRenderExportInput(input);
   return withSource(input, async ({ root, source }) => {
@@ -158,6 +169,7 @@ async function renderExport(input) {
 async function dispatch(pathname, input) {
   if (pathname === '/probe') return probe(input);
   if (pathname === '/extract-audio-chunks') return extractAudioChunks(input);
+  if (pathname === '/separate-stems') return separateStems(input);
   if (pathname === '/render-export') return renderExport(input);
   throw Object.assign(new Error('Not found.'), { statusCode: 404 });
 }
