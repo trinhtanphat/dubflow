@@ -14,11 +14,7 @@ export interface WorkflowBindingLike {
 }
 
 export interface AnalyticsEngineDatasetLike {
-  writeDataPoint(point: {
-    blobs?: string[];
-    doubles?: number[];
-    indexes?: string[];
-  }): void;
+  writeDataPoint(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
 }
 
 export interface RateLimitBindingLike {
@@ -37,6 +33,7 @@ export interface Env {
   RATE_LIMIT_VOICE: RateLimitBindingLike;
   RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
+  RATE_LIMIT_BATCH_EXPORT: RateLimitBindingLike;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
