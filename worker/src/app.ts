@@ -13,6 +13,7 @@ import { createTranslationRoutes } from './routes/translation';
 import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
+import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
 
 const app = new Hono<WorkerHonoEnv>();
 
@@ -26,6 +27,7 @@ app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
 app.route('/api/projects', createExportRoutes());
+app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
 app.route('/api/projects', createTranslationRoutes());
@@ -33,6 +35,7 @@ app.route('/api/projects', createJobRoutes());
 app.route('/api/projects', createMediaRoutes());
 app.route('/api/voice', createVoiceRoutes());
 app.route('/api', createUsageRoutes());
+app.route('/api', createPublicShareRoutes());
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;
