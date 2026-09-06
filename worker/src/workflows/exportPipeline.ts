@@ -397,7 +397,11 @@ async function runTargetExportPipeline(
   } catch (error) {
     try {
       if (params.exportId && deps.multilang) {
-        await deps.multilang.failExport(params.projectId, params.exportId, params.userId, isJobCancelledError(error) ? 'EXPORT_CANCELLED' : 'EXPORT_FAILED');
+        if (isJobCancelledError(error)) {
+          await deps.multilang.cancelExport(params.projectId, params.exportId, params.userId, 'EXPORT_CANCELLED');
+        } else {
+          await deps.multilang.failExport(params.projectId, params.exportId, params.userId, 'EXPORT_FAILED');
+        }
       }
       if (!isJobCancelledError(error)) await deps.jobs.fail(params.jobId, 'EXPORT_FAILED', errorMessage(error));
       if (params.batchId) await reconcileBatchProjectStatus({ projectId: params.projectId, userId: params.userId, batchId: params.batchId }, deps);
