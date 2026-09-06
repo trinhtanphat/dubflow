@@ -2,6 +2,10 @@ import { Container } from '@cloudflare/containers';
 import type { Env } from '../env';
 
 const OBJECT_PATH = '/objects/';
+const ELEVENLABS_STEM_PATH = '/v1/music/stem-separation';
+
+export const FFMPEG_ALLOWED_HOSTS = ['media.r2', 'api.elevenlabs.io'] as const;
+export const FFMPEG_INTERCEPT_HTTPS = true;
 
 function objectKeyFromRequest(request: Request): string | null {
   const pathname = new URL(request.url).pathname;
@@ -14,11 +18,25 @@ function objectKeyFromRequest(request: Request): string | null {
   }
 }
 
+async function elevenLabsStemRequest(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method !== 'POST' || url.pathname !== ELEVENLABS_STEM_PATH) {
+    return new Response('Provider request not allowed.', { status: 403 });
+  }
+  const apiKey = env.ELEVENLABS_API_KEY?.trim();
+  if (!apiKey) return new Response('Stem separation provider unavailable.', { status: 503 });
+
+  const headers = new Headers(request.headers);
+  headers.set('xi-api-key', apiKey);
+  return fetch(new Request(request, { headers }));
+}
+
 export class FfmpegContainer extends Container<Env> {
   defaultPort = 8080;
   sleepAfter = '10m';
   enableInternet = false;
-  allowedHosts = ['media.r2'];
+  interceptHttps = FFMPEG_INTERCEPT_HTTPS;
+  allowedHosts = [...FFMPEG_ALLOWED_HOSTS];
 }
 
 FfmpegContainer.outboundByHost = {
@@ -48,4 +66,5 @@ FfmpegContainer.outboundByHost = {
 
     return new Response('Method not allowed.', { status: 405 });
   },
+  'api.elevenlabs.io': elevenLabsStemRequest,
 };
