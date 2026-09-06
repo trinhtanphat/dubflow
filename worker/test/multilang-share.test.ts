@@ -52,6 +52,7 @@ function multilangStore(overrides: Partial<MultilangStore> = {}): MultilangStore
     async setExportRunning() {},
     async completeExport() {},
     async failExport() {},
+    async cancelExport() {},
     async invalidateExportsForTarget() {},
     ...overrides,
   };
