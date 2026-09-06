@@ -68,12 +68,14 @@ describe('Phase 4C batch export studio controls', () => {
       configured: true,
       languages: ['vi'],
       cloning: true,
+      preview: true,
       cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
     }, 'ja');
     const unknown = dubbedAvailability({
       configured: true,
       languages: 'unknown',
       cloning: true,
+      preview: true,
       cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
     }, 'ja');
 
@@ -92,6 +94,7 @@ describe('Phase 4C batch export studio controls', () => {
           configured: false,
           languages: 'unknown',
           cloning: false,
+          preview: false,
           cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: false },
         }}
         busy={false}
