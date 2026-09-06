@@ -35,18 +35,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > .wrangler.runtime-probe.json <<'JSON'
+          {
+            "name": "dubflow-runtime-probe",
+            "account_id": "6c5207813df3d5b83b9508125e0e9e12",
+            "main": "worker/src/index.ts",
+            "compatibility_date": "2026-09-05",
+            "compatibility_flags": ["nodejs_compat"],
+            "assets": {
+              "directory": "./dist",
+              "binding": "ASSETS",
+              "not_found_handling": "single-page-application",
+              "run_worker_first": ["/api/*"]
+            },
+            "d1_databases": [
+              {
+                "binding": "DB",
+                "database_name": "dubflow-db",
+                "database_id": "4ce2cfa0-1876-48dc-8cc8-ec4f9b1523c3"
+              }
+            ],
+            "analytics_engine_datasets": [
+              { "binding": "ANALYTICS", "dataset": "dubflow_events" }
+            ]
+          }
+          JSON
+
           log="$RUNNER_TEMP/wrangler-remote-dev.log"
           : > "$log"
-          npx wrangler dev --remote --port 8787 --log-level debug >"$log" 2>&1 &
+          npx wrangler dev --remote --config .wrangler.runtime-probe.json --port 8787 --log-level debug >"$log" 2>&1 &
           pid=$!
           cleanup() {
             kill "$pid" 2>/dev/null || true
             wait "$pid" 2>/dev/null || true
+            rm -f .wrangler.runtime-probe.json
           }
           trap cleanup EXIT
 
           ready=0
-          for attempt in $(seq 1 45); do
+          for attempt in $(seq 1 60); do
             if curl --silent --fail --output /dev/null http://127.0.0.1:8787/api/health; then
               ready=1
               break
@@ -60,18 +87,21 @@ jobs:
 
           if [ "$ready" -ne 1 ]; then
             echo '--- remote dev startup log ---'
-            sed -n '1,260p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
+            sed -n '1,360p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
             exit 2
           fi
 
+          failed=0
           for path in ready projects usage; do
             status="$(curl --silent --show-error --output "$RUNNER_TEMP/$path.body" --write-out '%{http_code}' \
               -H 'accept: application/json' -H 'cache-control: no-cache' \
               "http://127.0.0.1:8787/api/$path")"
             body="$(cat "$RUNNER_TEMP/$path.body")"
             printf 'remote-dev /api/%s status=%s body-prefix=%s\n' "$path" "$status" "${body:0:500}"
+            if [ "$status" -ge 500 ]; then failed=1; fi
           done
 
           sleep 2
           echo '--- remote dev runtime log (sanitized) ---'
-          sed -n '1,420p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
+          sed -n '1,520p' "$log" | sed -E 's/(Bearer|token|authorization)[^ ,}]*/\1 [redacted]/Ig'
+          exit "$failed"
