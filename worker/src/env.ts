@@ -35,6 +35,7 @@ export interface Env {
   RATE_LIMIT_EXPORT: RateLimitBindingLike;
   RATE_LIMIT_TRANSLATE: RateLimitBindingLike;
   RATE_LIMIT_VOICE: RateLimitBindingLike;
+  RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
   RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
