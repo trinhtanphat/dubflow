@@ -91,6 +91,18 @@ export class ProjectExportRepository {
     };
   }
 
+  async get(projectId: string, exportId: string, userId: string): Promise<ProjectExport | null> {
+    const row = await this.db.prepare(
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
+       FROM project_exports e
+       JOIN projects p ON p.id = e.project_id
+       WHERE e.project_id = ? AND e.id = ? AND p.user_id = ?
+       LIMIT 1`,
+    ).bind(projectId, exportId, userId).first<ProjectExportRow>();
+    return row ? fromRow(row) : null;
+  }
+
   async latest(
     projectId: string,
     userId: string,
