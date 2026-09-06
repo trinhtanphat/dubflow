@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TranslationContextStore } from '../src/db/translation-context';
 import { TranslationContextPersistenceError } from '../src/db/translation-context';
+import type { TargetLanguage } from '../src/domain/language';
 import type { Env } from '../src/env';
 import {
   normalizeGlossaryInput,
@@ -14,6 +15,7 @@ import {
 const initialEntry: GlossaryEntry = {
   id: 'entry-1',
   projectId: 'project-1',
+  targetLanguage: 'vi',
   sourceTerm: 'DubFlow',
   preferredTranslation: 'DubFlow',
   note: null,
@@ -37,24 +39,40 @@ class ContextStoreFake implements TranslationContextStore {
     glossary: [initialEntry],
   };
   seenUsers: string[] = [];
+  seenTargets: TargetLanguage[] = [];
 
   private owned(projectId: string, userId: string): boolean {
     this.seenUsers.push(userId);
     return projectId === 'project-1' && userId === 'dev-user';
   }
 
-  private requireRevision(expectedRevision: number): void {
+  private contextFor(targetLanguage: TargetLanguage): TranslationContext {
+    this.seenTargets.push(targetLanguage);
+    return {
+      revision: this.context.revision,
+      style: this.context.style,
+      glossary: this.context.glossary
+        .filter((entry) => entry.targetLanguage === targetLanguage)
+        .map((entry) => ({ ...entry })),
+    };
+  }
+
+  private requireRevision(expectedRevision: number, targetLanguage: TargetLanguage = 'vi'): void {
     if (expectedRevision !== this.context.revision) {
       throw new TranslationContextPersistenceError(
         'TRANSLATION_CONTEXT_CONFLICT',
         'Translation settings changed elsewhere.',
-        cloneContext(this.context),
+        this.contextFor(targetLanguage),
       );
     }
   }
 
-  async getContext(projectId: string, userId: string): Promise<TranslationContext | null> {
-    return this.owned(projectId, userId) ? cloneContext(this.context) : null;
+  async getContext(
+    projectId: string,
+    userId: string,
+    targetLanguage: TargetLanguage,
+  ): Promise<TranslationContext | null> {
+    return this.owned(projectId, userId) ? this.contextFor(targetLanguage) : null;
   }
 
   async updateStyle(
@@ -66,12 +84,12 @@ class ContextStoreFake implements TranslationContextStore {
     if (!this.owned(projectId, userId)) {
       throw new TranslationContextPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
     }
-    this.requireRevision(expectedRevision);
+    this.requireRevision(expectedRevision, 'vi');
     const normalized = validateTranslationStyle(style);
     if (normalized !== this.context.style) {
       this.context = { ...this.context, style: normalized, revision: this.context.revision + 1 };
     }
-    return cloneContext(this.context);
+    return this.contextFor('vi');
   }
 
   async createEntry(
@@ -83,25 +101,26 @@ class ContextStoreFake implements TranslationContextStore {
     if (!this.owned(projectId, userId)) {
       throw new TranslationContextPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
     }
-    this.requireRevision(expectedRevision);
     const normalized = normalizeGlossaryInput(input);
+    this.requireRevision(expectedRevision, normalized.targetLanguage);
     if (normalized.sourceTerm === 'duplicate') {
       throw new TranslationContextPersistenceError(
         'GLOSSARY_ENTRY_CONFLICT',
         'Duplicate glossary entry.',
-        cloneContext(this.context),
+        this.contextFor(normalized.targetLanguage),
       );
     }
     if (normalized.sourceTerm === 'limit') {
       throw new TranslationContextPersistenceError(
         'GLOSSARY_LIMIT_REACHED',
         'Glossary limit reached.',
-        cloneContext(this.context),
+        this.contextFor(normalized.targetLanguage),
       );
     }
     const entry: GlossaryEntry = {
       id: 'entry-new',
       projectId,
+      targetLanguage: normalized.targetLanguage,
       sourceTerm: normalized.sourceTerm,
       preferredTranslation: normalized.preferredTranslation,
       note: normalized.note,
@@ -114,7 +133,7 @@ class ContextStoreFake implements TranslationContextStore {
       revision: this.context.revision + 1,
       glossary: [...this.context.glossary, entry],
     };
-    return { entry: { ...entry }, context: cloneContext(this.context) };
+    return { entry: { ...entry }, context: this.contextFor(normalized.targetLanguage) };
   }
 
   async updateEntry(
@@ -127,18 +146,20 @@ class ContextStoreFake implements TranslationContextStore {
     if (!this.owned(projectId, userId)) {
       throw new TranslationContextPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
     }
-    this.requireRevision(expectedRevision);
     const normalized = normalizeGlossaryInput(input);
-    const index = this.context.glossary.findIndex((entry) => entry.id === entryId);
+    this.requireRevision(expectedRevision, normalized.targetLanguage);
+    const index = this.context.glossary.findIndex((entry) =>
+      entry.id === entryId && entry.targetLanguage === normalized.targetLanguage);
     if (index < 0) {
       throw new TranslationContextPersistenceError(
         'GLOSSARY_ENTRY_NOT_FOUND',
         'Glossary entry not found.',
-        cloneContext(this.context),
+        this.contextFor(normalized.targetLanguage),
       );
     }
     const entry: GlossaryEntry = {
       ...this.context.glossary[index],
+      targetLanguage: normalized.targetLanguage,
       sourceTerm: normalized.sourceTerm,
       preferredTranslation: normalized.preferredTranslation,
       note: normalized.note,
@@ -150,7 +171,7 @@ class ContextStoreFake implements TranslationContextStore {
       revision: this.context.revision + 1,
       glossary: this.context.glossary.map((candidate, candidateIndex) => candidateIndex === index ? entry : candidate),
     };
-    return { entry: { ...entry }, context: cloneContext(this.context) };
+    return { entry: { ...entry }, context: this.contextFor(normalized.targetLanguage) };
   }
 
   async deleteEntry(
@@ -158,24 +179,26 @@ class ContextStoreFake implements TranslationContextStore {
     entryId: string,
     userId: string,
     expectedRevision: number,
+    targetLanguage: TargetLanguage = 'vi',
   ): Promise<TranslationContext> {
     if (!this.owned(projectId, userId)) {
       throw new TranslationContextPersistenceError('PROJECT_NOT_FOUND', 'Project not found.');
     }
-    this.requireRevision(expectedRevision);
-    if (!this.context.glossary.some((entry) => entry.id === entryId)) {
+    this.requireRevision(expectedRevision, targetLanguage);
+    if (!this.context.glossary.some((entry) => entry.id === entryId && entry.targetLanguage === targetLanguage)) {
       throw new TranslationContextPersistenceError(
         'GLOSSARY_ENTRY_NOT_FOUND',
         'Glossary entry not found.',
-        cloneContext(this.context),
+        this.contextFor(targetLanguage),
       );
     }
     this.context = {
       ...this.context,
       revision: this.context.revision + 1,
-      glossary: this.context.glossary.filter((entry) => entry.id !== entryId),
+      glossary: this.context.glossary.filter((entry) =>
+        !(entry.id === entryId && entry.targetLanguage === targetLanguage)),
     };
-    return cloneContext(this.context);
+    return this.contextFor(targetLanguage);
   }
 }
 
@@ -236,19 +259,63 @@ describe('translation context HTTP routes', () => {
     });
   });
 
-  it('lists the owner glossary with its canonical context revision', async () => {
+  it('defaults legacy glossary reads to Vietnamese and scopes explicit target reads', async () => {
     const store = new ContextStoreFake();
+    store.context.glossary.push({
+      ...initialEntry,
+      id: 'entry-ja',
+      targetLanguage: 'ja',
+      preferredTranslation: 'ダブフロー',
+    });
     const routes = await routesFor(store);
-    const response = await jsonRequest(routes, '/project-1/glossary', 'GET');
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      contextRevision: 4,
-      glossary: [{ id: 'entry-1', sourceTerm: 'DubFlow' }],
+    const legacy = await jsonRequest(routes, '/project-1/glossary', 'GET');
+    expect(legacy.status).toBe(200);
+    await expect(legacy.json()).resolves.toMatchObject({
+      targetLanguage: 'vi',
+      glossary: [{ id: 'entry-1', targetLanguage: 'vi' }],
+    });
+
+    const japanese = await jsonRequest(routes, '/project-1/glossary?targetLanguage=ja', 'GET');
+    expect(japanese.status).toBe(200);
+    await expect(japanese.json()).resolves.toMatchObject({
+      targetLanguage: 'ja',
+      glossary: [{ id: 'entry-ja', targetLanguage: 'ja' }],
     });
   });
 
-  it('creates, updates, and deletes glossary entries while returning canonical context', async () => {
+  it('rejects unsupported glossary targets before touching the store', async () => {
+    const store = new ContextStoreFake();
+    const routes = await routesFor(store);
+    const response = await jsonRequest(routes, '/project-1/glossary?targetLanguage=fr', 'GET');
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'TARGET_LANGUAGE_UNSUPPORTED' });
+    expect(store.seenUsers).toEqual([]);
+  });
+
+  it('creates target-scoped glossary entries and returns the same-target canonical context', async () => {
+    const store = new ContextStoreFake();
+    const routes = await routesFor(store);
+    const created = await jsonRequest(routes, '/project-1/glossary', 'POST', {
+      expectedContextRevision: 4,
+      targetLanguage: 'ja',
+      sourceTerm: 'GPU',
+      preferredTranslation: 'GPU',
+      note: 'Keep acronym',
+      caseSensitive: true,
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toMatchObject({
+      entry: { id: 'entry-new', targetLanguage: 'ja', sourceTerm: 'GPU' },
+      contextRevision: 5,
+      context: {
+        revision: 5,
+        glossary: [{ id: 'entry-new', targetLanguage: 'ja' }],
+      },
+    });
+  });
+
+  it('creates, updates, and deletes Vietnamese glossary entries while returning canonical context', async () => {
     const store = new ContextStoreFake();
     const routes = await routesFor(store);
 
@@ -261,7 +328,7 @@ describe('translation context HTTP routes', () => {
     });
     expect(created.status).toBe(201);
     await expect(created.json()).resolves.toMatchObject({
-      entry: { id: 'entry-new', sourceTerm: 'GPU' },
+      entry: { id: 'entry-new', targetLanguage: 'vi', sourceTerm: 'GPU' },
       contextRevision: 5,
       context: { revision: 5, glossary: expect.any(Array) },
     });
@@ -275,7 +342,7 @@ describe('translation context HTTP routes', () => {
     });
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({
-      entry: { id: 'entry-new', preferredTranslation: 'bộ xử lý đồ họa' },
+      entry: { id: 'entry-new', targetLanguage: 'vi', preferredTranslation: 'bộ xử lý đồ họa' },
       contextRevision: 6,
       context: { revision: 6 },
     });
@@ -285,6 +352,7 @@ describe('translation context HTTP routes', () => {
     });
     expect(deleted.status).toBe(200);
     await expect(deleted.json()).resolves.toMatchObject({
+      targetLanguage: 'vi',
       contextRevision: 7,
       context: { revision: 7, glossary: [{ id: 'entry-1' }] },
     });
