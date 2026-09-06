@@ -84,10 +84,22 @@ function assertExportClip(projectId: string, raw: ExportClip, options?: RenderEx
 }
 
 export class ContainerMediaProcessor implements MediaProcessor {
-  constructor(private readonly namespace: ContainerNamespaceLike) {}
+  constructor(private readonly namespace: ContainerNamespaceLike | undefined) {}
 
   private async call(projectId: string, path: string, body: unknown): Promise<unknown> {
+    if (!this.namespace || typeof this.namespace.getByName !== 'function') {
+      throw new MediaProcessorError(
+        'MEDIA_PROCESSOR_UNAVAILABLE',
+        'FFmpeg media processor is unavailable because the container binding is not configured.',
+      );
+    }
     const stub = this.namespace.getByName(projectId);
+    if (!stub || typeof stub.fetch !== 'function') {
+      throw new MediaProcessorError(
+        'MEDIA_PROCESSOR_UNAVAILABLE',
+        'FFmpeg media processor is unavailable because the container instance could not be resolved.',
+      );
+    }
     const response = await stub.fetch(new Request(`http://ffmpeg.internal${path}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
