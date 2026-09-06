@@ -131,6 +131,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   const makeBucket = deps.makeBucket ?? readableBucket;
   const getVoiceCapabilities = deps.getVoiceCapabilities ?? voiceCapabilities;
   const makeBatchId = deps.makeBatchId ?? (() => crypto.randomUUID());
+  const voiceConfigured = (env: Env) => getVoiceCapabilities(env).configured !== false;
 
   async function validateTarget(
     env: Env,
@@ -265,6 +266,53 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
   }
 
+  async function startLegacy(c: any) {
+    const userId = getCurrentUserId();
+    const projectId = c.req.param('id');
+    const projects = makeProjects(c.env);
+    const project = await projects.getByIdForUser(projectId, userId);
+    if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
+    if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before export.'), 400);
+    if (!['needs_review', 'completed'].includes(project.status)) {
+      return c.json(errorBody('PROJECT_NOT_EXPORTABLE', 'Project must finish dubbing review before export.'), 409);
+    }
+    if (!voiceConfigured(c.env)) {
+      return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'The dubbing voice provider is not configured.'), 503);
+    }
+
+    const validated = await validateTarget(c.env, projectId, userId, 'vi', 'dubbed');
+    if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+
+    const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
+    if (rateLimited) return rateLimited;
+
+    const exportsStore = makeExports(c.env);
+    const jobs = makeJobs(c.env);
+    const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null);
+    const job = await jobs.create(projectId, 'export');
+    await projects.setStatus(projectId, userId, 'processing');
+    try {
+      const instance = await c.env.EXPORT_WORKFLOW.create({
+        params: {
+          projectId,
+          userId,
+          jobId: job.id,
+          exportId: attempt.id,
+          targetLanguage: 'vi',
+          output: 'dubbed',
+          requestId: c.get('requestId'),
+        },
+      });
+      return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
+      await jobs.fail(job.id, 'EXPORT_WORKFLOW_START_FAILED', message);
+      await exportsStore.fail(projectId, attempt.id, userId, 'EXPORT_WORKFLOW_START_FAILED', message);
+      await projects.setStatus(projectId, userId, 'needs_review');
+      return c.json(errorBody('EXPORT_WORKFLOW_START_FAILED', message), 503);
+    }
+  }
+
   routes.post('/:id/exports/batch', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
@@ -383,7 +431,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
   });
 
-  routes.post('/:id/export', async (c) => startSingle(c, 'vi', 'dubbed', true));
+  routes.post('/:id/export', async (c) => startLegacy(c));
 
   routes.get('/:id/export/media', async (c) => {
     const userId = getCurrentUserId();
