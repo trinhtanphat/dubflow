@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
+  getExportCapabilities,
   startBatchExport,
   startLanguageExport,
+  type ExportCapabilitiesDto,
   type ExportLaunchDto,
   type ExportOutput,
+  type SeparationMode,
 } from '../features/export/batchExportApi';
 import {
   getProjectLanguages,
@@ -83,7 +86,9 @@ export function StudioShell(props: Props) {
   const [savingLanguages, setSavingLanguages] = useState(false);
   const [processingLanguage, setProcessingLanguage] = useState<TargetLanguage | null>(null);
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null);
+  const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilitiesDto | null>(null);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
+  const [separationMode, setSeparationMode] = useState<SeparationMode>('source_mix');
   const [exportBusy, setExportBusy] = useState(false);
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportError, setExportError] = useState('');
@@ -131,6 +136,23 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject]);
+
+  useEffect(() => {
+    if (!isCloudProject) return;
+    let active = true;
+    getExportCapabilities(projectId).then((caps) => {
+      if (!active) return;
+      setExportCapabilities(caps);
+      if (!caps.dialogueBackgroundSeparation.available || !caps.dialogueBackgroundSeparation.modes.includes('preserve_background')) {
+        setSeparationMode('source_mix');
+      }
+    }).catch(() => {
+      if (!active) return;
+      setExportCapabilities(null);
+      setSeparationMode('source_mix');
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
@@ -249,13 +271,21 @@ export function StudioShell(props: Props) {
       : [...current, language]);
   };
 
+  const changeSeparationMode = (mode: SeparationMode) => {
+    if (mode === 'preserve_background') {
+      const capability = exportCapabilities?.dialogueBackgroundSeparation;
+      if (!capability?.available || !capability.modes.includes('preserve_background')) return;
+    }
+    setSeparationMode(mode);
+  };
+
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startLanguageExport(projectId, exportTarget, exportOutput);
+      const result = await startLanguageExport(projectId, exportTarget, exportOutput, separationMode);
       setExportResults((current) => [...current.filter((item) => item.targetLanguage !== result.targetLanguage), result]);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu export ngôn ngữ hiện tại.'));
@@ -268,7 +298,7 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startBatchExport(projectId, selectedLanguages, exportOutput);
+      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, separationMode);
       setExportResults(result.exports);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu batch export.'));
@@ -281,7 +311,7 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startLanguageExport(projectId, language, exportOutput);
+      const result = await startLanguageExport(projectId, language, exportOutput, separationMode);
       setExportResults((current) => current.map((item) => item.targetLanguage === language ? result : item));
     } catch (error) {
       setExportError(message(error, 'Không thể thử lại export.'));
@@ -318,11 +348,14 @@ export function StudioShell(props: Props) {
                 enabledLanguages={config.languages.map((entry) => entry.targetLanguage)}
                 selectedLanguages={selectedLanguages}
                 output={exportOutput}
+                separationMode={separationMode}
+                exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
                 busy={exportBusy}
                 results={exportResults}
                 error={exportError}
                 onOutputChange={setExportOutput}
+                onSeparationModeChange={changeSeparationMode}
                 onToggleLanguage={toggleSelected}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}
