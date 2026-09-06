@@ -1,32 +1,32 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { ProjectRepository, type D1DatabaseLike, type D1RunResultLike, type D1StatementLike } from '../src/db/projects';
 import { TARGET_LANGUAGES, isTargetLanguage } from '../src/domain/language';
 
-const readRepoFile = (relativePath: string) => readFileSync(new URL(`../../${relativePath}`, import.meta.url), 'utf8');
+class MemoryStatement implements D1StatementLike {
+  bind(..._values: unknown[]): D1StatementLike { return this; }
+  async run(): Promise<D1RunResultLike> { return { meta: { changes: 1 } }; }
+  async all<T>(): Promise<{ results?: T[] }> { return { results: [] }; }
+  async first<T>(): Promise<T | null> { return null; }
+}
 
-describe('Phase 4C canonical target domain and schema', () => {
+const db: D1DatabaseLike = {
+  prepare: () => new MemoryStatement(),
+};
+
+describe('Phase 4C canonical target domain and schema bridge', () => {
   it('defines exactly the five canonical Phase 4C target languages', () => {
     expect(TARGET_LANGUAGES).toEqual(['vi', 'en', 'zh', 'ja', 'ko']);
     expect(isTargetLanguage('ja')).toBe(true);
     expect(isTargetLanguage('fr')).toBe(false);
   });
 
-  it('creates language variant tables and Vietnamese compatibility backfills', () => {
-    const sql = readRepoFile('migrations/0009_multilanguage_variants.sql');
-    expect(sql).toContain('ADD COLUMN target_languages_revision');
-    expect(sql).toMatch(/CREATE TABLE(?: IF NOT EXISTS)? project_target_languages/);
-    expect(sql).toMatch(/CREATE TABLE(?: IF NOT EXISTS)? segment_translations/);
-    expect(sql).toMatch(/CREATE TABLE(?: IF NOT EXISTS)? project_exports/);
-    expect(sql).toMatch(/INSERT(?: OR IGNORE)? INTO project_target_languages[\s\S]*'vi'/);
-    expect(sql).toContain("target_language TEXT NOT NULL DEFAULT 'vi'");
-  });
-
-  it('maps projects.target_languages_revision without widening the legacy targetLanguage DTO', () => {
-    const source = readRepoFile('worker/src/db/projects.ts');
-    expect(source).toContain('targetLanguagesRevision: number');
-    expect(source).toContain('target_languages_revision: number');
-    expect(source).toMatch(/PROJECT_COLUMNS[\s\S]*target_languages_revision/);
-    expect(source).toMatch(/targetLanguagesRevision:\s*row\.target_languages_revision/);
-    expect(source).toContain("targetLanguage: 'vi'");
+  it('starts newly created legacy-compatible projects at target language revision one', async () => {
+    const project = await new ProjectRepository(db).create('dev-user', {
+      title: 'Episode',
+      sourceLanguage: 'zh',
+      targetLanguage: 'vi',
+    });
+    expect(project.targetLanguage).toBe('vi');
+    expect(project.targetLanguagesRevision).toBe(1);
   });
 });

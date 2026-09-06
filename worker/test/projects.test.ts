@@ -15,6 +15,7 @@ class MemoryProjectStore implements ProjectStore {
       title: input.title,
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
+      targetLanguagesRevision: 1,
       status: 'draft',
     };
     this.projects.unshift(project);
@@ -68,6 +69,7 @@ describe('project routes', () => {
     expect(createdResponse.status).toBe(201);
     const created = await createdResponse.json() as Project;
     expect(created.targetLanguage).toBe('vi');
+    expect(created.targetLanguagesRevision).toBe(1);
 
     const listResponse = await app.request('/api/projects');
     expect(await listResponse.json()).toEqual([created]);
