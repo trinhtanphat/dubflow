@@ -6,8 +6,8 @@ import { createTranslationRoutes } from '../src/routes/translation';
 
 type SegmentRow = {
   id: string; project_id: string; speaker_id: string | null; start_ms: number; end_ms: number;
-  source_text: string; translated_text: string; translation_engine: string; translation_status: string;
-  voice_status: string; version: number; split_parent_id: string | null;
+  source_text: string; translated_text: string; translation_engine: string; translation_context_revision: number | null;
+  translation_status: string; voice_status: string; version: number; split_parent_id: string | null;
 };
 
 class Statement implements D1StatementLike {
@@ -15,24 +15,33 @@ class Statement implements D1StatementLike {
   constructor(private readonly db: FakeDb, readonly sql: string) {}
   bind(...values: unknown[]) { this.values = values; return this; }
   async run(): Promise<D1RunResultLike> {
-    if (this.sql.includes('UPDATE segments SET translated_text')) {
+    if (this.sql.includes('UPDATE segments') && this.sql.includes('SET translated_text')) {
       this.db.translationWrites += 1;
-      const translatedText = String(this.values[0]);
-      const engine = String(this.values[1]);
-      const expectedVersion = this.values.find((value) => typeof value === 'number') as number | undefined;
+      const [translatedText, engine, contextRevision, _segmentId, _projectId, _userId, expectedVersion] = this.values as [
+        string, string, number | null, string, string, string, number | undefined,
+      ];
       if (expectedVersion !== undefined && expectedVersion !== this.db.segment.version) {
         return { meta: { changes: 0 } };
       }
       this.db.segment.translated_text = translatedText;
       this.db.segment.translation_engine = engine;
+      this.db.segment.translation_context_revision = contextRevision;
       this.db.segment.translation_status = 'completed';
       this.db.segment.version += 1;
       return { meta: { changes: 1 } };
     }
     return { meta: { changes: 1 } };
   }
-  async all<T>() { return { results: [] as T[] }; }
+  async all<T>() {
+    if (this.sql.includes('FROM project_glossary_entries')) return { results: [] as T[] };
+    return { results: [] as T[] };
+  }
   async first<T>(): Promise<T | null> {
+    if (this.sql.includes('SELECT translation_style, translation_context_revision')) {
+      const [projectId, userId] = this.values;
+      if (projectId !== 'p1' || userId !== 'dev-user') return null;
+      return { translation_style: 'neutral', translation_context_revision: 1 } as T;
+    }
     if (this.sql.includes('FROM projects WHERE id = ? AND user_id = ?')) {
       const [projectId, userId] = this.values;
       if (projectId !== 'p1' || userId !== 'dev-user') return null;
@@ -53,7 +62,7 @@ class FakeDb implements D1DatabaseLike {
   translationWrites = 0;
   segment: SegmentRow = {
     id: 's1', project_id: 'p1', speaker_id: null, start_ms: 0, end_ms: 1_000,
-    source_text: 'hello', translated_text: 'server-new', translation_engine: 'workers-ai',
+    source_text: 'hello', translated_text: 'server-new', translation_engine: 'workers-ai', translation_context_revision: null,
     translation_status: 'completed', voice_status: 'pending', version: 2, split_parent_id: null,
   };
   prepare(sql: string) { return new Statement(this, sql); }
@@ -69,8 +78,14 @@ function envFor(db: FakeDb) {
   return {
     DB: db,
     AI: {
-      async run() { return { translated_text: 'provider-result' }; },
+      async run(_model: string, input: unknown) {
+        if (input && typeof input === 'object' && Array.isArray((input as any).messages)) {
+          return { response: JSON.stringify({ translations: [{ id: 's1', text: 'contextual-result' }] }) };
+        }
+        return { translated_text: 'provider-result' };
+      },
     },
+    CONTEXT_TRANSLATION_MODEL: '@cf/example/context-model',
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'test-key',
   } as any;
 }
@@ -94,7 +109,7 @@ describe('revision-aware retranslation route', () => {
     expect(db.segment.translated_text).toBe('server-new');
   });
 
-  it('compare mode never persists either provider result', async () => {
+  it('compare mode never persists either provider result for inactive context', async () => {
     const db = new FakeDb();
     vi.stubGlobal('fetch', async () => Response.json({
       data: { translations: [{ translatedText: 'google-result' }] },
