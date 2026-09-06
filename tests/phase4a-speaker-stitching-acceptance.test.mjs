@@ -30,9 +30,13 @@ test('Phase 4A keeps conservative deterministic speaker evidence and rerun recon
   assert.doesNotMatch(stitch + reconcile, /embedding|voiceprint|biometric/i);
 });
 
-test('Phase 4A source gates stay wired and runtime stays unqualified', () => {
+test('Phase 4A source gates expose only the 15-second canonical window policy and runtime stays unqualified', () => {
   assert.match(packageJson, /phase4a-speaker-stitching-acceptance\.test\.mjs/);
   assert.match(packageJson, /phase4a-diarization-acceptance\.test\.mjs/);
   assert.match(packageJson, /audio-chunks\.test\.mjs/);
+  assert.doesNotMatch(packageJson, /audio-windows\.test\.mjs/);
+  assert.match(deploymentStatus, /300(?:-second|s).*15(?:-second|s).*overlap/is);
+  assert.match(deploymentStatus, /285(?:-second|s)/is);
+  assert.match(deploymentStatus, /rerun/i);
   assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/i);
 });
