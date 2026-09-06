@@ -280,14 +280,36 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'The dubbing voice provider is not configured.'), 503);
     }
 
-    const validated = await validateTarget(c.env, projectId, userId, 'vi', 'dubbed');
-    if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+    const hasPhase4CLegacyState = Boolean(
+      c.env.DB
+      || (deps.makeLanguages && deps.makeSegments && deps.makeVariants && deps.makeExports),
+    );
+    if (hasPhase4CLegacyState) {
+      const validated = await validateTarget(c.env, projectId, userId, 'vi', 'dubbed');
+      if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+    }
 
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
 
-    const exportsStore = makeExports(c.env);
     const jobs = makeJobs(c.env);
+    if (!hasPhase4CLegacyState) {
+      const job = await jobs.create(projectId, 'export');
+      await projects.setStatus(projectId, userId, 'processing');
+      try {
+        const instance = await c.env.EXPORT_WORKFLOW.create({
+          params: { projectId, userId, jobId: job.id },
+        });
+        return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
+        await jobs.fail(job.id, 'EXPORT_WORKFLOW_START_FAILED', message);
+        await projects.setStatus(projectId, userId, 'needs_review');
+        return c.json(errorBody('EXPORT_WORKFLOW_START_FAILED', message), 503);
+      }
+    }
+
+    const exportsStore = makeExports(c.env);
     const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null);
     const job = await jobs.create(projectId, 'export');
     await projects.setStatus(projectId, userId, 'processing');
