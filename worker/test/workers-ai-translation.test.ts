@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
+import { TARGET_LANGUAGES } from '../src/domain/language';
 import { WorkersAITranslationProvider } from '../src/services/translation/workers-ai';
 
 class FakeAI implements AiBinding {
@@ -19,7 +20,7 @@ const activeContext = {
 describe('Workers AI translation', () => {
   it('advertises raw-only availability', () => {
     const provider = new WorkersAITranslationProvider(new FakeAI());
-    expect(provider).toHaveProperty('capabilities', { contextual: false, available: true });
+    expect(provider).toHaveProperty('capabilities', { contextual: false, available: true, targets: TARGET_LANGUAGES });
   });
 
   it('preserves ids and maps source/target languages without trusting model identity', async () => {
