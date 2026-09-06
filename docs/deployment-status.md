@@ -22,7 +22,8 @@ R2 multipart media upload
    OR Workers AI Whisper fallback when it is absent
 -> conservative overlap duplicate suppression + evidence-based cross-chunk speaker stitching
 -> deterministic/atomic D1 speaker + transcript persistence
--> Workers AI translation by default
+-> context-aware Workers AI translation when project glossary/style is active
+   OR raw Workers AI translation by default when project context is inactive
 -> project/job terminal state
 -> Studio poll + transcript/timeline/speaker metadata hydration
 -> server-backed transcript editing, speaker naming and per-speaker ElevenLabs voice assignment
@@ -61,6 +62,14 @@ Final exported media can be shared through owner-managed, revocable links. Owner
 
 The Phase 3C acceptance gates verify the Cloudflare bindings, distinct limiter namespaces, admission ordering, no-expensive-side-effect rejection boundaries, token-hash persistence, 256-bit secret generation, non-secret owner list contract, public token route, owner/share Range parity, telemetry/billing isolation, one-time-link semantics, and compact responsive Studio sharing surface. This is repository source/configuration qualification only. Production deployment remains **manual-only**, no Phase 3C production deploy is performed by this qualification work, and production runtime remains **UNQUALIFIED** until the documented Container credential and real provider/media fixture gates pass.
 
+## Phase 4A translation context qualification
+
+Phase 4A is **source-qualified only** for project-scoped translation style presets and glossary entries. The source/CI contract covers revision-safe D1 persistence, ownership-scoped settings and glossary APIs, one immutable translation-context snapshot per logical operation, contextual Workers AI routing, persisted segment context revision, Studio glossary/style controls, and unchanged Phase 3B `translation_character` accounting.
+
+Raw Workers AI and Google Basic Translation remain context-incompatible paths and do not silently consume active project context. Contextual translation fails closed rather than silently falling back to a raw provider, and changing project translation settings does not automatically retranslate existing segments.
+
+The contextual model runtime is not proven by source CI. Phase 4A does not change the existing production blocker: the Cloudflare Container credential still requires the missing Container permission, and no separate live contextual-model/media fixture qualification has been recorded. Production runtime status remains **UNQUALIFIED**.
+
 ## Phase 4A cross-chunk speaker stitching qualification
 
 Phase 4A source/CI qualification adds bounded overlapping ASR analysis windows and a pure conservative stitching layer. The FFmpeg Container requests at most 300 seconds per ASR window with an eight-second overlap; the next normal window starts 292 seconds after the previous one. Returned offsets are the real analysis-window starts. Phase 3B metering remains authoritative and records the actual duration of every WAV sent to the ASR provider, including overlap seconds.
@@ -79,6 +88,6 @@ Studio Pro V2 source acceptance covers the real media player, direct timeline ma
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments, including a real cross-window boundary before Phase 4A stitching can be called production-qualified. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
+A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments, including a real cross-window boundary before Phase 4A stitching can be called production-qualified. For contextual translation qualification, a configured `CONTEXT_TRANSLATION_MODEL` must successfully process a real project glossary/style fixture without silent raw-provider fallback. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
 
-If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, and ElevenLabs secret values are never committed to the repository.
+If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, ElevenLabs, and contextual-model secret values are never committed to the repository.

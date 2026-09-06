@@ -13,6 +13,7 @@ const canonical: Segment = {
   sourceText: 'hello world',
   translatedText: 'xin chao',
   translationEngine: 'workers-ai',
+  translationContextRevision: null,
   translationStatus: 'completed',
   voiceStatus: 'pending',
   dubbedObjectKey: null,

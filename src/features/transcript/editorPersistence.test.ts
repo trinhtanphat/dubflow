@@ -47,10 +47,34 @@ describe('editor persistence', () => {
     const result = await retranslateEditorSegment('p1', 's1', 2, 'workers-ai', {
       async retranslateSegment(projectId, segmentId, expectedVersion, mode) {
         calls.push({ projectId, segmentId, expectedVersion, mode });
-        return { mode: 'workers-ai' as const, result: { id: 's1', text: 'Bản mới', provider: 'workers-ai' }, segment: updated };
+        return {
+          mode: 'workers-ai' as const,
+          result: { id: 's1', text: 'Bản mới', provider: 'workers-ai' },
+          segment: updated,
+          contextRevision: null,
+        };
       },
     });
     expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', expectedVersion: 2, mode: 'workers-ai' }]);
+    expect(result).toEqual({ mode: 'persisted', segment: updated });
+  });
+
+  it('lets the server derive the safe mode and accepts contextual persisted results', async () => {
+    const calls: unknown[] = [];
+    const updated = { ...segment, translatedText: 'Theo ngữ cảnh', version: 3 };
+    const result = await retranslateEditorSegment('p1', 's1', 2, undefined, {
+      async retranslateSegment(projectId, segmentId, expectedVersion, mode) {
+        calls.push({ projectId, segmentId, expectedVersion, mode });
+        return {
+          mode: 'contextual' as const,
+          result: { id: 's1', text: 'Theo ngữ cảnh', provider: 'workers-ai-contextual' },
+          segment: updated,
+          contextRevision: 7,
+        };
+      },
+    });
+
+    expect(calls).toEqual([{ projectId: 'p1', segmentId: 's1', expectedVersion: 2, mode: undefined }]);
     expect(result).toEqual({ mode: 'persisted', segment: updated });
   });
 });

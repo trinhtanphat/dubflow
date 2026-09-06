@@ -19,6 +19,7 @@ export type Segment = {
   sourceText: string;
   translatedText: string;
   translationEngine: string;
+  translationContextRevision: number | null;
   translationStatus: string;
   voiceStatus: string;
   dubbedObjectKey: string | null;
@@ -28,14 +29,15 @@ export type Segment = {
 
 type SegmentRow = {
   id: string; project_id: string; speaker_id: string | null; start_ms: number; end_ms: number;
-  source_text: string; translated_text: string; translation_engine: string; translation_status: string;
-  voice_status: string; dubbed_object_key?: string | null; version: number; split_parent_id?: string | null;
+  source_text: string; translated_text: string; translation_engine: string; translation_context_revision?: number | null;
+  translation_status: string; voice_status: string; dubbed_object_key?: string | null; version: number; split_parent_id?: string | null;
 };
 
 function fromRow(row: SegmentRow): Segment {
   return {
     id: row.id, projectId: row.project_id, speakerId: row.speaker_id, startMs: row.start_ms, endMs: row.end_ms,
     sourceText: row.source_text, translatedText: row.translated_text, translationEngine: row.translation_engine,
+    translationContextRevision: row.translation_context_revision ?? null,
     translationStatus: row.translation_status, voiceStatus: row.voice_status, dubbedObjectKey: row.dubbed_object_key ?? null,
     version: row.version, splitParentId: row.split_parent_id ?? null,
   };
@@ -63,6 +65,7 @@ export interface SegmentStore {
     expectedVersion: number,
     translatedText: string,
     engine: 'workers-ai' | 'google',
+    contextRevision?: number | null,
   ): Promise<Segment | null>;
   setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
   replaceFromAsr(projectId: string, userId: string, segments: PersistedAsrSegment[]): Promise<Segment[]>;
@@ -76,7 +79,7 @@ export class SegmentPersistenceError extends Error {
 }
 
 const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s.source_text, s.translated_text,
- s.translation_engine, s.translation_status, s.voice_status, s.dubbed_object_key, s.version, s.split_parent_id
+ s.translation_engine, s.translation_context_revision, s.translation_status, s.voice_status, s.dubbed_object_key, s.version, s.split_parent_id
  FROM segments s JOIN projects p ON p.id = s.project_id`;
 
 type AuthorizedProject = { id: string; duration_ms: number | null; status: string };
@@ -90,6 +93,17 @@ function requireExpectedVersion(expectedVersion: number): void {
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
     throw new SegmentPersistenceError('INVALID_SEGMENT_VERSION', 'expectedVersion must be a positive integer.');
   }
+}
+
+function normalizeContextRevision(contextRevision: number | null | undefined): number | null {
+  if (contextRevision === undefined || contextRevision === null) return null;
+  if (!Number.isInteger(contextRevision) || contextRevision < 1) {
+    throw new SegmentPersistenceError(
+      'INVALID_TRANSLATION_CONTEXT_REVISION',
+      'translation context revision must be a positive integer when provided.',
+    );
+  }
+  return contextRevision;
 }
 
 export class SegmentRepository implements SegmentStore {
@@ -293,8 +307,8 @@ export class SegmentRepository implements SegmentStore {
         .bind(left.endMs, left.sourceText, left.translatedText, segmentId, projectId, userId, expectedVersion),
       this.db.prepare(`INSERT INTO segments (
         id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
-        translation_engine, translation_status, voice_status, dubbed_object_key, version, split_parent_id
-      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 1, ?
+        translation_engine, translation_context_revision, translation_status, voice_status, dubbed_object_key, version, split_parent_id
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 1, ?
         WHERE EXISTS (
           SELECT 1 FROM segments s JOIN projects p ON p.id = s.project_id
           WHERE s.id = ? AND s.project_id = ? AND p.user_id = ? AND s.version = ?
@@ -308,6 +322,7 @@ export class SegmentRepository implements SegmentStore {
           right.sourceText,
           right.translatedText,
           right.translationEngine,
+          right.translationContextRevision,
           right.translationStatus,
           current.id,
           current.id,
@@ -413,19 +428,21 @@ export class SegmentRepository implements SegmentStore {
     expectedVersion: number,
     translatedText: string,
     engine: 'workers-ai' | 'google',
+    contextRevision?: number | null,
   ): Promise<Segment | null> {
     requireExpectedVersion(expectedVersion);
+    const normalizedContextRevision = normalizeContextRevision(contextRevision);
     const current = await this.get(projectId, segmentId, userId);
     if (!current) return null;
     if (current.version !== expectedVersion) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
     const result = await this.db.prepare(`UPDATE segments
-      SET translated_text = ?, translation_engine = ?, translation_status = 'completed', voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
+      SET translated_text = ?, translation_engine = ?, translation_context_revision = ?, translation_status = 'completed', voice_status = 'pending', dubbed_object_key = NULL, version = version + 1
       WHERE id = ? AND project_id = ?
       AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
       AND version = ?`)
-      .bind(translatedText, engine, segmentId, projectId, userId, expectedVersion).run();
+      .bind(translatedText, engine, normalizedContextRevision, segmentId, projectId, userId, expectedVersion).run();
     if (affectedRows(result) === 0) {
       const canonical = await this.get(projectId, segmentId, userId);
       if (!canonical) return null;
@@ -473,8 +490,8 @@ export class SegmentRepository implements SegmentStore {
       ...segments.map((segment) => this.db.prepare(
         `INSERT INTO segments (
           id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
-          translation_engine, translation_status, voice_status, dubbed_object_key, version
-        ) VALUES (?, ?, ?, ?, ?, ?, '', 'workers-ai', 'pending', 'pending', NULL, 1)`,
+          translation_engine, translation_context_revision, translation_status, voice_status, dubbed_object_key, version
+        ) VALUES (?, ?, ?, ?, ?, ?, '', 'workers-ai', NULL, 'pending', 'pending', NULL, 1)`,
       ).bind(segment.id, projectId, segment.speakerId ?? null, segment.startMs, segment.endMs, segment.sourceText)),
       this.clearExportStatement(projectId, userId),
     ];
@@ -488,6 +505,7 @@ export class SegmentRepository implements SegmentStore {
       sourceText: segment.sourceText,
       translatedText: '',
       translationEngine: 'workers-ai',
+      translationContextRevision: null,
       translationStatus: 'pending',
       voiceStatus: 'pending',
       dubbedObjectKey: null,
