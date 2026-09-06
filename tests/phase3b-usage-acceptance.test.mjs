@@ -17,10 +17,10 @@ const [usage, pipeline, exportPipeline, migration, usageRoutes, usageApi, usageP
 ]);
 
 test('Phase 3B uses canonical seconds-based usage kinds and summary fields', () => {
-  for (const kind of ['asr_audio_second', 'translation_character', 'tts_audio_second', 'render_second']) {
+  for (const kind of ['asr_audio_second', 'translation_character', 'tts_audio_second', 'stem_separation_audio_second', 'render_second']) {
     assert.match(usage, new RegExp(kind));
   }
-  for (const field of ['asrAudioSeconds', 'translationCharacters', 'ttsAudioSeconds', 'renderSeconds']) {
+  for (const field of ['asrAudioSeconds', 'translationCharacters', 'ttsAudioSeconds', 'stemSeparationAudioSeconds', 'renderSeconds']) {
     assert.match(usage, new RegExp(field));
     assert.match(usageApi, new RegExp(field));
   }
@@ -36,9 +36,13 @@ test('Phase 3B meters provider work in canonical units with retry-scoped operati
   assert.match(exportPipeline, /metadata\.durationMs\s*\/\s*1000/);
   assert.match(exportPipeline, /Number\(project\.durationMs\)\s*\/\s*1000/);
   assert.match(exportPipeline, /kind:\s*'tts_audio_second'/);
+  assert.match(exportPipeline, /kind:\s*'stem_separation_audio_second'/);
   assert.match(exportPipeline, /kind:\s*'render_second'/);
   assert.match(exportPipeline, /getByOperation\(ttsKey,\s*'started'\)/);
   assert.match(exportPipeline, /getByOperation\(ttsKey,\s*'completed'\)/);
+  assert.match(exportPipeline, /'stem-separation'/);
+  assert.match(exportPipeline, /pair\.sourceRevision/);
+  assert.match(exportPipeline, /separation\.id/);
 });
 
 test('Phase 3B usage writes are idempotent, completed-only for totals, and credits stay read-only', () => {
