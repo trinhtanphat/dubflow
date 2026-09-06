@@ -8,7 +8,7 @@ Deployment is fail-closed. `npm run deploy` verifies source, performs the Wrangl
 
 GitHub Actions is enabled for this public repository. CI installs dependencies, runs the complete source/test/build verification, performs a Wrangler dry-run, and captures the Studio reference screenshots from the exact tested SHA. Production deployment is **manual-only** through `workflow_dispatch` and requires the `CLOUDFLARE_API_TOKEN` GitHub secret. The token must include Cloudflare **Containers Write** (or equivalent Containers Edit) permission in addition to the permissions needed for Workers and the bound resources.
 
-A previous live Container deployment reached the Worker deployment path but returned `Unauthorized` when Wrangler moved into Container image deployment. Until a later manual deploy proves that credential boundary has been corrected, production runtime status remains **UNQUALIFIED**. Do not bypass the credential check or repeatedly auto-deploy `main` after the same deterministic authentication failure.
+A previous live Container deployment reached the Worker deployment path but returned `Unauthorized` when Wrangler moved into Container image deployment. Until a later separately authorized manual deploy proves that credential boundary has been corrected, production runtime status remains **UNQUALIFIED**. Do not bypass the credential check or repeatedly auto-deploy `main` after the same deterministic authentication failure.
 
 ## Reconciled live dubbing source path
 
@@ -64,12 +64,14 @@ Owner downloads can select a concrete completed export variant. New multi-langua
 
 A GREEN Phase 4C source/CI run and Wrangler dry-run do not prove real multi-language production behavior. Production runtime remains **UNQUALIFIED** until a real authorized provider/media fixture demonstrates at least two distinct targets end-to-end through translation, target-language ElevenLabs TTS, target-scoped FFmpeg rendering, persisted export variants, owner retrieval and concrete-variant sharing. A successful deployment by itself is not that fixture.
 
+Phase 4C does **not** trigger production deployment. This implementation phase stops at feature exact-head CI, PR/merge verification and post-merge CI. Any later production deployment is a separate, manually authorized qualification action and remains fail-closed on the Cloudflare Containers credential boundary.
+
 ## Studio reference qualification
 
 Studio CI continues to capture the canonical desktop/reference viewports from the exact tested SHA. Reference screenshots qualify presentation, not real provider/media runtime behavior. Empty-media states remain truthful rather than fabricating uploaded footage.
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment remains manual-only. After a fully green merge and post-merge CI, one manual production deploy may be attempted. If the Cloudflare token still fails the Containers Write boundary, deployment is BLOCKED and runtime remains **UNQUALIFIED** without repeated retries.
+A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment remains manual-only. This Phase 4C implementation stops after a fully green merge and post-merge CI; it does not dispatch the production deployment workflow.
 
-If deployment succeeds, `/api/ready` must pass on the deployed revision. Final runtime qualification still requires real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
+A separately authorized future deployment must still satisfy the Containers credential boundary and `/api/ready`. Final runtime qualification additionally requires real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
