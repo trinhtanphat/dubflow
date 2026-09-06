@@ -13,31 +13,93 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
-      GITHUB_ACCOUNT_ID: '89531707'
-      GITHUB_ACCOUNT_NAME: trinhtanphat
-      GITHUB_REPO_ID: '1357840238'
-      GITHUB_REPO_NAME: dubflow
+      PRODUCTION_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      STALE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      PRODUCTION_WORKER_TAG: cec78627dd174827ab210bc09108fb1c
+      STALE_WORKER_TAG: ed49a7dcf94c407aafa2bedf4311331f
+      STALE_TRIGGER_UUID: 6aba718f-e7bb-4726-ae2d-c48d617794aa
+      REPO_CONNECTION_UUID: b5d4fd7a-f934-43dd-a4bd-939d98841320
     steps:
-      - name: Create or refresh GitHub repository connection only
+      - name: Activate correct production trigger and retire stale trigger
         shell: bash
         run: |
           set -euo pipefail
           api='https://api.cloudflare.com/client/v4'
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          payload="$(jq -nc \
-            --arg provider_type github \
-            --arg provider_account_id "$GITHUB_ACCOUNT_ID" \
-            --arg provider_account_name "$GITHUB_ACCOUNT_NAME" \
-            --arg repo_id "$GITHUB_REPO_ID" \
-            --arg repo_name "$GITHUB_REPO_NAME" \
-            '{provider_type:$provider_type,provider_account_id:$provider_account_id,provider_account_name:$provider_account_name,repo_id:$repo_id,repo_name:$repo_name}')"
-          body="$(mktemp)"
-          status="$(curl --silent --show-error --location \
-            --output "$body" --write-out '%{http_code}' \
-            "$api/accounts/$ACCOUNT_ID/builds/repos/connections" \
-            -X PUT -H "$auth" -H 'Content-Type: application/json' --data "$payload" || printf '000')"
-          echo "repo_connection_http=$status"
-          jq -c '{success,errors,messages,result:{repo_connection_uuid:.result.repo_connection_uuid,repo_id:.result.repo_id,repo_name:.result.repo_name,provider_type:.result.provider_type,provider_account_id:.result.provider_account_id,provider_account_name:.result.provider_account_name}}' "$body" || cat "$body"
-          jq -e '.success == true and (.result.repo_connection_uuid | type == "string")' "$body" >/dev/null
-          echo 'Repository connection bootstrap completed.'
+
+          echo '=== verify user-scoped API token ==='
+          verify="$(curl -fsS "$api/user/tokens/verify" -H "$auth")"
+          printf '%s' "$verify" | jq -c '{success,errors,result:{id:.result.id,status:.result.status}}'
+          printf '%s' "$verify" | jq -e '.success == true and .result.status == "active" and (.result.id | type == "string")' >/dev/null
+          token_id="$(printf '%s' "$verify" | jq -r '.result.id')"
+
+          echo '=== reuse or register this token as the production Builds token ==='
+          tokens="$(curl -fsS "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/tokens?per_page=200" -H "$auth")"
+          printf '%s' "$tokens" | jq -e '.success == true' >/dev/null
+          build_token_uuid="$(printf '%s' "$tokens" | jq -r --arg id "$token_id" '.result[]? | select(.cloudflare_token_id == $id) | .build_token_uuid' | head -n1)"
+          if [[ -z "$build_token_uuid" || "$build_token_uuid" == 'null' ]]; then
+            create_token_payload="$(jq -nc \
+              --arg name 'dubflow production build token' \
+              --arg secret "$CLOUDFLARE_API_TOKEN" \
+              --arg token_id "$token_id" \
+              '{build_token_name:$name,build_token_secret:$secret,cloudflare_token_id:$token_id}')"
+            created="$(curl -fsS "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/tokens" \
+              -X POST -H "$auth" -H 'Content-Type: application/json' --data "$create_token_payload")"
+            printf '%s' "$created" | jq -c '{success,errors,result:{build_token_uuid:.result.build_token_uuid,build_token_name:.result.build_token_name,owner_type:.result.owner_type}}'
+            printf '%s' "$created" | jq -e '.success == true and (.result.build_token_uuid | type == "string")' >/dev/null
+            build_token_uuid="$(printf '%s' "$created" | jq -r '.result.build_token_uuid')"
+          else
+            echo "reusing_build_token_uuid=$build_token_uuid"
+          fi
+
+          echo '=== ensure production Worker has exactly one main trigger ==='
+          triggers="$(curl -fsS "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_WORKER_TAG/triggers" -H "$auth")"
+          printf '%s' "$triggers" | jq -e '.success == true' >/dev/null
+          trigger_uuid="$(printf '%s' "$triggers" | jq -r '.result[]? | select((.branch_includes // []) | index("main")) | .trigger_uuid' | head -n1)"
+          if [[ -z "$trigger_uuid" || "$trigger_uuid" == 'null' ]]; then
+            trigger_payload="$(jq -nc \
+              --arg script "$PRODUCTION_WORKER_TAG" \
+              --arg repo "$REPO_CONNECTION_UUID" \
+              --arg build_token "$build_token_uuid" \
+              '{external_script_id:$script,repo_connection_uuid:$repo,build_token_uuid:$build_token,trigger_name:"dubflow production main",build_command:"npm run build",deploy_command:"node scripts/cloudflare-workers-build-deploy.mjs",root_directory:"/",branch_includes:["main"],branch_excludes:[],path_includes:["*"],path_excludes:[]}')"
+            created_trigger="$(curl -fsS "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/triggers" \
+              -X POST -H "$auth" -H 'Content-Type: application/json' --data "$trigger_payload")"
+            printf '%s' "$created_trigger" | jq -c '{success,errors,result:{trigger_uuid:.result.trigger_uuid,trigger_name:.result.trigger_name,external_script_id:.result.external_script_id,build_command:.result.build_command,deploy_command:.result.deploy_command,branch_includes:.result.branch_includes,repo_connection_uuid:.result.repo_connection.repo_connection_uuid,build_token_uuid:.result.build_token_uuid}}'
+            printf '%s' "$created_trigger" | jq -e '.success == true and (.result.trigger_uuid | type == "string")' >/dev/null
+            trigger_uuid="$(printf '%s' "$created_trigger" | jq -r '.result.trigger_uuid')"
+          else
+            echo "existing_production_trigger_uuid=$trigger_uuid"
+          fi
+
+          qualified="$(curl -fsS "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_WORKER_TAG/triggers" -H "$auth")"
+          printf '%s' "$qualified" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,build_command,deploy_command,branch_includes,branch_excludes,build_token_uuid,repo_connection_uuid:.repo_connection.repo_connection_uuid}]}'
+          printf '%s' "$qualified" | jq -e --arg uuid "$trigger_uuid" --arg repo "$REPO_CONNECTION_UUID" --arg token "$build_token_uuid" '
+            .success == true and
+            ([.result[]? | select(
+              .trigger_uuid == $uuid and
+              .repo_connection.repo_connection_uuid == $repo and
+              .build_token_uuid == $token and
+              .build_command == "npm run build" and
+              .deploy_command == "node scripts/cloudflare-workers-build-deploy.mjs" and
+              ((.branch_includes // []) | index("main"))
+            )] | length) == 1
+          ' >/dev/null
+
+          echo '=== retire the stale-account main trigger only after the production trigger qualifies ==='
+          stale_before="$(curl -fsS "$api/accounts/$STALE_ACCOUNT_ID/builds/workers/$STALE_WORKER_TAG/triggers" -H "$auth")"
+          printf '%s' "$stale_before" | jq -e '.success == true' >/dev/null
+          if printf '%s' "$stale_before" | jq -e --arg uuid "$STALE_TRIGGER_UUID" '.result[]? | select(.trigger_uuid == $uuid)' >/dev/null; then
+            deleted="$(curl -fsS "$api/accounts/$STALE_ACCOUNT_ID/builds/triggers/$STALE_TRIGGER_UUID" -X DELETE -H "$auth")"
+            printf '%s' "$deleted" | jq -c '{success,errors,messages}'
+            printf '%s' "$deleted" | jq -e '.success == true' >/dev/null
+          else
+            echo 'stale trigger already absent'
+          fi
+
+          stale_after="$(curl -fsS "$api/accounts/$STALE_ACCOUNT_ID/builds/workers/$STALE_WORKER_TAG/triggers" -H "$auth")"
+          printf '%s' "$stale_after" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes,branch_excludes}]}'
+          printf '%s' "$stale_after" | jq -e '.success == true and ([.result[]? | select((.branch_includes // []) | index("main"))] | length) == 0' >/dev/null
+
+          echo "PRODUCTION_TRIGGER_QUALIFIED=$trigger_uuid"
+          echo 'STALE_MAIN_TRIGGER_RETIRED'
+          echo 'No build was triggered by this bootstrap workflow.'
