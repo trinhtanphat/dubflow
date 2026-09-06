@@ -7,7 +7,7 @@ describe('ElevenLabs voice provider', () => {
     expect(provider.capabilities()).toEqual({
       provider: 'elevenlabs',
       configured: true,
-      languages: ['vi'],
+      languages: ['vi', 'en', 'ja', 'ko', 'zh'],
       cloning: true,
       preview: true,
       cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
