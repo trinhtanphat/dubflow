@@ -88,6 +88,8 @@ function translationEnv(db: TranslationDb): Env {
   return {
     DB: db,
     AI: ai,
+    ANALYTICS: { writeDataPoint() {} },
+    RATE_LIMIT_TRANSLATE: { async limit() { return { success: true }; } },
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-key',
   } as unknown as Env;
 }
