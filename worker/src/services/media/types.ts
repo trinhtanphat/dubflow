@@ -1,4 +1,5 @@
 import type { TargetLanguage } from '../../domain/language';
+import type { StemSeparationResult } from '../separation/types';
 
 export type AudioChunk = {
   objectKey: string;
@@ -23,6 +24,11 @@ export type RenderExportOptions = {
 export interface MediaProcessor {
   probe(objectKey: string): Promise<{ durationMs: number }>;
   extractAudioChunks(projectId: string, objectKey: string): Promise<AudioChunk[]>;
+  separateStems(
+    projectId: string,
+    sourceObjectKey: string,
+    sourceRevision: string,
+  ): Promise<StemSeparationResult>;
   renderExport(
     projectId: string,
     objectKey: string,
