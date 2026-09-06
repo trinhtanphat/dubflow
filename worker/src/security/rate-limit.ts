@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { errorBody } from '../http/json';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 
-export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone';
+export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone' | 'batch-export';
 
 const bindingName = {
   process: 'RATE_LIMIT_PROCESS',
@@ -12,6 +12,7 @@ const bindingName = {
   voice: 'RATE_LIMIT_VOICE',
   upload: 'RATE_LIMIT_UPLOAD',
   'voice-clone': 'RATE_LIMIT_VOICE_CLONE',
+  'batch-export': 'RATE_LIMIT_BATCH_EXPORT',
 } as const satisfies Record<RateLimitOperation, keyof Env>;
 
 export async function checkRateLimit(
