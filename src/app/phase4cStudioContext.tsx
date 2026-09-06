@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { DubbedAudioMode, ExportCapabilitiesDto } from '../features/export/batchExportApi';
 import type { Segment } from '../features/timeline/types';
 import type {
   TargetLanguage,
@@ -12,6 +13,9 @@ export type Phase4CStudioContextValue = {
   targetSegments: TranslationVariantDto[];
   targetDrafts: Record<string, string>;
   targetConflict: string;
+  audioMode: DubbedAudioMode;
+  exportCapabilities: ExportCapabilitiesDto | null;
+  setAudioMode: (audioMode: DubbedAudioMode) => void;
   editTargetTranslation: (segmentId: string, text: string) => void;
   flushTargetTranslation: (segmentId: string) => Promise<void>;
 };

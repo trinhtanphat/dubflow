@@ -8,10 +8,6 @@
   "routes": [
     { "pattern": "yupvox.qs3d.site", "custom_domain": true }
   ],
-  "vars": {
-    "CLOUDFLARE_ACCOUNT_ID": "50afb4fd3c4c7a1f3e1bdb7f22d4af7f",
-    "PUBLIC_ORIGIN": "https://yupvox.qs3d.site"
-  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -20,7 +16,6 @@
   },
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA" }],
-  "stream": { "binding": "STREAM" },
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "dubflow_events" }],
   "ratelimits": [
     { "name": "RATE_LIMIT_PROCESS", "namespace_id": "31001", "simple": { "limit": 4, "period": 60 } },

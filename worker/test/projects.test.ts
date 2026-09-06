@@ -16,6 +16,7 @@ class MemoryProjectStore implements ProjectStore {
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
       targetLanguagesRevision: 1,
+      sourceGeneration: 1,
       status: 'draft',
     };
     this.projects.unshift(project);

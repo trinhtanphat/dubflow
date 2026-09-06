@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
+import type { DubbedAudioMode } from '../src/domain/audio-mode';
 import type { ExportOutput, TargetLanguage } from '../src/domain/language';
+import type { DialogueSeparationCapabilities } from '../src/services/separation/types';
 import type { VoiceCapabilities } from '../src/services/voice/types';
 
 const project = {
   id: 'project-1', userId: 'dev-user', title: 'Demo', sourceLanguage: 'en', targetLanguage: 'vi',
   targetLanguagesRevision: 3, status: 'needs_review', sourceObjectKey: 'projects/project-1/source.mp4',
-  exportObjectKey: null,
+  sourceGeneration: 1, exportObjectKey: null,
 };
 
 const sourceSegments = [
@@ -25,10 +27,29 @@ function capabilities(languages: string[] | 'unknown'): VoiceCapabilities {
   };
 }
 
-function harness(options: { voiceLanguages?: string[] | 'unknown'; failWorkflowTarget?: TargetLanguage } = {}) {
+const unavailableSeparation: DialogueSeparationCapabilities = {
+  configured: false,
+  provider: null,
+  backgroundStem: false,
+  dialogueStem: false,
+  qualification: 'unavailable',
+};
+
+function harness(options: {
+  voiceLanguages?: string[] | 'unknown';
+  failWorkflowTarget?: TargetLanguage;
+  separation?: DialogueSeparationCapabilities;
+} = {}) {
   const calls = {
     rateLimits: 0,
-    exportCreates: [] as Array<{ target: TargetLanguage; output: ExportOutput; batchId: string | null; id: string }>,
+    separationCapabilities: 0,
+    exportCreates: [] as Array<{
+      target: TargetLanguage;
+      output: ExportOutput;
+      batchId: string | null;
+      audioMode: DubbedAudioMode;
+      id: string;
+    }>,
     exportFailures: [] as Array<{ id: string; code: string }>,
     workflow: [] as Array<{ params?: any }>,
     jobs: [] as string[],
@@ -78,17 +99,34 @@ function harness(options: { voiceLanguages?: string[] | 'unknown'; failWorkflowT
     },
   };
   const exportsStore = {
-    async create(_projectId: string, _userId: string, target: TargetLanguage, output: ExportOutput, batchId: string | null = null) {
+    async create(
+      _projectId: string,
+      _userId: string,
+      target: TargetLanguage,
+      output: ExportOutput,
+      batchId: string | null = null,
+      audioMode: DubbedAudioMode = 'dubbed_only',
+    ) {
       const id = `export-${nextExport++}`;
-      calls.exportCreates.push({ target, output, batchId, id });
+      const effectiveAudioMode: DubbedAudioMode = output === 'subtitles' ? 'dubbed_only' : audioMode;
+      calls.exportCreates.push({ target, output, batchId, audioMode: effectiveAudioMode, id });
       return {
-        id, projectId: 'project-1', targetLanguage: target, output, batchId, status: 'pending',
-        exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
+        id, projectId: 'project-1', targetLanguage: target, output, batchId, audioMode: effectiveAudioMode,
+        status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
       };
     },
     async latest(_projectId: string, _userId: string, target: TargetLanguage, output: ExportOutput) {
       return {
         id: 'export-latest', projectId: 'project-1', targetLanguage: target, output, batchId: null,
+        audioMode: 'dubbed_only' as const,
+        status: 'completed', exportObjectKey: `exports/${target}.mp4`, subtitleObjectKey: `exports/${target}.srt`,
+        errorCode: null, errorMessage: null,
+      };
+    },
+    async latestCompleted(_projectId: string, _userId: string, target: TargetLanguage, output: ExportOutput) {
+      return {
+        id: 'export-latest', projectId: 'project-1', targetLanguage: target, output, batchId: null,
+        audioMode: 'dubbed_only' as const,
         status: 'completed', exportObjectKey: `exports/${target}.mp4`, subtitleObjectKey: `exports/${target}.srt`,
         errorCode: null, errorMessage: null,
       };
@@ -137,6 +175,15 @@ function harness(options: { voiceLanguages?: string[] | 'unknown'; failWorkflowT
       makeExports: () => exportsStore,
       makeJobs: () => jobs,
       getVoiceCapabilities: () => capabilities(options.voiceLanguages ?? ['vi', 'ja', 'ko']),
+      makeSeparation: () => ({
+        async capabilities() {
+          calls.separationCapabilities += 1;
+          return options.separation ?? unavailableSeparation;
+        },
+        async separate() {
+          throw new Error('separation should not run in route admission tests');
+        },
+      }),
     },
   };
 }
@@ -168,7 +215,9 @@ describe('Phase 4C per-language export routes', () => {
 
     expect(response.status).toBe(202);
     expect(h.calls.rateLimits).toBe(1);
-    expect(h.calls.exportCreates).toEqual([{ target: 'ja', output: 'dubbed', batchId: null, id: 'export-1' }]);
+    expect(h.calls.exportCreates).toEqual([{
+      target: 'ja', output: 'dubbed', batchId: null, audioMode: 'dubbed_only', id: 'export-1',
+    }]);
     expect(h.calls.workflow[0]?.params).toMatchObject({
       projectId: 'project-1', userId: 'dev-user', jobId: 'job-1', exportId: 'export-1',
       targetLanguage: 'ja', output: 'dubbed',
@@ -235,7 +284,152 @@ describe('Phase 4C per-language export routes', () => {
     const response = await request(routes, h.env, '/project-1/export', 'POST');
 
     expect(response.status).toBe(202);
-    expect(h.calls.exportCreates).toEqual([{ target: 'vi', output: 'dubbed', batchId: null, id: 'export-1' }]);
+    expect(h.calls.exportCreates).toEqual([{
+      target: 'vi', output: 'dubbed', batchId: null, audioMode: 'dubbed_only', id: 'export-1',
+    }]);
     expect(h.calls.workflow[0]?.params).toMatchObject({ exportId: 'export-1', targetLanguage: 'vi', output: 'dubbed' });
+  });
+});
+
+describe('Phase 4D export audio treatment admission', () => {
+  it('defaults omitted dubbed mode and persists/forwards dubbed_only', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', { output: 'dubbed' });
+
+    expect(response.status).toBe(202);
+    expect(h.calls.exportCreates[0]?.audioMode).toBe('dubbed_only');
+    expect(h.calls.workflow[0]?.params).toMatchObject({ audioMode: 'dubbed_only' });
+    expect(h.calls.separationCapabilities).toBe(0);
+  });
+
+  it('propagates one duck_original mode across a dubbed batch without touching separation', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/batch', 'POST', {
+      targetLanguages: ['vi', 'ja'],
+      output: 'dubbed',
+      audioMode: 'duck_original',
+    });
+
+    expect(response.status).toBe(202);
+    expect(h.calls.exportCreates.map((row) => row.audioMode)).toEqual(['duck_original', 'duck_original']);
+    expect(h.calls.workflow.map((row) => row.params?.audioMode)).toEqual(['duck_original', 'duck_original']);
+    expect(h.calls.separationCapabilities).toBe(0);
+  });
+
+  it('rejects invalid audio mode before rate limits or export side effects', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', {
+      output: 'dubbed',
+      audioMode: 'bad',
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'AUDIO_MODE_INVALID' });
+    expect(h.calls.rateLimits).toBe(0);
+    expect(h.calls.exportCreates).toHaveLength(0);
+    expect(h.calls.jobs).toHaveLength(0);
+    expect(h.calls.workflow).toHaveLength(0);
+  });
+
+  it('rejects non-default subtitle treatment before rate limits or export side effects', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', {
+      output: 'subtitles',
+      audioMode: 'duck_original',
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'AUDIO_MODE_INVALID' });
+    expect(h.calls.rateLimits).toBe(0);
+    expect(h.calls.exportCreates).toHaveLength(0);
+    expect(h.calls.jobs).toHaveLength(0);
+    expect(h.calls.workflow).toHaveLength(0);
+  });
+
+  it('fails closed when separated background capability is unavailable before billable/admission side effects', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', {
+      output: 'dubbed',
+      audioMode: 'separated_background',
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: 'DIALOGUE_SEPARATION_UNAVAILABLE' });
+    expect(h.calls.separationCapabilities).toBe(1);
+    expect(h.calls.rateLimits).toBe(0);
+    expect(h.calls.exportCreates).toHaveLength(0);
+    expect(h.calls.jobs).toHaveLength(0);
+    expect(h.calls.workflow).toHaveLength(0);
+  });
+
+  it('fails closed for an unqualified separation provider before side effects', async () => {
+    const h = harness({
+      separation: {
+        configured: true,
+        provider: 'future-provider',
+        backgroundStem: true,
+        dialogueStem: true,
+        qualification: 'unqualified',
+      },
+    });
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', {
+      output: 'dubbed',
+      audioMode: 'separated_background',
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: 'DIALOGUE_SEPARATION_UNQUALIFIED' });
+    expect(h.calls.rateLimits).toBe(0);
+    expect(h.calls.exportCreates).toHaveLength(0);
+    expect(h.calls.jobs).toHaveLength(0);
+    expect(h.calls.workflow).toHaveLength(0);
+  });
+
+  it('admits a qualified separated background request and persists/forwards the mode', async () => {
+    const h = harness({
+      separation: {
+        configured: true,
+        provider: 'qualified-provider',
+        backgroundStem: true,
+        dialogueStem: false,
+        qualification: 'qualified',
+      },
+    });
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/exports/ja', 'POST', {
+      output: 'dubbed',
+      audioMode: 'separated_background',
+    });
+
+    expect(response.status).toBe(202);
+    expect(h.calls.separationCapabilities).toBe(1);
+    expect(h.calls.exportCreates[0]?.audioMode).toBe('separated_background');
+    expect(h.calls.workflow[0]?.params).toMatchObject({ audioMode: 'separated_background' });
+  });
+
+  it('exposes owner-scoped audio treatment capabilities and hides provider state for missing projects', async () => {
+    const h = harness();
+    const routes = await routesFor(h);
+    const response = await request(routes, h.env, '/project-1/export-capabilities');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      duckOriginal: true,
+      separation: unavailableSeparation,
+    });
+    expect(h.calls.separationCapabilities).toBe(1);
+
+    const missing = harness();
+    const missingRoutes = await routesFor(missing);
+    const missingResponse = await request(missingRoutes, missing.env, '/missing/export-capabilities');
+    expect(missingResponse.status).toBe(404);
+    await expect(missingResponse.json()).resolves.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
+    expect(missing.calls.separationCapabilities).toBe(0);
   });
 });

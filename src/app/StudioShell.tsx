@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
+  fetchExportCapabilities,
   startBatchExport,
   startLanguageExport,
+  type DubbedAudioMode,
+  type ExportCapabilitiesDto,
   type ExportLaunchDto,
   type ExportOutput,
 } from '../features/export/batchExportApi';
@@ -69,6 +72,14 @@ function replaceVariant(
   return rows.map((row) => row.segmentId === segmentId ? { ...row, translation } : row);
 }
 
+function withRequestedAudioMode(
+  result: ExportLaunchDto,
+  output: ExportOutput,
+  audioMode: DubbedAudioMode,
+): ExportLaunchDto {
+  return output === 'dubbed' ? { ...result, audioMode } : result;
+}
+
 export function StudioShell(props: Props) {
   const projectId = props.state.project.id;
   const isCloudProject = projectId !== 'demo';
@@ -83,7 +94,9 @@ export function StudioShell(props: Props) {
   const [savingLanguages, setSavingLanguages] = useState(false);
   const [processingLanguage, setProcessingLanguage] = useState<TargetLanguage | null>(null);
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null);
+  const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilitiesDto | null>(null);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
+  const [audioMode, setAudioMode] = useState<DubbedAudioMode>('dubbed_only');
   const [exportBusy, setExportBusy] = useState(false);
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportError, setExportError] = useState('');
@@ -131,6 +144,17 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject]);
+
+  useEffect(() => {
+    if (!isCloudProject) return;
+    let active = true;
+    fetchExportCapabilities(projectId).then((caps) => {
+      if (active) setExportCapabilities(caps);
+    }).catch(() => {
+      if (active) setExportCapabilities(null);
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
@@ -188,6 +212,9 @@ export function StudioShell(props: Props) {
     targetSegments,
     targetDrafts: currentDrafts,
     targetConflict,
+    audioMode,
+    exportCapabilities,
+    setAudioMode,
     editTargetTranslation,
     flushTargetTranslation,
   };
@@ -254,9 +281,11 @@ export function StudioShell(props: Props) {
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
+    const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     try {
-      const result = await startLanguageExport(projectId, exportTarget, exportOutput);
-      setExportResults((current) => [...current.filter((item) => item.targetLanguage !== result.targetLanguage), result]);
+      const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode);
+      const tagged = withRequestedAudioMode(result, exportOutput, requestedMode);
+      setExportResults((current) => [...current.filter((item) => item.targetLanguage !== tagged.targetLanguage), tagged]);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu export ngôn ngữ hiện tại.'));
     } finally {
@@ -267,9 +296,10 @@ export function StudioShell(props: Props) {
   const exportBatch = async () => {
     setExportBusy(true);
     setExportError('');
+    const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     try {
-      const result = await startBatchExport(projectId, selectedLanguages, exportOutput);
-      setExportResults(result.exports);
+      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode);
+      setExportResults(result.exports.map((item) => withRequestedAudioMode(item, exportOutput, requestedMode)));
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu batch export.'));
     } finally {
@@ -280,9 +310,13 @@ export function StudioShell(props: Props) {
   const retryFailed = async (language: TargetLanguage) => {
     setExportBusy(true);
     setExportError('');
+    const prior = exportResults.find((item) => item.targetLanguage === language);
+    const requestedMode = prior?.output === 'dubbed' ? (prior.audioMode ?? audioMode) : 'dubbed_only';
+    const requestedOutput = prior?.output ?? exportOutput;
     try {
-      const result = await startLanguageExport(projectId, language, exportOutput);
-      setExportResults((current) => current.map((item) => item.targetLanguage === language ? result : item));
+      const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode);
+      const tagged = withRequestedAudioMode(result, requestedOutput, requestedMode);
+      setExportResults((current) => current.map((item) => item.targetLanguage === language ? tagged : item));
     } catch (error) {
       setExportError(message(error, 'Không thể thử lại export.'));
     } finally {
@@ -318,11 +352,14 @@ export function StudioShell(props: Props) {
                 enabledLanguages={config.languages.map((entry) => entry.targetLanguage)}
                 selectedLanguages={selectedLanguages}
                 output={exportOutput}
+                audioMode={audioMode}
+                exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
                 busy={exportBusy}
                 results={exportResults}
                 error={exportError}
                 onOutputChange={setExportOutput}
+                onAudioModeChange={setAudioMode}
                 onToggleLanguage={toggleSelected}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}

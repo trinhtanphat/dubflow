@@ -17,6 +17,7 @@ export type Project = {
   sourceLanguage: CreateProjectInput['sourceLanguage'];
   targetLanguage: 'vi';
   targetLanguagesRevision: number;
+  sourceGeneration: number;
   status: ProjectStatus;
   sourceObjectKey?: string | null;
   exportObjectKey?: string | null;
@@ -59,6 +60,7 @@ type ProjectRow = {
   source_language: CreateProjectInput['sourceLanguage'];
   target_language: 'vi';
   target_languages_revision: number;
+  source_generation?: number;
   status: ProjectStatus;
   source_object_key?: string | null;
   export_object_key?: string | null;
@@ -78,6 +80,7 @@ function fromRow(row: ProjectRow): Project {
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
     targetLanguagesRevision: Number(row.target_languages_revision ?? 1),
+    sourceGeneration: Number(row.source_generation ?? 1),
     status: row.status,
     sourceObjectKey: row.source_object_key,
     exportObjectKey: row.export_object_key ?? null,
@@ -88,7 +91,7 @@ function fromRow(row: ProjectRow): Project {
   };
 }
 
-const CURRENT_PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
+const CURRENT_PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, source_generation, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
 
 export class ProjectRepository implements ProjectStore {
   private projectColumnsPromise?: Promise<Set<string>>;
@@ -112,11 +115,14 @@ export class ProjectRepository implements ProjectStore {
     const targetLanguagesRevision = columns.has('target_languages_revision')
       ? 'target_languages_revision'
       : '1 AS target_languages_revision';
+    const sourceGeneration = columns.has('source_generation')
+      ? 'source_generation'
+      : '1 AS source_generation';
     const exportObjectKey = columns.has('export_object_key')
       ? 'export_object_key'
       : 'NULL AS export_object_key';
 
-    return `id, user_id, title, source_language, target_language, ${targetLanguagesRevision}, status, source_object_key, ${exportObjectKey}, duration_ms, size_bytes, created_at, updated_at`;
+    return `id, user_id, title, source_language, target_language, ${targetLanguagesRevision}, ${sourceGeneration}, status, source_object_key, ${exportObjectKey}, duration_ms, size_bytes, created_at, updated_at`;
   }
 
   private async ensureDevelopmentUser(userId: string) {
@@ -140,6 +146,7 @@ export class ProjectRepository implements ProjectStore {
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
       targetLanguagesRevision: 1,
+      sourceGeneration: 1,
       status: 'draft',
     };
   }
@@ -163,9 +170,13 @@ export class ProjectRepository implements ProjectStore {
   async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
     await this.db.prepare(
       `UPDATE projects
-       SET source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
+       SET source_generation = CASE
+             WHEN source_object_key IS NULL OR source_object_key = ? THEN source_generation
+             ELSE source_generation + 1
+           END,
+           source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
-    ).bind(objectKey, sizeBytes, id, userId).run();
+    ).bind(objectKey, objectKey, sizeBytes, id, userId).run();
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {

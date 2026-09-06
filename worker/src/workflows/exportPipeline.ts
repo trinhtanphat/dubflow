@@ -1,13 +1,20 @@
+import type { AudioStemRepository } from '../db/audio-stems';
 import type { ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
 import type { UsageStore } from '../db/usage';
+import { parseDubbedAudioMode, type DubbedAudioMode } from '../domain/audio-mode';
 import type { ExportOutput, TargetLanguage } from '../domain/language';
 import { isTargetLanguage } from '../domain/language';
 import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
-import type { VoiceGenerateInput } from '../services/voice/types';
 import type { RenderExportOptions } from '../services/media/types';
+import {
+  DialogueSeparationError,
+  type DialogueSeparationCapabilities,
+  type DialogueSeparationProvider,
+} from '../services/separation/types';
 import { serializeSrt } from '../services/subtitles/srt';
+import type { VoiceGenerateInput } from '../services/voice/types';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type ExportWorkflowParams = {
@@ -17,6 +24,7 @@ export type ExportWorkflowParams = {
   exportId: string;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  audioMode?: DubbedAudioMode;
   requestId?: string;
 };
 
@@ -44,6 +52,7 @@ type ExportProject = {
   id: string;
   sourceObjectKey?: string | null;
   durationMs?: number | null;
+  sourceGeneration?: number | null;
 };
 
 type ExportSegment = {
@@ -93,6 +102,7 @@ type ExportJobs = {
 } & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 
 type ExportUsage = Pick<UsageStore, 'record' | 'getByOperation'>;
+type ExportStems = Pick<AudioStemRepository, 'latestCompleted' | 'begin' | 'complete' | 'fail'>;
 
 export type ExportPipelineDeps = {
   projects: {
@@ -127,6 +137,8 @@ export type ExportPipelineDeps = {
   speakers?: {
     list(projectId: string, userId: string): Promise<ExportSpeaker[]>;
   };
+  stems?: ExportStems;
+  separation?: DialogueSeparationProvider;
   bucket: {
     put?(key: string, value: ArrayBuffer): Promise<unknown>;
   };
@@ -155,6 +167,7 @@ type NormalizedExportParams = {
   exportId: string | null;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  audioMode: DubbedAudioMode;
 };
 
 function errorMessage(error: unknown): string {
@@ -163,14 +176,27 @@ function errorMessage(error: unknown): string {
 
 function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParams {
   const candidate = params as Partial<ExportWorkflowParams> & LegacyExportWorkflowParams;
-  const modernFieldPresent = candidate.exportId !== undefined || candidate.targetLanguage !== undefined || candidate.output !== undefined;
+  const modernFieldPresent = candidate.exportId !== undefined
+    || candidate.targetLanguage !== undefined
+    || candidate.output !== undefined
+    || candidate.audioMode !== undefined;
   if (!modernFieldPresent) {
-    return { ...params, modern: false, exportId: null, targetLanguage: 'vi', output: 'dubbed' };
+    return {
+      ...params,
+      modern: false,
+      exportId: null,
+      targetLanguage: 'vi',
+      output: 'dubbed',
+      audioMode: 'dubbed_only',
+    };
   }
+  const audioMode = parseDubbedAudioMode(candidate.audioMode);
   if (
-    typeof candidate.exportId !== 'string' || !candidate.exportId.trim() ||
-    !isTargetLanguage(candidate.targetLanguage) ||
-    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles')
+    typeof candidate.exportId !== 'string' || !candidate.exportId.trim()
+    || !isTargetLanguage(candidate.targetLanguage)
+    || (candidate.output !== 'dubbed' && candidate.output !== 'subtitles')
+    || !audioMode
+    || (candidate.output === 'subtitles' && audioMode !== 'dubbed_only')
   ) {
     throw new Error('Export workflow parameters are invalid.');
   }
@@ -183,6 +209,7 @@ function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParam
     exportId: candidate.exportId,
     targetLanguage: candidate.targetLanguage,
     output: candidate.output,
+    audioMode,
   };
 }
 
@@ -196,6 +223,29 @@ function targetAudioObjectKey(projectId: string, targetLanguage: TargetLanguage,
 
 function operationKey(jobId: string, retryCount: number, stage: string, item: string, provider: string): string {
   return `job:${jobId}:retry:${retryCount}:${stage}:${item}:${provider}`;
+}
+
+function separationOperationKey(projectId: string, sourceGeneration: number, provider: string): string {
+  return `project:${projectId}:source:${sourceGeneration}:dialogue-separation:${provider}`;
+}
+
+function separationCapabilityError(capabilities: DialogueSeparationCapabilities): DialogueSeparationError | null {
+  if (capabilities.qualification === 'unqualified') {
+    return new DialogueSeparationError(
+      'DIALOGUE_SEPARATION_UNQUALIFIED',
+      'Dialogue separation capability has not been qualified.',
+    );
+  }
+  if (
+    capabilities.qualification !== 'qualified'
+    || capabilities.configured !== true
+    || capabilities.backgroundStem !== true
+    || typeof capabilities.provider !== 'string'
+    || capabilities.provider.trim() === ''
+  ) {
+    return new DialogueSeparationError('DIALOGUE_SEPARATION_UNAVAILABLE', 'Dialogue separation is unavailable.');
+  }
+  return null;
 }
 
 function speakerVoiceId(segment: ExportWorkItem, speakers: Map<string, ExportSpeaker>): string | undefined {
@@ -269,6 +319,138 @@ function legacyWorkItems(segments: ExportSegment[]): ExportWorkItem[] {
   }));
 }
 
+async function resolveSeparatedBackground(
+  params: NormalizedExportParams,
+  project: ExportProject,
+  deps: ExportPipelineDeps,
+  step: ExportWorkflowStepLike,
+  ensureActive: () => Promise<void>,
+): Promise<string | undefined> {
+  if (params.audioMode !== 'separated_background') return undefined;
+  if (!deps.separation || !deps.stems) {
+    throw new DialogueSeparationError('DIALOGUE_SEPARATION_UNAVAILABLE', 'Dialogue separation is unavailable.');
+  }
+  const capabilities = await step.do('load dialogue separation capabilities', () => deps.separation!.capabilities());
+  const capabilityError = separationCapabilityError(capabilities);
+  if (capabilityError) throw capabilityError;
+
+  const provider = capabilities.provider!.trim();
+  const sourceGeneration = Number(project.sourceGeneration);
+  if (!Number.isInteger(sourceGeneration) || sourceGeneration < 1) {
+    throw new DialogueSeparationError('DIALOGUE_SEPARATION_ARTIFACT_INVALID', 'Project source generation is invalid.');
+  }
+  const durationMs = Number(project.durationMs);
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new DialogueSeparationError('DIALOGUE_SEPARATION_ARTIFACT_INVALID', 'Project duration is invalid for separation.');
+  }
+  const expectedKey = `projects/${params.projectId}/stems/${sourceGeneration}/${provider}/background.wav`;
+  const completedStem = await step.do('load reusable background stem', () =>
+    deps.stems!.latestCompleted(params.projectId, params.userId, sourceGeneration, 'background', provider),
+  );
+  if (completedStem) {
+    if (completedStem.objectKey !== expectedKey) {
+      throw new DialogueSeparationError(
+        'DIALOGUE_SEPARATION_ARTIFACT_INVALID',
+        'Completed dialogue separation stem has an invalid object key.',
+      );
+    }
+    return completedStem.objectKey;
+  }
+
+  const usageKey = separationOperationKey(params.projectId, sourceGeneration, provider);
+  const completedUsage = await step.do('load completed dialogue separation usage', () =>
+    deps.usage.getByOperation(usageKey, 'completed'),
+  );
+  if (completedUsage) {
+    throw new DialogueSeparationError(
+      'DIALOGUE_SEPARATION_ARTIFACT_INVALID',
+      'Completed dialogue separation accounting has no durable reusable background stem.',
+    );
+  }
+
+  await step.do('check cancellation before dialogue separation', ensureActive);
+  const pending = await step.do('claim dialogue separation background stem', () =>
+    deps.stems!.begin(params.projectId, params.userId, sourceGeneration, 'background', provider, null),
+  );
+  if (pending.status === 'completed') {
+    if (pending.objectKey !== expectedKey) {
+      throw new DialogueSeparationError(
+        'DIALOGUE_SEPARATION_ARTIFACT_INVALID',
+        'Claimed dialogue separation stem has an invalid object key.',
+      );
+    }
+    return pending.objectKey;
+  }
+
+  const units = durationMs / 1000;
+  const startedUsage = await step.do('load started dialogue separation usage', () =>
+    deps.usage.getByOperation(usageKey, 'started'),
+  );
+  if (!startedUsage) {
+    await step.do('record dialogue separation started usage', () => deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'dialogue_separation_second',
+      units,
+      provider,
+      phase: 'started',
+      operationKey: usageKey,
+    }));
+  }
+  await step.do('check cancellation before dialogue separation provider', ensureActive);
+
+  let result;
+  try {
+    result = await step.do('separate source dialogue and background', () => deps.separation!.separate({
+      projectId: params.projectId,
+      sourceObjectKey: project.sourceObjectKey!,
+      sourceGeneration,
+      durationMs,
+    }));
+  } catch (error) {
+    const message = errorMessage(error);
+    try {
+      await deps.stems.fail(params.projectId, pending.id, params.userId, 'DIALOGUE_SEPARATION_FAILED', message);
+    } catch {
+      // Preserve the provider failure if durable stem failure recording also fails.
+    }
+    if (error instanceof DialogueSeparationError) throw error;
+    throw new DialogueSeparationError('DIALOGUE_SEPARATION_FAILED', message);
+  }
+
+  if (result.provider !== provider || result.backgroundObjectKey !== expectedKey) {
+    const message = 'Dialogue separation provider returned an invalid background artifact.';
+    try {
+      await deps.stems.fail(params.projectId, pending.id, params.userId, 'DIALOGUE_SEPARATION_ARTIFACT_INVALID', message);
+    } catch {
+      // Preserve artifact validation failure.
+    }
+    throw new DialogueSeparationError('DIALOGUE_SEPARATION_ARTIFACT_INVALID', message);
+  }
+
+  await step.do('persist completed dialogue separation stem', () =>
+    deps.stems!.complete(
+      params.projectId,
+      pending.id,
+      params.userId,
+      result.backgroundObjectKey,
+      result.providerVersion ?? null,
+    ),
+  );
+  await step.do('record dialogue separation completed usage', () => deps.usage.record({
+    userId: params.userId,
+    projectId: params.projectId,
+    jobId: params.jobId,
+    kind: 'dialogue_separation_second',
+    units,
+    provider,
+    phase: 'completed',
+    operationKey: usageKey,
+  }));
+  return result.backgroundObjectKey;
+}
+
 export async function runExportPipeline(
   inputParams: RunExportWorkflowParams,
   deps: ExportPipelineDeps,
@@ -329,6 +511,8 @@ export async function runExportPipeline(
       });
       return { status: 'completed', subtitleObjectKey };
     }
+
+    const backgroundObjectKey = await resolveSeparatedBackground(params, project, deps, step, ensureActive);
 
     const speakerRows = deps.speakers
       ? await step.do('load export speaker voices', async () => deps.speakers!.list(params!.projectId, params!.userId))
@@ -453,8 +637,13 @@ export async function runExportPipeline(
         operationKey: renderKey,
       };
       await deps.usage.record({ ...common, phase: 'started' });
-      const options = params!.modern
-        ? { targetLanguage: params!.targetLanguage, exportId: params!.exportId! }
+      const options: RenderExportOptions | undefined = params!.modern
+        ? {
+          targetLanguage: params!.targetLanguage,
+          exportId: params!.exportId!,
+          audioMode: params!.audioMode,
+          ...(backgroundObjectKey ? { backgroundObjectKey } : {}),
+        }
         : undefined;
       const result = await withProviderTelemetry(deps.telemetry, {
         requestId: params!.requestId,
@@ -471,8 +660,8 @@ export async function runExportPipeline(
         ? `projects/${params!.projectId}/exports/${params!.targetLanguage}/${params!.exportId}.mp4`
         : null;
       if (
-        typeof result.exportObjectKey !== 'string' ||
-        (expected ? result.exportObjectKey !== expected : !result.exportObjectKey.startsWith(`projects/${params!.projectId}/export/`))
+        typeof result.exportObjectKey !== 'string'
+        || (expected ? result.exportObjectKey !== expected : !result.exportObjectKey.startsWith(`projects/${params!.projectId}/export/`))
       ) {
         throw new Error('Media processor returned an invalid export object key.');
       }
@@ -505,6 +694,7 @@ export async function runExportPipeline(
       exportId: null,
       targetLanguage: 'vi' as const,
       output: 'dubbed' as const,
+      audioMode: 'dubbed_only' as const,
     };
     if (isJobCancelledError(error)) {
       if (!effective.modern) {
@@ -518,10 +708,11 @@ export async function runExportPipeline(
     }
 
     const message = errorMessage(error);
+    const code = error instanceof DialogueSeparationError ? error.code : 'EXPORT_FAILED';
     try {
-      await deps.jobs.fail(effective.jobId, 'EXPORT_FAILED', message);
+      await deps.jobs.fail(effective.jobId, code, message);
       if (effective.modern && effective.exportId && deps.exports) {
-        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, 'EXPORT_FAILED', message);
+        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, code, message);
       } else {
         await deps.projects.setStatus(effective.projectId, effective.userId, 'needs_review');
       }

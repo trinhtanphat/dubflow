@@ -7,13 +7,13 @@ test('deployment probe requires HTTP 200 and the exact current schema revision',
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11, media: { stream: 'ready' } };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 10 };
     },
   });
   assert.deepEqual(await probeDeployment(fetchOk), {
     ok: true,
     status: 200,
-    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11, media: { stream: 'ready' } },
+    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 10 },
   });
 });
 

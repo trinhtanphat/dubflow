@@ -12,16 +12,6 @@ export type ProcessRouteDeps = {
   makeJobs?: (env: Env) => JobStore;
 };
 
-function streamAdmissionError(env: Env) {
-  if (!env.STREAM) {
-    return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
-  }
-  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
-    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
-  }
-  return null;
-}
-
 export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
   const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
@@ -39,9 +29,6 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
 
       const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
       if (rateLimited) return rateLimited;
-
-      const admissionError = streamAdmissionError(c.env);
-      if (admissionError) return c.json(admissionError, 503);
 
       const job = await jobs.create(projectId, 'dubbing');
       try {

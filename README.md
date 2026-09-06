@@ -22,10 +22,12 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - Phase 4B source support adds explicit-consent ElevenLabs Instant Voice Clone (IVC) enrollment with owner-scoped lifecycle records, temporary R2 sample cleanup, provider deletion, `ready`-only speaker assignment, and a dedicated clone rate-limit lane. Professional Voice Clone training/verification orchestration remains out of scope.
 - Phase 4C source support adds target-aware language configuration, translation variants, target-aware glossary context, dubbed/subtitle export attempts, batch export, target-scoped R2 artifacts, partial-success isolation, and concrete export sharing for `vi/en/zh/ja/ko`.
 - Phase 4C Studio exposes target-language controls, target-bound transcript editing, truthful per-language state, and batch export controls. Canonical source/timing/speaker identity remains shared rather than duplicated per language.
+- Phase 4D source support adds three backward-compatible dubbed-audio treatments: `dubbed_only`, deterministic `duck_original`, and provider-backed `separated_background`. `duck_original` attenuates original dialogue windows by exactly -18 dB with an 80 ms attack lead and 120 ms release tail; it never invokes AI separation.
+- Phase 4D persists `source_generation`, export `audio_mode`, and reusable owner-scoped `project_audio_stems`. A completed current-generation background stem is reusable across target languages. True `separated_background` is fail-closed and remains unavailable in the production adapter until a provider is explicitly configured and qualified with background-stem support.
 - Completed Vietnamese output retains the legacy project-level export compatibility path while target-specific attempts remain independently addressable.
-- Phase 3B usage accounting remains authoritative for provider work. `RATE_LIMIT_BATCH_EXPORT` is retained as a Cloudflare compatibility/admission binding and is not credits, pricing or a parallel billing ledger.
+- Phase 3B usage accounting remains authoritative for provider work. Phase 4D adds `dialogue_separation_second` only when real separation provider work runs; deterministic ducking and unavailable-provider rejection do not create separation usage. `RATE_LIMIT_BATCH_EXPORT` is retained as a Cloudflare compatibility/admission binding and is not credits, pricing or a parallel billing ledger.
 - Visual lip-sync remains capability-gated and is not claimed as implemented or production-qualified.
-- `GET /api/ready` checks the production D1 schema and reports configured capability without exposing secret values.
+- `GET /api/ready` checks production D1 schema revision 11, including Phase 4D audio-treatment state, and reports configured capability without exposing secret values.
 - GitHub Actions verification CI installs dependencies, runs acceptance/unit tests, performs the TypeScript/Vite production build, runs Wrangler dry-run, and captures reference screenshots.
 
 ## Cloudflare target
@@ -33,7 +35,7 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 Production account ID:
 
 ```text
-6c5207813df3d5b83b9508125e0e9e12
+50afb4fd3c4c7a1f3e1bdb7f22d4af7f
 ```
 
 Production custom domain:
@@ -56,7 +58,7 @@ GitHub Actions is **CI only**. It may install dependencies, test, build, run `wr
 
 `.github/workflows/deploy-cloudflare.yml` must not exist. Do not recreate a GitHub production deploy workflow to work around a Cloudflare failure.
 
-Because the project deploys an FFmpeg Cloudflare Container, the API token configured in Cloudflare **Settings > Builds** must include the normal Worker/resource permissions plus **Containers Edit** for account `6c5207813df3d5b83b9508125e0e9e12`. Secret token values must never be committed.
+Because the project deploys an FFmpeg Cloudflare Container, the API token configured in Cloudflare **Settings > Builds** must include the normal Worker/resource permissions plus **Containers Edit** for account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. Secret token values must never be committed.
 
 Optional runtime providers use secrets such as:
 
@@ -68,6 +70,8 @@ ELEVENLABS_DEFAULT_VOICE_ID
 ```
 
 If Deepgram is not configured, YupVox falls back to Workers AI Whisper and does not claim speaker diarization. If ElevenLabs is not configured or its language capability is unqualified/unsupported, dubbed export must fail closed rather than fabricate support; subtitle export remains independently admissible when its own prerequisites are satisfied.
+
+The production Phase 4D separation adapter is intentionally unavailable. `separated_background` must not silently fall back to `duck_original` or `dubbed_only`. A future provider-specific lane must first prove `configured=true`, `qualification='qualified'`, `backgroundStem=true`, and a non-empty provider identity.
 
 See `docs/DEPLOYMENT-POLICY.md` and `docs/deployment-status.md` for the authoritative deployment and qualification boundary.
 
@@ -112,7 +116,9 @@ Phase 4B is source/CI qualification only. Managed ElevenLabs IVC enrollment requ
 
 Phase 4C is also **source/CI qualification only**. Automated tests qualify the exact five-language authority, canonical/variant separation, target-aware translation context, CAS/conflict behavior, per-target export isolation, subtitles, voice fail-closed admission, concrete export sharing, Vietnamese compatibility and Studio controls. Source CI does not prove that real configured translation, ElevenLabs TTS and FFmpeg rendering have succeeded across multiple languages. A later runtime qualification requires a real authorized fixture with at least two distinct supported targets end-to-end.
 
-Phase 4C implementation in this lane does **not** perform a production deployment. Merging source to `main` may trigger the repository's normal Cloudflare Workers Builds production lane, but runtime remains unqualified until the separate real-fixture qualification succeeds.
+Phase 4D is **source/CI qualification only**. Automated tests qualify the three audio modes, exact ducking constants, schema revision 11, source-generation stem invalidation/reuse, separation usage idempotency, fail-closed provider admission, exact render contracts, and honest Studio capability gating. Production `separated_background` remains **UNQUALIFIED** and intentionally unavailable until a real provider-specific qualification lane is implemented and a deployed authorized fixture proves a durable background stem plus final render. `duck_original` is deterministic FFmpeg treatment and must not be described as AI separation.
+
+Phase 4C/4D implementation in this lane does **not** perform a production deployment. Merging source to `main` may trigger the repository's normal Cloudflare Workers Builds production lane, but runtime remains unqualified until the separate real-fixture qualification succeeds.
 
 ## Safety / truthfulness boundaries
 
@@ -122,6 +128,8 @@ Phase 4C implementation in this lane does **not** perform a production deploymen
 - Do not claim Professional Voice Clone creation/training/verification from Phase 4B IVC support.
 - Do not mark a production dubbed export PASS until a deployed fixture has actually written and returned the final artifact.
 - Do not claim Phase 4C multi-language runtime PASS from source CI, Wrangler dry-run, screenshots or deployment alone.
+- Do not claim Phase 4D `separated_background` production support while the production adapter is unavailable/unqualified.
+- Do not describe `duck_original` as AI dialogue separation; it is deterministic source-audio gain automation.
 - Do not treat `RATE_LIMIT_BATCH_EXPORT` as usage accounting, credits, pricing or billing state.
 - Do not claim visual lip-sync rendering from duration fitting or audio timeline assembly alone.
 - Do not merge cross-chunk speakers from matching numeric speaker indexes, text alone, names, or guesses; only the conservative overlap-evidence contract may stitch identities, and ambiguous evidence must remain split.

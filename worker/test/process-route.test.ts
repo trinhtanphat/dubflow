@@ -30,8 +30,6 @@ describe('process route', () => {
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
-      STREAM: {},
-      STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
       DUBBING_WORKFLOW: {
         async create(input: unknown) { workflowCalls.push(input); return { id: 'workflow-1' }; },
       },

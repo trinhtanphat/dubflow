@@ -121,17 +121,24 @@ async function extractAudioChunks(input) {
 }
 
 async function renderExport(input) {
-  validateRenderExportInput(input);
-  return withSource(input, async ({ root, source }) => {
+  const validated = validateRenderExportInput(input);
+  return withSource(validated, async ({ root, source }) => {
     const sourceDurationMs = await durationMs(source);
-    const outside = input.clips.find((clip) => clip.endMs > sourceDurationMs);
+    const outside = validated.clips.find((clip) => clip.endMs > sourceDurationMs);
     if (outside) throw new Error(`Dubbed clip ${outside.segmentId} exceeds source duration.`);
+
+    let backgroundPath;
+    if (validated.audioMode === 'separated_background') {
+      backgroundPath = join(root, 'background-stem.audio');
+      await downloadObject(validated.backgroundObjectKey, backgroundPath);
+      await durationMs(backgroundPath);
+    }
 
     const clipPaths = [];
     const clipDurationsMs = [];
-    for (let index = 0; index < input.clips.length; index += 1) {
+    for (let index = 0; index < validated.clips.length; index += 1) {
       const path = join(root, `dub-${String(index).padStart(5, '0')}.audio`);
-      await downloadObject(input.clips[index].objectKey, path);
+      await downloadObject(validated.clips[index].objectKey, path);
       clipPaths.push(path);
       clipDurationsMs.push(await durationMs(path));
     }
@@ -141,15 +148,17 @@ async function renderExport(input) {
       sourcePath: source,
       outputPath: output,
       durationMs: sourceDurationMs,
-      clips: input.clips,
+      clips: validated.clips,
       clipPaths,
       clipDurationsMs,
+      audioMode: validated.audioMode,
+      backgroundPath,
     });
     await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
 
-    const exportObjectKey = input.targetLanguage && input.exportId
-      ? `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.mp4`
-      : `projects/${input.projectId}/export/dubbed.mp4`;
+    const exportObjectKey = validated.targetLanguage && validated.exportId
+      ? `projects/${validated.projectId}/exports/${validated.targetLanguage}/${validated.exportId}.mp4`
+      : `projects/${validated.projectId}/export/dubbed.mp4`;
     await uploadFile(exportObjectKey, output, 'video/mp4');
     return { exportObjectKey };
   });
