@@ -19,19 +19,52 @@ jobs:
       STALE_TAG: ed49a7dcf94c407aafa2bedf4311331f
       TARGET_SHA: 6424f990404b635164dfb61595e471d7b66ea008
     steps:
-      - name: Snapshot Builds API state
+      - name: Verify corrected Builds lane and public production snapshot
         shell: bash
         run: |
           set -euo pipefail
           api='https://api.cloudflare.com/client/v4'
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           get() { curl -fsS "$1" -H "$auth"; }
+
           echo '=== production triggers ==='
-          get "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_TAG/triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes,build_token_name,repo_connection_uuid:.repo_connection.repo_connection_uuid}]}'
+          prod_triggers="$(get "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_TAG/triggers")"
+          printf '%s' "$prod_triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes,build_token_name,repo_connection_uuid:.repo_connection.repo_connection_uuid}]}'
+          printf '%s' "$prod_triggers" | jq -e '.success == true and ([.result[]? | select((.branch_includes // []) | index("main"))] | length) == 1' >/dev/null
+
           echo '=== production recent builds ==='
           builds="$(get "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_TAG/builds")"
           printf '%s' "$builds" | jq -c '{success,errors,result:[.result[:10][]? | {build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata:{branch:.build_trigger_metadata.branch,commit_hash:.build_trigger_metadata.commit_hash,build_trigger_source:.build_trigger_metadata.build_trigger_source,build_command:.build_trigger_metadata.build_command,deploy_command:.build_trigger_metadata.deploy_command,build_token_name:.build_trigger_metadata.build_token_name}}]}'
-          echo '=== target build match ==='
-          printf '%s' "$builds" | jq -c --arg sha "$TARGET_SHA" '{matches:[.result[]? | select(.build_trigger_metadata.commit_hash == $sha) | {build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata}]}'
+          printf '%s' "$builds" | jq -e --arg sha "$TARGET_SHA" '.success == true and ([.result[]? | select(.build_trigger_metadata.commit_hash == $sha and .build_outcome == "success")] | length) == 1' >/dev/null
+
           echo '=== stale triggers ==='
-          get "$api/accounts/$STALE_ACCOUNT_ID/builds/workers/$STALE_TAG/triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes}]}'
+          stale="$(get "$api/accounts/$STALE_ACCOUNT_ID/builds/workers/$STALE_TAG/triggers")"
+          printf '%s' "$stale" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes}]}'
+          printf '%s' "$stale" | jq -e '.success == true and ([.result[]? | select((.branch_includes // []) | index("main"))] | length) == 0' >/dev/null
+
+          echo '=== public production ==='
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+          ready_file="$(mktemp)"
+          projects_file="$(mktemp)"
+          usage_file="$(mktemp)"
+          p1_file="$(mktemp)"
+          p2_file="$(mktemp)"
+          ready="$(curl -sSLo "$ready_file" -w '%{http_code}' --max-time 20 "$base/api/ready")"
+          projects="$(curl -sSLo "$projects_file" -w '%{http_code}' --max-time 20 "$base/api/projects")"
+          usage="$(curl -sSLo "$usage_file" -w '%{http_code}' --max-time 20 "$base/api/usage")"
+          p1="$(curl -sSLo "$p1_file" -w '%{http_code}' --max-time 20 "$base/api/projects/$project1")"
+          p2="$(curl -sSLo "$p2_file" -w '%{http_code}' --max-time 20 "$base/api/projects/$project2")"
+          project_count="$(jq 'if type == "array" then length else -1 end' "$projects_file")"
+          schema_revision="$(jq -r '.schemaRevision // -1' "$ready_file")"
+          echo "ready=$ready schemaRevision=$schema_revision projects=$projects count=$project_count usage=$usage p1=$p1 p2=$p2"
+          echo "ready_body=$(cat "$ready_file")"
+          test "$ready" = '200'
+          test "$schema_revision" = '10'
+          test "$projects" = '200'
+          test "$project_count" = '4'
+          test "$usage" = '200'
+          test "$p1" = '200'
+          test "$p2" = '200'
+          echo 'AUTOMATIC_BUILD_AND_PUBLIC_PRODUCTION_QUALIFIED'
