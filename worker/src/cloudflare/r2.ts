@@ -39,6 +39,7 @@ export interface R2BucketLike {
   head?(key: string): Promise<R2ObjectMetadataLike | null>;
   get?(key: string, options?: R2GetOptions): Promise<R2ObjectBodyLike | null>;
   put?(key: string, value: R2UploadValue): Promise<R2ObjectLike>;
+  delete?(key: string): Promise<void>;
 }
 
 export interface R2ReadableBucketLike {
