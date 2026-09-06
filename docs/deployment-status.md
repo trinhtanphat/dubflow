@@ -50,6 +50,14 @@ Authorized summaries are exposed through `GET /api/usage` and `GET /api/projects
 
 A GREEN Phase 3B acceptance gate qualifies repository source behavior only. It does **not** change the production-runtime status below: the Cloudflare Container credential and real provider/media fixture gates must still pass before runtime can be called qualified.
 
+## Phase 4A translation context qualification
+
+Phase 4A is **source-qualified only** for project-scoped translation style presets and glossary entries. The source/CI contract covers revision-safe D1 persistence, ownership-scoped settings and glossary APIs, one immutable translation-context snapshot per logical operation, contextual Workers AI routing, persisted segment context revision, Studio glossary/style controls, and unchanged Phase 3B `translation_character` accounting.
+
+Raw Workers AI and Google Basic Translation remain context-incompatible paths and do not silently consume active project context. Contextual translation fails closed rather than silently falling back to a raw provider, and changing project translation settings does not automatically retranslate existing segments.
+
+The contextual model runtime is not proven by source CI. Phase 4A does not change the existing production blocker: the Cloudflare Container credential still requires the missing Container permission, and no separate live contextual-model/media fixture qualification has been recorded. Production runtime status remains **UNQUALIFIED**.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.

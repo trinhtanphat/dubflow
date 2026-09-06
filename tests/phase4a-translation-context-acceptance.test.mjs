@@ -52,7 +52,7 @@ test('Phase 4A keeps revision-safe ownership, pipeline provenance and Phase 3B a
   assert.match(contextRoutesSource, /PROJECT_NOT_FOUND/);
   assert.match(contextRoutesSource, /expectedContextRevision/);
   assert.match(pipelineSource, /translation_character/);
-  assert.match(pipelineSource, /translationContextRevision/);
+  assert.match(pipelineSource, /routed\.contextRevision/);
   assert.doesNotMatch(pipelineSource, /credit_balance\s*[-+]=/);
 });
 
