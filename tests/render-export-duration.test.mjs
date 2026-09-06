@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { buildAtempoChain, buildRenderExportArgs } from '../containers/ffmpeg/render-export.mjs';
+import * as renderExport from '../containers/ffmpeg/render-export.mjs';
 
+const { buildAtempoChain, buildRenderExportArgs } = renderExport;
 const dockerfile = readFileSync('containers/ffmpeg/Dockerfile', 'utf8');
 const server = readFileSync('containers/ffmpeg/server.mjs', 'utf8');
 
@@ -53,6 +54,14 @@ test('render graph fits downloaded voice duration to each segment window before 
   assert.match(graph, /atempo=0\.5,atrim=duration=2/);
   assert.match(graph, /adelay=1000\|1000/);
   assert.match(graph, /adelay=3000\|3000/);
+});
+
+test('dialogue windows merge deterministically with 80ms attack and 120ms release', () => {
+  assert.equal(typeof renderExport.mergeDialogueWindows, 'function');
+  assert.deepEqual(renderExport.mergeDialogueWindows([
+    { startMs: 1000, endMs: 2000 },
+    { startMs: 1950, endMs: 2500 },
+  ]), [{ startMs: 920, endMs: 2620 }]);
 });
 
 test('dubbed_only keeps the compatibility silent base and never mixes source audio', () => {
