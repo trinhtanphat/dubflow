@@ -1,0 +1,227 @@
+.share-panel {
+  position: fixed;
+  top: 86px;
+  right: 20px;
+  z-index: 42;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 106px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid #30323d;
+  border-radius: 12px;
+  background: rgba(15, 16, 22, 0.98);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(139, 54, 244, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+.share-panel button,
+.share-panel select {
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.share-panel button {
+  border: 1px solid #383a46;
+  padding: 0 12px;
+  color: var(--text);
+  background: #181920;
+}
+
+.share-panel button:hover:not(:disabled) {
+  border-color: #65458d;
+  background: #20212a;
+}
+
+.share-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.share-panel__header strong,
+.share-panel__header span {
+  display: block;
+}
+
+.share-panel__header strong {
+  font-size: 14px;
+}
+
+.share-panel__header span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.share-panel__close {
+  flex: 0 0 32px;
+  width: 32px;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.share-panel__notice,
+.share-panel__created,
+.share-panel__error {
+  margin: 12px 0 0;
+  border-radius: 9px;
+  padding: 11px 12px;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.share-panel__notice {
+  border: 1px solid #292b35;
+  color: #999ca9;
+  background: #121319;
+}
+
+.share-panel__created {
+  border: 1px solid rgba(139, 54, 244, 0.44);
+  background: rgba(139, 54, 244, 0.09);
+}
+
+.share-panel__created > strong {
+  display: block;
+  color: #eadcff;
+  font-size: 11px;
+}
+
+.share-panel__created p {
+  margin: 4px 0 9px;
+  color: #aaa2b8;
+}
+
+.share-panel__error {
+  border: 1px solid rgba(255, 89, 100, 0.34);
+  color: #ff9da5;
+  background: rgba(255, 89, 100, 0.08);
+}
+
+.share-panel__link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.share-panel__link-row code {
+  min-width: 0;
+  max-height: 74px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 9px;
+  border: 1px solid #302a3e;
+  border-radius: 7px;
+  color: #d7c8ed;
+  background: #0c0d12;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.share-panel__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin-top: 13px;
+}
+
+.share-panel__actions > button {
+  border-color: rgba(177, 105, 255, 0.58);
+  background: linear-gradient(135deg, #9341f3, #6f27db);
+  font-weight: 700;
+}
+
+.share-panel__ttl span {
+  display: block;
+  margin-bottom: 6px;
+  color: #8a8d9a;
+  font-size: 9px;
+}
+
+.share-panel__ttl select {
+  height: 36px;
+}
+
+.share-panel__list {
+  display: grid;
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.share-panel__list > p {
+  margin: 0;
+  padding: 10px 2px 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.share-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border: 1px solid #292b35;
+  border-radius: 9px;
+  background: #121319;
+}
+
+.share-panel__item > div {
+  min-width: 0;
+}
+
+.share-panel__item strong,
+.share-panel__item span,
+.share-panel__item small {
+  display: block;
+}
+
+.share-panel__item strong {
+  font-size: 10px;
+}
+
+.share-panel__item span,
+.share-panel__item small {
+  margin-top: 3px;
+  color: #7f8290;
+  font-size: 9px;
+}
+
+.share-panel__item--active {
+  border-color: rgba(41, 200, 121, 0.25);
+}
+
+.share-panel__item--expired,
+.share-panel__item--revoked {
+  opacity: 0.72;
+}
+
+@media (max-width: 640px) {
+  .share-panel {
+    top: 82px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100vh - 94px);
+    padding: 14px;
+  }
+
+  .share-panel__actions,
+  .share-panel__link-row {
+    grid-template-columns: 1fr;
+  }
+
+  .share-panel__item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
