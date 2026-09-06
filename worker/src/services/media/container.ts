@@ -1,3 +1,4 @@
+import type { StemSeparationResult } from '../separation/types';
 import type { AudioChunk, ExportClip, MediaProcessor, RenderExportOptions } from './types';
 
 export interface ContainerStubLike {
@@ -38,6 +39,12 @@ function assertProjectObject(projectId: string, objectKey: string, folder?: stri
   const prefix = folder ? `${projectPrefix(projectId)}${folder}/` : projectPrefix(projectId);
   if (!objectKey.startsWith(prefix)) {
     throw new MediaProcessorError('MEDIA_OBJECT_KEY_INVALID', 'Media object key does not belong to the project.');
+  }
+}
+
+function assertSourceRevision(sourceRevision: string): void {
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(sourceRevision)) {
+    throw new MediaProcessorError('MEDIA_STEM_REVISION_INVALID', 'Stem source revision is invalid.');
   }
 }
 
@@ -136,6 +143,36 @@ export class ContainerMediaProcessor implements MediaProcessor {
         overlapAfterMs: chunk.overlapAfterMs,
       };
     });
+  }
+
+  async separateStems(
+    projectId: string,
+    sourceObjectKey: string,
+    sourceRevision: string,
+  ): Promise<StemSeparationResult> {
+    assertProjectObject(projectId, sourceObjectKey, 'source');
+    assertSourceRevision(sourceRevision);
+    const result = await this.call(projectId, '/separate-stems', {
+      projectId,
+      objectKey: sourceObjectKey,
+      sourceRevision,
+    }) as Partial<StemSeparationResult>;
+    const prefix = `${projectPrefix(projectId)}stems/${sourceRevision}`;
+    const expectedDialogue = `${prefix}/dialogue.wav`;
+    const expectedBackground = `${prefix}/background.wav`;
+    if (
+      result.dialogueObjectKey !== expectedDialogue ||
+      result.backgroundObjectKey !== expectedBackground
+    ) {
+      throw new MediaProcessorError(
+        'MEDIA_PROCESSOR_RESPONSE_INVALID',
+        'Media processor returned invalid stem object keys.',
+      );
+    }
+    return {
+      dialogueObjectKey: result.dialogueObjectKey,
+      backgroundObjectKey: result.backgroundObjectKey,
+    };
   }
 
   async renderExport(
