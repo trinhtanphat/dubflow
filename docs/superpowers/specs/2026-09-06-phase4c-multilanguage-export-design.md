@@ -79,6 +79,10 @@ Before implementation merge/reconciliation, the migration sequence must be re-ch
 
 ### 5.2 Project target languages
 
+Add a project-level optimistic-concurrency column:
+
+- `projects.target_languages_revision INTEGER NOT NULL DEFAULT 1 CHECK (target_languages_revision >= 1)`.
+
 Add `project_target_languages` with one row per enabled target language.
 
 Required fields:
@@ -86,8 +90,9 @@ Required fields:
 - `project_id`;
 - `target_language`;
 - `status`;
-- `languages_revision` or equivalent project-language-set revision source;
 - created/updated timestamps.
+
+The primary/unique key is `(project_id, target_language)`.
 
 Allowed target language values are exactly `vi`, `en`, `zh`, `ja`, `ko`.
 
@@ -101,7 +106,9 @@ Per-language status values:
 - `completed`;
 - `failed`.
 
-The enabled language set has its own optimistic-concurrency revision independent from source segment versions and translation-context revision.
+Any mutation that changes the enabled target-language set increments `projects.target_languages_revision` exactly once. Per-language status updates do not increment that revision.
+
+The enabled language set revision is independent from source segment versions and translation-context revision.
 
 ### 5.3 Segment translations
 
@@ -125,20 +132,22 @@ Editing Japanese increments only the Japanese variant version. It must not confl
 
 ### 5.4 Language exports
 
-Add `project_exports` keyed by project, target language, and export identity/version.
+Add `project_exports` with an immutable export ID and project/target association.
 
 Required fields:
 
-- export ID;
-- project ID;
-- target language;
-- status;
-- export object key nullable until complete;
-- subtitle object key nullable;
-- error code/message nullable;
+- `id` primary key;
+- `project_id`;
+- `target_language`;
+- `output_mode` in `dubbed | subtitles`;
+- `status`;
+- `export_object_key` nullable until complete;
+- `subtitle_object_key` nullable;
+- `error_code` nullable;
+- `error_message` nullable;
 - created/updated timestamps.
 
-The schema must support multiple export attempts while allowing a deterministic current/latest export to be found for a target language.
+The schema must support multiple attempts while allowing deterministic lookup of the latest export for `(project_id, target_language, output_mode)` by stable ordering on creation time plus ID.
 
 ### 5.5 Glossary target language
 
@@ -152,7 +161,7 @@ Glossary uniqueness becomes target-aware. The logical uniqueness key is:
 
 Translation style remains project-global in Phase 4C.
 
-The translation-context revision stays a project-global coarse revision. A glossary change for any target may increment the project context revision; translation rows persist the exact revision used so stale context is visible and auditable.
+The translation-context revision stays a project-global coarse revision. A glossary change for any target increments the project context revision according to the existing Phase 4A trigger semantics; translation rows persist the exact revision used so stale context is visible and auditable.
 
 ### 5.6 Compatibility bridge
 
@@ -167,7 +176,7 @@ Migration/backfill rules:
 
 1. Every existing project gains enabled target `vi`.
 2. Existing segment translated text is backfilled into `segment_translations(..., 'vi')`.
-3. Existing project export object key is backfilled into a Vietnamese project export when present.
+3. Existing project export object key is backfilled into a Vietnamese `dubbed` project export when present.
 4. Existing glossary rows become target `vi`.
 5. Vietnamese writes mirror the legacy compatibility fields while the legacy API remains supported.
 
@@ -184,7 +193,7 @@ export type TargetLanguage = typeof TARGET_LANGUAGES[number];
 
 Remove target-specific `'vi'` type literals from new provider/domain interfaces. Existing compatibility DTOs may remain Vietnamese-only where intentionally preserved.
 
-Project creation remains backward-compatible and may still default to `vi`; Phase 4C language configuration is managed through the target-language API after project creation.
+Project creation remains backward-compatible and defaults to `vi`; Phase 4C language configuration is managed through the target-language API after project creation.
 
 ## 7. Translation provider behavior
 
@@ -220,7 +229,7 @@ Existing structural safety remains mandatory:
 
 ### 7.4 Router
 
-Inactive context may route according to the existing explicit/default raw-provider behavior.
+Inactive context routes according to the existing explicit/default raw-provider behavior.
 
 Active context auto-routes to contextual translation exactly as Phase 4A does, now parameterized by target language.
 
@@ -256,7 +265,7 @@ All endpoints are owner-scoped. A project not owned by the current actor returns
 
 `GET /api/projects/:id/languages`
 
-Returns enabled targets, per-language status, and `languagesRevision`.
+Returns enabled targets, per-language status, and `languagesRevision` sourced from `projects.target_languages_revision`.
 
 `PATCH /api/projects/:id/languages`
 
@@ -295,15 +304,15 @@ Runs or queues a target-language translation operation using one context snapsho
 
 `POST /api/projects/:id/exports/:language`
 
-Starts one language export.
+Body includes `output: 'dubbed' | 'subtitles'` and defaults to `dubbed` only for the legacy-compatible Vietnamese path; new Phase 4C clients must send it explicitly.
 
-`GET /api/projects/:id/exports/:language`
+`GET /api/projects/:id/exports/:language?output=dubbed|subtitles`
 
-Returns latest/current export state for that target.
+Returns latest/current export state for that target/output mode.
 
-`GET /api/projects/:id/exports/:language/media`
+`GET /api/projects/:id/exports/:language/media?output=dubbed|subtitles`
 
-Streams the completed target-language export with owner telemetry and range behavior equivalent to the existing owner export endpoint.
+Streams the completed target-language artifact with owner telemetry and range behavior equivalent to the existing owner export endpoint where the artifact type supports ranges.
 
 `POST /api/projects/:id/exports/batch`
 
@@ -315,6 +324,8 @@ Body:
   "output": "dubbed"
 }
 ```
+
+`output` is exactly `dubbed` or `subtitles` for the entire batch request. A mixed dubbed/subtitle batch requires separate requests in Phase 4C.
 
 The batch response exposes per-language durable state; it does not claim all-or-nothing success.
 
@@ -366,6 +377,8 @@ job:{jobId}:retry:{retry}:tts:{lang}:{segmentId}:{provider}
 job:{jobId}:retry:{retry}:render:{lang}:final:ffmpeg-container
 ```
 
+Subtitle-only export does not record TTS or render usage unless it actually invokes a metered render stage. If subtitle generation is pure serialization with no metered provider/container call, it creates no synthetic usage event.
+
 Started/completed semantics and durable-artifact recovery remain compatible with Phase 3B.
 
 Reused completed artifacts must not be double-metered.
@@ -382,19 +395,19 @@ Language-specific voice artifacts use keys such as:
 projects/{projectId}/voices/{lang}/{segmentId}/{version}.mp3
 ```
 
-Subtitles use:
+Subtitles use immutable/versioned keys such as:
 
 ```text
-projects/{projectId}/subtitles/{lang}.srt
+projects/{projectId}/subtitles/{lang}/{exportId}.srt
 ```
 
-Final exports use immutable/versioned keys under:
+Final dubbed exports use immutable/versioned keys under:
 
 ```text
 projects/{projectId}/exports/{lang}/{exportId}.mp4
 ```
 
-Vietnamese compatibility may mirror the latest completed Vietnamese export into `projects.export_object_key`.
+Vietnamese compatibility mirrors the latest completed Vietnamese dubbed export into `projects.export_object_key`.
 
 ### 12.1 Voice capability
 
@@ -406,7 +419,7 @@ Before dubbed export:
 - explicitly unsupported target language: fail `VOICE_LANGUAGE_UNSUPPORTED`;
 - unknown language capability: do not advertise dubbed export as qualified; fail `VOICE_LANGUAGE_UNQUALIFIED` for dubbed output.
 
-Subtitle-only export may remain available when voice language capability is unavailable, provided translations are ready.
+Subtitle-only export is permitted when translations are ready even if voice language capability is unsupported or unknown.
 
 Phase 4C does not create, enroll, delete, or otherwise mutate voice clones except through already-existing speaker/voice APIs needed by normal export.
 
@@ -416,7 +429,9 @@ A batch is not a single transaction over all languages.
 
 Each target has durable independent status and artifacts.
 
-Example result:
+For batch output `dubbed`, every target independently checks voice capability. For batch output `subtitles`, voice capability is irrelevant.
+
+Example dubbed result:
 
 ```json
 {
@@ -437,18 +452,19 @@ Retrying one failed language reuses valid translations/TTS/export intermediates 
 
 Source edit:
 
-- invalidates every target translation variant for that source segment;
+- marks every target translation variant for that source segment stale/pending rather than silently treating old translated text as current;
 - invalidates dependent TTS and exports for those variants.
 
 Target translation edit/retranslate:
 
+- increments only that target variant version;
 - invalidates only that target's TTS/export artifacts for the affected segment/version;
 - does not change other language variants.
 
 Speaker voice assignment change:
 
 - invalidates affected dubbed voice/export artifacts according to existing speaker/voice dependency rules;
-- does not invalidate translated text.
+- does not invalidate translated text or subtitle-only exports.
 
 Glossary/style change:
 
@@ -460,7 +476,7 @@ Target-language disable:
 
 - removes it from active project workflow/UI selection;
 - does not physically delete historical translation/export rows in the same mutation;
-- re-enabling the language may reuse still-valid history after version/provenance checks.
+- re-enabling the language may reuse still-valid history after source version/context/provenance checks.
 
 ## 15. Concurrency model
 
@@ -468,7 +484,7 @@ Use separate conflict domains.
 
 ### Project language set
 
-`languagesRevision` guards enabled-target configuration.
+`projects.target_languages_revision` guards enabled-target configuration.
 
 Stale mutation returns `409 PROJECT_LANGUAGES_CONFLICT` with canonical current state.
 
@@ -491,9 +507,10 @@ Per-language status is the Phase 4C source of truth for multi-language UX.
 Existing project status remains a coarse compatibility/dashboard aggregate:
 
 - `processing` while any active language operation is running;
-- `needs_review` when enabled targets require review or intervention;
-- `completed` only when the requested enabled/output scope is complete;
-- existing failure/cancel semantics remain available for coarse reporting.
+- `needs_review` when any enabled target requires review/intervention and no active operation needs the stronger `processing` state;
+- `completed` only when all currently enabled targets required by the requested workflow scope are complete;
+- `cancelled` follows existing explicit cancellation semantics;
+- fatal project-wide failures may still use existing failure semantics.
 
 Do not infer exact language state only from project status.
 
@@ -537,6 +554,8 @@ Expose:
 
 - `Export current language`;
 - `Batch export selected languages`.
+
+The batch dialog requires one output mode for the request: `Dubbed video` or `Subtitles only`.
 
 Show one durable row per selected target with statuses such as:
 
@@ -635,17 +654,18 @@ Phase 4C is source/CI-qualified only when all of the following are covered and p
 11. Translation usage meters source Unicode characters once per actual target/provider operation.
 12. TTS/render usage is not double-counted when durable artifacts are reused.
 13. Operation keys cannot collide across target languages.
-14. One failed batch language does not erase successful languages or their artifacts.
-15. Retrying a failed language does not regenerate/rebill successful languages.
-16. Voice capability is fail-closed for dubbed export and truthful in UI.
-17. Subtitle-only behavior remains possible where designed without pretending dubbed-audio support.
-18. Legacy Vietnamese export/download remains functional during compatibility period.
-19. Phase 3C authorization, rate-limit ordering, telemetry, sharing/download safety, and redaction tests remain green.
-20. Phase 4A glossary/style/context semantics remain green.
-21. Speaker stitching/project-stable diarization tests remain green.
-22. Phase 4B voice-clone consent/lifecycle/assignment/abuse-control tests remain green.
-23. TypeScript, Vite production build, Wrangler dry-run, CJK screenshot qualification, reference screenshots, and artifact upload remain green.
-24. Post-merge CI on the actual `main` merge SHA succeeds before the lane is called complete.
+14. Subtitle-only export does not fabricate TTS/render usage when those metered stages are not invoked.
+15. One failed batch language does not erase successful languages or their artifacts.
+16. Retrying a failed language does not regenerate/rebill successful languages.
+17. Voice capability is fail-closed for dubbed export and truthful in UI.
+18. Subtitle-only export remains available when translation is ready and does not pretend dubbed-audio support.
+19. Legacy Vietnamese export/download remains functional during compatibility period.
+20. Phase 3C authorization, rate-limit ordering, telemetry, sharing/download safety, and redaction tests remain green.
+21. Phase 4A glossary/style/context semantics remain green.
+22. Speaker stitching/project-stable diarization tests remain green.
+23. Phase 4B voice-clone consent/lifecycle/assignment/abuse-control tests remain green.
+24. TypeScript, Vite production build, Wrangler dry-run, CJK screenshot qualification, reference screenshots, and artifact upload remain green.
+25. Post-merge CI on the actual `main` merge SHA succeeds before the lane is called complete.
 
 ## 23. Deployment status
 
