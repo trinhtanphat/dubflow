@@ -13,8 +13,19 @@ export function ScriptInspector(props: Props) {
   const targetRow = canonical && phase?.targetLanguage
     ? phase.targetSegments.find((row) => row.segmentId === canonical.id) ?? null
     : null;
+  const targetDraftText = canonical && phase?.targetLanguage
+    ? phase.targetDrafts[canonical.id]
+    : undefined;
+  const useVietnameseCompatibility = Boolean(
+    canonical
+    && phase?.targetLanguage === 'vi'
+    && !targetRow
+    && targetDraftText === undefined,
+  );
   const segment = canonical && phase?.targetLanguage
-    ? composeTargetSegment(canonical, targetRow, phase.targetDrafts[canonical.id])
+    ? useVietnameseCompatibility
+      ? canonical
+      : composeTargetSegment(canonical, targetRow, targetDraftText)
     : canonical;
 
   const editDraft: Props['onEditDraft'] = (segmentId, patch) => {
@@ -37,7 +48,7 @@ export function ScriptInspector(props: Props) {
     if (phase?.targetLanguage) void phase.flushTargetTranslation(segmentId);
   };
 
-  const canonicalDraft = phase?.targetLanguage && props.draft
+  const canonicalDraft = phase?.targetLanguage && props.draft && !useVietnameseCompatibility
     ? {
         ...props.draft,
         patch: {

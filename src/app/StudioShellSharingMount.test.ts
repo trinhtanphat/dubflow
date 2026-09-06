@@ -1,5 +1,10 @@
+/// <reference types="vite/client" />
+
 import { describe, expect, it } from 'vitest';
-import studioShellSource from './StudioShell.tsx?raw';
+import wrapperSource from './StudioShell.tsx?raw';
+import baseSource from './StudioShellBase.tsx?raw';
+
+const studioShellSource = `${wrapperSource}\n${baseSource}`;
 
 describe('StudioShell sharing mount', () => {
   it('owns share panel visibility and gates the panel on a durable export', () => {

@@ -1,7 +1,10 @@
 /// <reference types="vite/client" />
 
 import { describe, expect, it } from 'vitest';
-import source from './StudioShell.tsx?raw';
+import wrapperSource from './StudioShell.tsx?raw';
+import baseSource from './StudioShellBase.tsx?raw';
+
+const source = `${wrapperSource}\n${baseSource}`;
 
 describe('StudioShell command surface wiring', () => {
   it('does not leave the command palette trigger as a no-op', () => {
