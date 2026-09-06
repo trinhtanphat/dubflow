@@ -43,7 +43,6 @@ jobs:
             return parsed;
           }
 
-          // Generate fresh failing invocations inside the query window.
           const paths = ['/api/ready', '/api/projects', '/api/usage'];
           for (const path of paths) {
             const response = await fetch(`https://yupvox.qs3d.site${path}`, {
@@ -80,8 +79,10 @@ jobs:
           });
 
           const result = query?.result ?? {};
-          const events = Array.isArray(result?.events) ? result.events : [];
-          console.log(`observability matching events=${events.length}`);
+          const eventEnvelope = result?.events ?? {};
+          const events = Array.isArray(eventEnvelope?.events) ? eventEnvelope.events : [];
+          const totalCount = Number(eventEnvelope?.count ?? events.length);
+          console.log(`observability matching events=${events.length} total=${Number.isFinite(totalCount) ? totalCount : 'unknown'}`);
 
           function pick(obj, key) {
             if (!obj || typeof obj !== 'object') return undefined;
@@ -91,6 +92,7 @@ jobs:
           function sanitizeEvent(event) {
             const metadata = event?.$metadata ?? event?.metadata ?? {};
             const attrs = event?.attributes ?? event?.data ?? {};
+            const workers = event?.$workers ?? {};
             const candidates = {
               id: metadata?.id,
               service: metadata?.service,
@@ -100,10 +102,13 @@ jobs:
               statusCode: metadata?.statusCode ?? metadata?.status_code,
               error: metadata?.error,
               message: metadata?.message,
-              requestUrl: metadata?.request?.url ?? metadata?.url,
-              outcome: metadata?.outcome,
+              requestUrl: metadata?.url ?? metadata?.request?.url,
+              outcome: workers?.outcome ?? metadata?.outcome,
+              scriptName: workers?.scriptName,
+              requestId: workers?.requestId ?? metadata?.requestId,
               exception: pick(attrs, 'exception') ?? pick(attrs, 'exceptions') ?? pick(event, 'exceptions'),
               eventMessage: pick(event, 'message'),
+              source: typeof event?.source === 'string' ? event.source.slice(0, 1600) : undefined,
             };
             const text = JSON.stringify(candidates);
             return text.length > 5000 ? text.slice(0, 5000) : text;
@@ -111,7 +116,7 @@ jobs:
 
           const relevant = events.filter((event) => {
             const text = JSON.stringify(event);
-            return text.includes('/api/projects') || text.includes('/api/usage') || text.includes('/api/ready') || /error|exception|500|USAGE_SUMMARY_FAILED/i.test(text);
+            return text.includes('/api/projects') || text.includes('/api/usage') || text.includes('/api/ready') || /error|exception|500|USAGE_SUMMARY_FAILED|Internal Server Error/i.test(text);
           });
           console.log(`relevant events=${relevant.length}`);
           for (const event of relevant.slice(0, 80)) console.log(sanitizeEvent(event));
