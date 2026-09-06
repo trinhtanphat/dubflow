@@ -1,7 +1,12 @@
 import type { VoiceCapabilities } from '../voice/voiceApi';
 import type { TargetLanguage } from '../translation/languageVariantsApi';
 import { LANGUAGE_LABELS } from '../translation/TargetLanguagesPanel';
-import type { ExportLaunchDto, ExportOutput } from './batchExportApi';
+import type {
+  ExportCapabilitiesDto,
+  ExportLaunchDto,
+  ExportOutput,
+  SeparationMode,
+} from './batchExportApi';
 import './batch-export.css';
 
 export function dubbedAvailability(
@@ -19,11 +24,14 @@ type Props = {
   enabledLanguages: TargetLanguage[];
   selectedLanguages: TargetLanguage[];
   output: ExportOutput;
+  separationMode: SeparationMode;
+  exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
   busy: boolean;
   results: ExportLaunchDto[];
   error: string;
   onOutputChange: (output: ExportOutput) => void;
+  onSeparationModeChange: (mode: SeparationMode) => void;
   onToggleLanguage: (language: TargetLanguage) => void;
   onExportCurrent: () => void;
   onBatchExport: () => void;
@@ -39,19 +47,29 @@ export function BatchExportPanelView({
   enabledLanguages,
   selectedLanguages,
   output,
+  separationMode,
+  exportCapabilities,
   voiceCapabilities,
   busy,
   results,
   error,
   onOutputChange,
+  onSeparationModeChange,
   onToggleLanguage,
   onExportCurrent,
   onBatchExport,
   onRetryFailed,
 }: Props) {
   const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
-  const currentBlocked = output === 'dubbed' && !voice.allowed;
-  const selectedBlocked = output === 'dubbed' && selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed);
+  const separation = exportCapabilities?.dialogueBackgroundSeparation;
+  const preserveAvailable = Boolean(
+    separation?.available && separation.modes.includes('preserve_background'),
+  );
+  const separationBlocked = output === 'dubbed' && separationMode === 'preserve_background' && !preserveAvailable;
+  const currentBlocked = output === 'dubbed' && (!voice.allowed || separationBlocked);
+  const selectedBlocked = output === 'dubbed' && (
+    separationBlocked || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
+  );
   const allSucceeded = results.length > 0 && results.every((result) => result.status === 'queued');
 
   return (
@@ -63,6 +81,35 @@ export function BatchExportPanelView({
           <option value="subtitles">Subtitles (.srt)</option>
         </select>
       </header>
+      {output === 'dubbed' && (
+        <fieldset className="batch-export__separation">
+          <legend>Audio bed</legend>
+          <label>
+            <input
+              type="radio"
+              name="separation-mode"
+              value="source_mix"
+              checked={separationMode === 'source_mix'}
+              onChange={() => onSeparationModeChange('source_mix')}
+            />
+            <span><strong>Source mix</strong><small>Giữ hành vi export an toàn mặc định.</small></span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="separation-mode"
+              value="preserve_background"
+              checked={separationMode === 'preserve_background'}
+              disabled={!preserveAvailable}
+              onChange={() => onSeparationModeChange('preserve_background')}
+            />
+            <span><strong>Preserve background/music</strong><small>Tách thoại và dùng background stem làm nền audio.</small></span>
+          </label>
+          {!preserveAvailable && (
+            <p className="batch-export__guard">Tách thoại/background hiện không khả dụng trên deployment này.</p>
+          )}
+        </fieldset>
+      )}
       <div className="batch-export__languages">
         {enabledLanguages.map((language) => (
           <label key={language}>
