@@ -18,10 +18,9 @@ export function buildAudioWindows(durationMs, chunkSeconds, overlapSeconds) {
   const strideMs = (chunkSeconds - overlapSeconds) * 1000;
   const windows = [];
   for (let offsetMs = 0; offsetMs < durationMs; offsetMs += strideMs) {
-    windows.push({
-      offsetMs,
-      durationMs: Math.min(chunkMs, durationMs - offsetMs),
-    });
+    const windowDurationMs = Math.min(chunkMs, durationMs - offsetMs);
+    windows.push({ offsetMs, durationMs: windowDurationMs });
+    if (offsetMs + windowDurationMs >= durationMs) break;
   }
   return windows;
 }
