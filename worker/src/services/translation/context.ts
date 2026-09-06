@@ -22,7 +22,7 @@ export type GlossaryEntry = {
 };
 
 export type GlossaryEntryInput = {
-  targetLanguage: TargetLanguage;
+  targetLanguage?: TargetLanguage;
   sourceTerm: string;
   preferredTranslation: string;
   note?: string | null;
@@ -85,7 +85,7 @@ export function normalizeGlossaryInput(input: GlossaryEntryInput): NormalizedGlo
     throw new TranslationContextValidationError('GLOSSARY_SOURCE_TERM_INVALID', 'Glossary entry is invalid.');
   }
 
-  const targetLanguage = validateTargetLanguage(input.targetLanguage);
+  const targetLanguage = validateTargetLanguage(input.targetLanguage ?? 'vi');
 
   if (typeof input.caseSensitive !== 'boolean') {
     throw new TranslationContextValidationError(
