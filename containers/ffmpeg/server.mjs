@@ -138,6 +138,12 @@ async function renderExport(input) {
     const outside = input.clips.find((clip) => clip.endMs > sourceDurationMs);
     if (outside) throw new Error(`Dubbed clip ${outside.segmentId} exceeds source duration.`);
 
+    let backgroundPath;
+    if (input.backgroundObjectKey) {
+      backgroundPath = join(root, 'background.wav');
+      await downloadObject(input.backgroundObjectKey, backgroundPath);
+    }
+
     const clipPaths = [];
     const clipDurationsMs = [];
     for (let index = 0; index < input.clips.length; index += 1) {
@@ -150,6 +156,7 @@ async function renderExport(input) {
     const output = join(root, 'dubbed.mp4');
     const args = buildRenderExportArgs({
       sourcePath: source,
+      backgroundPath,
       outputPath: output,
       durationMs: sourceDurationMs,
       clips: input.clips,
