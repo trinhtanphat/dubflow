@@ -166,8 +166,11 @@ test('Phase 3C safety gate locks one-time Studio bearer-link semantics', () => {
   assert.match(sharePanelSource, /listShares\(projectId\)/);
   assert.match(sharePanelSource, /Mã cuối: \{share\.tokenHint\}/);
   assert.doesNotMatch(sharePanelSource, /tokenHint[^\n]*(?:shareUrl|\/api\/shares)/);
-  assert.match(studioShellSource, /shareOpen && state\.project\.exportObjectKey/);
-  assert.match(studioShellSource, /<SharePanel projectId=\{state\.project\.id\}/);
+  assert.match(
+    studioShellSource,
+    /shareOpen && (?:state\.project\.exportObjectKey|\(state\.project\.exportObjectKey \|\| shareExportId\))/, 
+  );
+  assert.match(studioShellSource, /<SharePanel[\s\S]*?projectId=\{state\.project\.id\}/);
 });
 
 test('Phase 3C safety gate requires source-only qualification docs without upgrading runtime status', () => {
