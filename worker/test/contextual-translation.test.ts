@@ -30,6 +30,8 @@ const context: TranslationContext = {
   ],
 };
 
+const targets = ['vi', 'en', 'zh', 'ja', 'ko'] as const;
+
 async function providerModule() {
   return import('../src/services/translation/contextual');
 }
@@ -39,22 +41,22 @@ describe('ContextualWorkersAITranslationProvider', () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
     const unavailable = new ContextualWorkersAITranslationProvider(ai, '   ');
-    expect(unavailable.capabilities).toEqual({ contextual: true, available: false });
+    expect(unavailable.capabilities).toEqual({ contextual: true, available: false, targets });
 
     await expect(unavailable.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi', context))
       .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_UNAVAILABLE' });
     expect(ai.calls).toHaveLength(0);
 
     expect(new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model').capabilities)
-      .toEqual({ contextual: true, available: true });
+      .toEqual({ contextual: true, available: true, targets });
   });
 
-  it('rejects unsupported targets before an AI call', async () => {
+  it('rejects targets outside the Phase 4C set before an AI call', async () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
     const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
 
-    await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'ja', context))
+    await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'fr', context))
       .rejects.toMatchObject({ code: 'TRANSLATION_TARGET_UNSUPPORTED' });
     expect(ai.calls).toHaveLength(0);
   });
