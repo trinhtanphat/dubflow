@@ -17,6 +17,7 @@ type SegmentRow = {
   source_text: string;
   translated_text: string;
   translation_engine: string;
+  translation_context_revision: number | null;
   translation_status: string;
   voice_status: string;
   version: number;
@@ -31,6 +32,7 @@ class Statement implements D1StatementLike {
     if (this.sql.includes('UPDATE segments SET translated_text')) {
       this.db.segment.translated_text = String(this.values[0]);
       this.db.segment.translation_engine = String(this.values[1]);
+      this.db.segment.translation_context_revision = this.values[2] == null ? null : Number(this.values[2]);
       this.db.segment.translation_status = 'completed';
       this.db.segment.version += 1;
     }
@@ -38,6 +40,11 @@ class Statement implements D1StatementLike {
   }
   async all<T>() { return { results: [] as T[] }; }
   async first<T>(): Promise<T | null> {
+    if (this.sql.includes('SELECT translation_style, translation_context_revision')) {
+      const [projectId, userId] = this.values;
+      if (projectId !== 'p1' || userId !== 'dev-user') return null;
+      return { translation_style: 'neutral', translation_context_revision: 1 } as T;
+    }
     if (this.sql.includes('FROM projects WHERE id = ? AND user_id = ?')) {
       return {
         id: 'p1', user_id: 'dev-user', title: 'demo', source_language: 'en', target_language: 'vi', status: 'needs_review',
@@ -51,7 +58,7 @@ class Statement implements D1StatementLike {
 class FakeDb implements D1DatabaseLike {
   segment: SegmentRow = {
     id: 's1', project_id: 'p1', speaker_id: null, start_ms: 0, end_ms: 1_000,
-    source_text: 'secret source sentence', translated_text: 'old', translation_engine: 'workers-ai',
+    source_text: 'secret source sentence', translated_text: 'old', translation_engine: 'workers-ai', translation_context_revision: null,
     translation_status: 'completed', voice_status: 'pending', version: 2, split_parent_id: null,
   };
   prepare(sql: string) { return new Statement(this, sql); }
