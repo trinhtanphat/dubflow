@@ -1,4 +1,5 @@
 import { parseDubbedAudioMode } from '../../domain/audio-mode';
+import type { TargetLanguage } from '../../domain/language';
 import type { AudioChunk, ExportClip, MediaProcessor, RenderExportOptions } from './types';
 
 export interface ContainerStubLike {
@@ -42,13 +43,22 @@ function assertProjectObject(projectId: string, objectKey: string, folder?: stri
   }
 }
 
-function assertRenderOptions(projectId: string, options: RenderExportOptions): void {
-  if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(options.targetLanguage)) {
+function targetExportKeys(projectId: string, targetLanguage: TargetLanguage, exportId: string) {
+  if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(targetLanguage)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export target language is invalid.');
   }
-  if (!/^[A-Za-z0-9._-]{1,200}$/.test(options.exportId)) {
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(exportId)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export id is invalid.');
   }
+  const base = `${projectPrefix(projectId)}exports/${targetLanguage}/${exportId}`;
+  return {
+    exportObjectKey: `${base}.mp4`,
+    audioObjectKey: `${base}.audio.wav`,
+  };
+}
+
+function assertRenderOptions(projectId: string, options: RenderExportOptions): void {
+  targetExportKeys(projectId, options.targetLanguage, options.exportId);
   const audioMode = parseDubbedAudioMode(options.audioMode);
   if (!audioMode) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export audio mode is invalid.');
@@ -153,6 +163,34 @@ export class ContainerMediaProcessor implements MediaProcessor {
     });
   }
 
+  async extractExportAudio(
+    projectId: string,
+    exportObjectKey: string,
+    targetLanguage: TargetLanguage,
+    exportId: string,
+  ): Promise<{ audioObjectKey: string }> {
+    const expected = targetExportKeys(projectId, targetLanguage, exportId);
+    if (exportObjectKey !== expected.exportObjectKey) {
+      throw new MediaProcessorError(
+        'MEDIA_OBJECT_KEY_INVALID',
+        'Export audio extraction requires the exact canonical project export object.',
+      );
+    }
+    const result = await this.call(projectId, '/extract-export-audio', {
+      projectId,
+      objectKey: exportObjectKey,
+      targetLanguage,
+      exportId,
+    }) as { audioObjectKey?: unknown };
+    if (result.audioObjectKey !== expected.audioObjectKey) {
+      throw new MediaProcessorError(
+        'MEDIA_PROCESSOR_RESPONSE_INVALID',
+        'Media processor returned an invalid export audio object key.',
+      );
+    }
+    return { audioObjectKey: expected.audioObjectKey };
+  }
+
   async renderExport(
     projectId: string,
     objectKey: string,
@@ -172,7 +210,7 @@ export class ContainerMediaProcessor implements MediaProcessor {
       ...(options ? options : {}),
     }) as { exportObjectKey?: unknown };
     const expectedKey = options
-      ? `${projectPrefix(projectId)}exports/${options.targetLanguage}/${options.exportId}.mp4`
+      ? targetExportKeys(projectId, options.targetLanguage, options.exportId).exportObjectKey
       : `${projectPrefix(projectId)}export/dubbed.mp4`;
     if (typeof result.exportObjectKey !== 'string' || result.exportObjectKey !== expectedKey) {
       throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned an invalid export object key.');
