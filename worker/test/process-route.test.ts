@@ -30,6 +30,8 @@ describe('process route', () => {
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
+      STREAM: {},
+      STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
       DUBBING_WORKFLOW: {
         async create(input: unknown) { workflowCalls.push(input); return { id: 'workflow-1' }; },
       },
@@ -38,7 +40,9 @@ describe('process route', () => {
     const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ jobId: 'job-1', workflowId: 'workflow-1', status: 'queued' });
-    expect(workflowCalls).toEqual([{ params: { projectId: 'project-1', userId: 'dev-user', jobId: 'job-1' } }]);
+    expect(workflowCalls).toEqual([{ params: {
+      projectId: 'project-1', userId: 'dev-user', jobId: 'job-1', requestId: undefined,
+    } }]);
   });
 
   it('returns 404 without creating a job for a foreign project', async () => {

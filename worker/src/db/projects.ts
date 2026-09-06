@@ -197,12 +197,9 @@ export class ProjectRepository implements ProjectStore {
              WHEN source_object_key IS NULL OR source_object_key = ? THEN source_generation
              ELSE source_generation + 1
            END,
-           stream_video_uid = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_video_uid ELSE NULL END,
-           stream_source_object_key = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_source_object_key ELSE NULL END,
-           stream_ready_at = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_ready_at ELSE NULL END,
            source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
-    ).bind(objectKey, objectKey, objectKey, objectKey, objectKey, sizeBytes, id, userId).run();
+    ).bind(objectKey, objectKey, sizeBytes, id, userId).run();
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {

@@ -5,6 +5,12 @@ import { createExportRoutes } from '../src/routes/export';
 
 const allowExport = { async limit() { return { success: true }; } };
 const analytics = { writeDataPoint() {} };
+const streamRuntime = {
+  STREAM: {},
+  CLOUDFLARE_ACCOUNT_ID: 'account',
+  STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
+  CLOUDFLARE_STREAM_API_TOKEN: 'stream-token',
+};
 
 function phase4cExportDeps(calls?: string[]) {
   return {
@@ -62,6 +68,7 @@ describe('export route', () => {
       ...phase4cExportDeps(calls),
     }));
     const env = {
+      ...streamRuntime,
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key',
@@ -102,6 +109,7 @@ describe('export route', () => {
       ...phase4cExportDeps(calls),
     }));
     const env = {
+      ...streamRuntime,
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key', ELEVENLABS_DEFAULT_VOICE_ID: 'voice',

@@ -11,6 +11,9 @@ const fullSchema = {
   project_source_generation_column: 1,
   project_exports_audio_mode_column: 1,
   project_audio_stems_table: 1,
+  stream_video_uid_column: 1,
+  stream_source_object_key_column: 1,
+  stream_ready_at_column: 1,
 };
 
 describe('checkReadiness', () => {
@@ -29,7 +32,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 11,
+      schemaRevision: 12,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -53,7 +56,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 11,
+      schemaRevision: 12,
       asr: {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',
@@ -77,6 +80,9 @@ describe('checkReadiness', () => {
               project_source_generation_column: 0,
               project_exports_audio_mode_column: 0,
               project_audio_stems_table: 0,
+              stream_video_uid_column: 0,
+              stream_source_object_key_column: 0,
+              stream_ready_at_column: 0,
             } as T;
           },
         };
