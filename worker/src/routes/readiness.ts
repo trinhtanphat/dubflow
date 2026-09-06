@@ -8,12 +8,20 @@ export interface ReadinessDatabaseLike {
   prepare(sql: string): ReadinessStatementLike;
 }
 
+export type MediaReadinessConfig = {
+  stream?: unknown;
+  accountId?: string;
+  sourceSigningSecret?: string;
+  streamApiToken?: string;
+};
+
 export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
-  schemaRevision: 10 | null;
+  schemaRevision: 11 | null;
   asr: AsrCapabilities;
+  media?: { stream: 'ready' | 'unavailable' };
 };
 
 type ReadinessSchemaRow = {
@@ -23,9 +31,12 @@ type ReadinessSchemaRow = {
   target_languages_revision_column: number;
   project_target_languages_table: number;
   project_exports_output_column: number;
+  stream_video_uid_column: number;
+  stream_source_object_key_column: number;
+  stream_ready_at_column: number;
 };
 
-const CURRENT_SCHEMA_REVISION = 10 as const;
+const CURRENT_SCHEMA_REVISION = 11 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   if (!row) return false;
@@ -35,12 +46,36 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
     Number(row.usage_operation_column) === 1 &&
     Number(row.target_languages_revision_column) === 1 &&
     Number(row.project_target_languages_table) === 1 &&
-    Number(row.project_exports_output_column) === 1
+    Number(row.project_exports_output_column) === 1 &&
+    Number(row.stream_video_uid_column) === 1 &&
+    Number(row.stream_source_object_key_column) === 1 &&
+    Number(row.stream_ready_at_column) === 1
   );
 }
 
-export async function checkReadiness(db: ReadinessDatabaseLike, deepgramApiKey?: string): Promise<ReadinessResult> {
+function mediaStatus(config?: MediaReadinessConfig): { stream: 'ready' | 'unavailable' } | undefined {
+  if (!config) return undefined;
+  const ready = Boolean(
+    config.stream &&
+    config.accountId?.trim() &&
+    config.sourceSigningSecret?.trim() &&
+    config.streamApiToken?.trim()
+  );
+  return { stream: ready ? 'ready' : 'unavailable' };
+}
+
+function result(input: Omit<ReadinessResult, 'ready'>, media?: { stream: 'ready' | 'unavailable' }): ReadinessResult {
+  const ready = input.database === 'ready' && (!media || media.stream === 'ready');
+  return { ready, ...input, ...(media ? { media } : {}) };
+}
+
+export async function checkReadiness(
+  db: ReadinessDatabaseLike,
+  deepgramApiKey?: string,
+  mediaConfig?: MediaReadinessConfig,
+): Promise<ReadinessResult> {
   const asr = asrCapabilities(deepgramApiKey);
+  const media = mediaStatus(mediaConfig);
   try {
     const row = await db.prepare(`
       SELECT
@@ -67,33 +102,42 @@ export async function checkReadiness(db: ReadinessDatabaseLike, deepgramApiKey?:
         EXISTS(
           SELECT 1 FROM pragma_table_info('project_exports')
           WHERE name = 'output'
-        ) AS project_exports_output_column
+        ) AS project_exports_output_column,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('projects')
+          WHERE name = 'stream_video_uid'
+        ) AS stream_video_uid_column,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('projects')
+          WHERE name = 'stream_source_object_key'
+        ) AS stream_source_object_key_column,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('projects')
+          WHERE name = 'stream_ready_at'
+        ) AS stream_ready_at_column
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
-      return {
-        ready: false,
+      return result({
         service: 'dubflow',
         database: 'missing-schema',
         schemaRevision: null,
         asr,
-      };
+      }, media);
     }
 
-    return {
-      ready: true,
+    return result({
       service: 'dubflow',
       database: 'ready',
       schemaRevision: CURRENT_SCHEMA_REVISION,
       asr,
-    };
+    }, media);
   } catch {
-    return {
-      ready: false,
+    return result({
       service: 'dubflow',
       database: 'unavailable',
       schemaRevision: null,
       asr,
-    };
+    }, media);
   }
 }

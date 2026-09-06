@@ -12,6 +12,16 @@ export type ProcessRouteDeps = {
   makeJobs?: (env: Env) => JobStore;
 };
 
+function streamAdmissionError(env: Env) {
+  if (!env.STREAM) {
+    return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
+  }
+  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
+    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
+  }
+  return null;
+}
+
 export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
   const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
@@ -26,6 +36,9 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
       const project = await projects.getByIdForUser(projectId, userId);
       if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before processing.'), 400);
+
+      const admissionError = streamAdmissionError(c.env);
+      if (admissionError) return c.json(admissionError, 503);
 
       const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
       if (rateLimited) return rateLimited;
