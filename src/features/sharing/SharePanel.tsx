@@ -124,7 +124,6 @@ export function SharePanelView({
 
 export type SharePanelProps = {
   projectId: string;
-  exportId?: string;
   onClose(): void;
 };
 
@@ -132,7 +131,7 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-export function SharePanel({ projectId, exportId, onClose }: SharePanelProps) {
+export function SharePanel({ projectId, onClose }: SharePanelProps) {
   const [shares, setShares] = useState<ExportShare[]>([]);
   const [createdShareUrl, setCreatedShareUrl] = useState('');
   const [expiresInSeconds, setExpiresInSeconds] = useState(DEFAULT_SHARE_TTL_SECONDS);
@@ -143,7 +142,6 @@ export function SharePanel({ projectId, exportId, onClose }: SharePanelProps) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError('');
     setCreatedShareUrl('');
     listShares(projectId)
       .then((items) => {
@@ -158,14 +156,14 @@ export function SharePanel({ projectId, exportId, onClose }: SharePanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [projectId, exportId]);
+  }, [projectId]);
 
   const create = async () => {
     if (busy) return;
     setBusy(true);
     setError('');
     try {
-      const result = await createShare(projectId, expiresInSeconds, exportId);
+      const result = await createShare(projectId, expiresInSeconds);
       setCreatedShareUrl(result.shareUrl);
       setShares((current) => [result.share, ...current.filter((share) => share.id !== result.share.id)]);
     } catch (reason) {

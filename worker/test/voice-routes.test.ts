@@ -29,7 +29,7 @@ describe('voice HTTP routes', () => {
     expect(payload).toEqual({
       provider: 'elevenlabs',
       configured: true,
-      languages: ['vi', 'en', 'ja', 'ko', 'zh'],
+      languages: ['vi'],
       cloning: true,
       preview: true,
       cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },

@@ -21,6 +21,7 @@ type ProjectContextRow = {
 type GlossaryRow = {
   id: string;
   project_id: string;
+  target_language: 'vi' | 'en' | 'zh' | 'ja' | 'ko';
   source_term: string;
   source_term_key: string;
   preferred_translation: string;
@@ -67,9 +68,12 @@ class ContextStatement implements D1StatementLike {
 
     if (this.sql.includes('INSERT INTO project_glossary_entries')) {
       const [
-        id, projectId, sourceTerm, sourceTermKey, preferredTranslation, note, caseSensitive,
+        id, projectId, targetLanguage, sourceTerm, sourceTermKey, preferredTranslation, note, caseSensitive,
         guardedProjectId, userId, expectedRevision, countedProjectId,
-      ] = this.values as [string, string, string, string, string, string | null, number, string, string, number, string];
+      ] = this.values as [
+        string, string, GlossaryRow['target_language'], string, string, string, string | null, number,
+        string, string, number, string,
+      ];
       const project = this.memory.project;
       if (
         project.id !== projectId
@@ -80,12 +84,16 @@ class ContextStatement implements D1StatementLike {
         || this.memory.glossary.filter((row) => row.project_id === projectId).length >= MAX_GLOSSARY_ENTRIES
       ) return { meta: { changes: 0 } };
       if (this.memory.glossary.some((row) =>
-        row.project_id === projectId && row.source_term_key === sourceTermKey && row.case_sensitive === caseSensitive)) {
-        throw new Error('UNIQUE constraint failed: project_glossary_entries.project_id, project_glossary_entries.source_term_key, project_glossary_entries.case_sensitive');
+        row.project_id === projectId
+        && row.target_language === targetLanguage
+        && row.source_term_key === sourceTermKey
+        && row.case_sensitive === caseSensitive)) {
+        throw new Error('UNIQUE constraint failed: project_glossary_entries.project_id, project_glossary_entries.target_language, project_glossary_entries.source_term_key, project_glossary_entries.case_sensitive');
       }
       this.memory.glossary.push({
         id,
         project_id: projectId,
+        target_language: targetLanguage,
         source_term: sourceTerm,
         source_term_key: sourceTermKey,
         preferred_translation: preferredTranslation,
@@ -100,9 +108,12 @@ class ContextStatement implements D1StatementLike {
 
     if (this.sql.includes('UPDATE project_glossary_entries')) {
       const [
-        sourceTerm, sourceTermKey, preferredTranslation, note, caseSensitive,
+        targetLanguage, sourceTerm, sourceTermKey, preferredTranslation, note, caseSensitive,
         entryId, projectId, guardedProjectId, userId, expectedRevision,
-      ] = this.values as [string, string, string, string | null, number, string, string, string, string, number];
+      ] = this.values as [
+        GlossaryRow['target_language'], string, string, string, string | null, number,
+        string, string, string, string, number,
+      ];
       const project = this.memory.project;
       const row = this.memory.glossary.find((entry) => entry.id === entryId && entry.project_id === projectId);
       if (
@@ -112,7 +123,8 @@ class ContextStatement implements D1StatementLike {
         || project.user_id !== userId
         || project.translation_context_revision !== expectedRevision
       ) return { meta: { changes: 0 } };
-      const changed = row.source_term !== sourceTerm
+      const changed = row.target_language !== targetLanguage
+        || row.source_term !== sourceTerm
         || row.source_term_key !== sourceTermKey
         || row.preferred_translation !== preferredTranslation
         || row.note !== note
@@ -121,10 +133,12 @@ class ContextStatement implements D1StatementLike {
       if (this.memory.glossary.some((entry) =>
         entry.id !== entryId
         && entry.project_id === projectId
+        && entry.target_language === targetLanguage
         && entry.source_term_key === sourceTermKey
         && entry.case_sensitive === caseSensitive)) {
-        throw new Error('UNIQUE constraint failed: project_glossary_entries.project_id, project_glossary_entries.source_term_key, project_glossary_entries.case_sensitive');
+        throw new Error('UNIQUE constraint failed: project_glossary_entries.project_id, project_glossary_entries.target_language, project_glossary_entries.source_term_key, project_glossary_entries.case_sensitive');
       }
+      row.target_language = targetLanguage;
       row.source_term = sourceTerm;
       row.source_term_key = sourceTermKey;
       row.preferred_translation = preferredTranslation;
@@ -136,11 +150,12 @@ class ContextStatement implements D1StatementLike {
     }
 
     if (this.sql.includes('DELETE FROM project_glossary_entries')) {
-      const [entryId, projectId, guardedProjectId, userId, expectedRevision] = this.values as [
-        string, string, string, string, number,
+      const [entryId, projectId, targetLanguage, guardedProjectId, userId, expectedRevision] = this.values as [
+        string, string, GlossaryRow['target_language'], string, string, number,
       ];
       const project = this.memory.project;
-      const index = this.memory.glossary.findIndex((entry) => entry.id === entryId && entry.project_id === projectId);
+      const index = this.memory.glossary.findIndex((entry) =>
+        entry.id === entryId && entry.project_id === projectId && entry.target_language === targetLanguage);
       if (
         index < 0
         || guardedProjectId !== projectId
@@ -157,6 +172,10 @@ class ContextStatement implements D1StatementLike {
   }
 
   async first<T>() {
+    if (this.sql.includes('COUNT(*) AS entry_count')) {
+      const [projectId] = this.values as [string];
+      return { entry_count: this.memory.glossary.filter((row) => row.project_id === projectId).length } as T;
+    }
     if (this.sql.includes('FROM projects')) {
       const [projectId, userId] = this.values as [string, string];
       const project = this.memory.project;
@@ -171,9 +190,9 @@ class ContextStatement implements D1StatementLike {
 
   async all<T>() {
     if (this.sql.includes('FROM project_glossary_entries')) {
-      const [projectId] = this.values as [string];
+      const [projectId, targetLanguage] = this.values as [string, GlossaryRow['target_language']];
       const rows = this.memory.glossary
-        .filter((row) => row.project_id === projectId)
+        .filter((row) => row.project_id === projectId && row.target_language === targetLanguage)
         .sort((left, right) => left.source_term_key.localeCompare(right.source_term_key)
           || left.case_sensitive - right.case_sensitive
           || left.id.localeCompare(right.id));
@@ -201,6 +220,7 @@ class ContextMemoryDb implements D1DatabaseLike {
       this.glossary.push({
         id: `seed-${index}`,
         project_id: this.project.id,
+        target_language: 'vi',
         source_term: `Term ${index}`,
         source_term_key: `term ${String(index).padStart(3, '0')}`,
         preferred_translation: `Dịch ${index}`,
@@ -213,6 +233,8 @@ class ContextMemoryDb implements D1DatabaseLike {
     }
   }
 }
+
+const VI = { targetLanguage: 'vi' as const };
 
 describe('Phase 4A translation context primitives', () => {
   it('normalizes glossary keys deterministically', () => {
@@ -233,7 +255,7 @@ describe('Phase 4A translation context primitives', () => {
     expect(isTranslationContextActive({
       ...neutral,
       glossary: [{
-        id: 'g1', projectId: 'p1', sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null,
+        id: 'g1', projectId: 'p1', targetLanguage: 'vi', sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null,
         caseSensitive: false, createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z',
       }],
     })).toBe(true);
@@ -243,21 +265,13 @@ describe('Phase 4A translation context primitives', () => {
 describe('TranslationContextRepository style revision behavior', () => {
   it('reads the canonical default context for an owned project', async () => {
     const repo = new TranslationContextRepository(new ContextMemoryDb());
-    await expect(repo.getContext('project-1', 'dev-user')).resolves.toEqual({
-      revision: 1,
-      style: 'neutral',
-      glossary: [],
-    });
+    await expect(repo.getContext('project-1', 'dev-user')).resolves.toEqual({ revision: 1, style: 'neutral', glossary: [] });
   });
 
   it('increments the context revision exactly once for a real style change', async () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
-    await expect(repo.updateStyle('project-1', 'dev-user', 1, 'formal')).resolves.toEqual({
-      revision: 2,
-      style: 'formal',
-      glossary: [],
-    });
+    await expect(repo.updateStyle('project-1', 'dev-user', 1, 'formal')).resolves.toEqual({ revision: 2, style: 'formal', glossary: [] });
     expect(memory.project.translation_context_revision).toBe(2);
   });
 
@@ -266,11 +280,7 @@ describe('TranslationContextRepository style revision behavior', () => {
     memory.project.translation_style = 'natural';
     memory.project.translation_context_revision = 2;
     const repo = new TranslationContextRepository(memory);
-    await expect(repo.updateStyle('project-1', 'dev-user', 2, 'natural')).resolves.toEqual({
-      revision: 2,
-      style: 'natural',
-      glossary: [],
-    });
+    await expect(repo.updateStyle('project-1', 'dev-user', 2, 'natural')).resolves.toEqual({ revision: 2, style: 'natural', glossary: [] });
     expect(memory.project.translation_context_revision).toBe(2);
   });
 
@@ -280,8 +290,7 @@ describe('TranslationContextRepository style revision behavior', () => {
     memory.project.translation_context_revision = 4;
     const repo = new TranslationContextRepository(memory);
     await expect(repo.updateStyle('project-1', 'dev-user', 3, 'formal')).rejects.toMatchObject({
-      code: 'TRANSLATION_CONTEXT_CONFLICT',
-      context: { revision: 4, style: 'cinematic', glossary: [] },
+      code: 'TRANSLATION_CONTEXT_CONFLICT', context: { revision: 4, style: 'cinematic', glossary: [] },
     });
     expect(memory.project.translation_context_revision).toBe(4);
   });
@@ -300,29 +309,19 @@ describe('TranslationContextRepository glossary mutations', () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
     const result = await repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: '  Acme  ',
-      preferredTranslation: '  Acme Việt Nam  ',
-      note: '   ',
-      caseSensitive: false,
+      ...VI, sourceTerm: '  Acme  ', preferredTranslation: '  Acme Việt Nam  ', note: '   ', caseSensitive: false,
     });
     expect(result.context.revision).toBe(2);
-    expect(result.entry).toMatchObject({
-      sourceTerm: 'Acme',
-      preferredTranslation: 'Acme Việt Nam',
-      note: null,
-      caseSensitive: false,
-    });
+    expect(result.entry).toMatchObject({ targetLanguage: 'vi', sourceTerm: 'Acme', preferredTranslation: 'Acme Việt Nam', note: null, caseSensitive: false });
     expect(memory.project.translation_context_revision).toBe(2);
   });
 
   it('rejects canonical duplicates without incrementing revision', async () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
-    await repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null, caseSensitive: false,
-    });
+    await repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null, caseSensitive: false });
     await expect(repo.createEntry('project-1', 'dev-user', 2, {
-      sourceTerm: 'ＡCME', preferredTranslation: 'Acme khác', note: null, caseSensitive: false,
+      ...VI, sourceTerm: 'ＡCME', preferredTranslation: 'Acme khác', note: null, caseSensitive: false,
     })).rejects.toMatchObject({ code: 'GLOSSARY_ENTRY_CONFLICT' });
     expect(memory.project.translation_context_revision).toBe(2);
     expect(memory.glossary).toHaveLength(1);
@@ -334,7 +333,7 @@ describe('TranslationContextRepository glossary mutations', () => {
     const revision = memory.project.translation_context_revision;
     const repo = new TranslationContextRepository(memory);
     await expect(repo.createEntry('project-1', 'dev-user', revision, {
-      sourceTerm: 'Overflow', preferredTranslation: 'Tràn', note: null, caseSensitive: false,
+      ...VI, sourceTerm: 'Overflow', preferredTranslation: 'Tràn', note: null, caseSensitive: false,
     })).rejects.toMatchObject({ code: 'GLOSSARY_LIMIT_REACHED' });
     expect(memory.project.translation_context_revision).toBe(revision);
     expect(memory.glossary).toHaveLength(200);
@@ -344,15 +343,15 @@ describe('TranslationContextRepository glossary mutations', () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
     const created = await repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI', note: null, caseSensitive: true,
+      ...VI, sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI', note: null, caseSensitive: true,
     });
     const updated = await repo.updateEntry('project-1', created.entry.id, 'dev-user', 2, {
-      sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI Việt Nam', note: 'Tên riêng', caseSensitive: true,
+      ...VI, sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI Việt Nam', note: 'Tên riêng', caseSensitive: true,
     });
     expect(updated.context.revision).toBe(3);
     expect(updated.entry.preferredTranslation).toBe('OpenAI Việt Nam');
     const noOp = await repo.updateEntry('project-1', created.entry.id, 'dev-user', 3, {
-      sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI Việt Nam', note: 'Tên riêng', caseSensitive: true,
+      ...VI, sourceTerm: 'OpenAI', preferredTranslation: 'OpenAI Việt Nam', note: 'Tên riêng', caseSensitive: true,
     });
     expect(noOp.context.revision).toBe(3);
     expect(memory.project.translation_context_revision).toBe(3);
@@ -362,12 +361,12 @@ describe('TranslationContextRepository glossary mutations', () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
     const created = await repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'Brand', preferredTranslation: 'Thương hiệu', note: null, caseSensitive: false,
+      ...VI, sourceTerm: 'Brand', preferredTranslation: 'Thương hiệu', note: null, caseSensitive: false,
     });
-    const deleted = await repo.deleteEntry('project-1', created.entry.id, 'dev-user', 2);
+    const deleted = await repo.deleteEntry('project-1', created.entry.id, 'dev-user', 2, 'vi');
     expect(deleted.revision).toBe(3);
     expect(deleted.glossary).toEqual([]);
-    await expect(repo.deleteEntry('project-1', created.entry.id, 'dev-user', 3))
+    await expect(repo.deleteEntry('project-1', created.entry.id, 'dev-user', 3, 'vi'))
       .rejects.toMatchObject({ code: 'GLOSSARY_ENTRY_NOT_FOUND' });
     expect(memory.project.translation_context_revision).toBe(3);
   });
@@ -375,37 +374,30 @@ describe('TranslationContextRepository glossary mutations', () => {
   it('returns canonical context for stale glossary mutations and hides cross-user projects', async () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
-    await repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null, caseSensitive: false,
-    });
+    await repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: 'Acme', preferredTranslation: 'Acme', note: null, caseSensitive: false });
     await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'Other', preferredTranslation: 'Khác', note: null, caseSensitive: false,
+      ...VI, sourceTerm: 'Other', preferredTranslation: 'Khác', note: null, caseSensitive: false,
     })).rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_CONFLICT', context: { revision: 2 } });
     await expect(repo.createEntry('project-1', 'other-user', 2, {
-      sourceTerm: 'Other', preferredTranslation: 'Khác', note: null, caseSensitive: false,
+      ...VI, sourceTerm: 'Other', preferredTranslation: 'Khác', note: null, caseSensitive: false,
     })).rejects.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
-    await expect(repo.getContext('project-1', 'other-user')).resolves.toBeNull();
+    await expect(repo.getContext('project-1', 'other-user', 'vi')).resolves.toBeNull();
     expect(memory.project.translation_context_revision).toBe(2);
   });
 
   it('validates Unicode lengths and required glossary fields before writing', async () => {
     const memory = new ContextMemoryDb();
     const repo = new TranslationContextRepository(memory);
-    await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: '   ', preferredTranslation: 'x', note: null, caseSensitive: false,
-    })).rejects.toMatchObject({ code: 'GLOSSARY_SOURCE_TERM_INVALID' });
-    await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'x', preferredTranslation: '   ', note: null, caseSensitive: false,
-    })).rejects.toMatchObject({ code: 'GLOSSARY_TRANSLATION_INVALID' });
-    await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: '😀'.repeat(121), preferredTranslation: 'x', note: null, caseSensitive: false,
-    })).rejects.toMatchObject({ code: 'GLOSSARY_SOURCE_TERM_INVALID' });
-    await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'x', preferredTranslation: '😀'.repeat(201), note: null, caseSensitive: false,
-    })).rejects.toMatchObject({ code: 'GLOSSARY_TRANSLATION_INVALID' });
-    await expect(repo.createEntry('project-1', 'dev-user', 1, {
-      sourceTerm: 'x', preferredTranslation: 'y', note: '😀'.repeat(301), caseSensitive: false,
-    })).rejects.toMatchObject({ code: 'GLOSSARY_NOTE_INVALID' });
+    await expect(repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: '   ', preferredTranslation: 'x', note: null, caseSensitive: false }))
+      .rejects.toMatchObject({ code: 'GLOSSARY_SOURCE_TERM_INVALID' });
+    await expect(repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: 'x', preferredTranslation: '   ', note: null, caseSensitive: false }))
+      .rejects.toMatchObject({ code: 'GLOSSARY_TRANSLATION_INVALID' });
+    await expect(repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: '😀'.repeat(121), preferredTranslation: 'x', note: null, caseSensitive: false }))
+      .rejects.toMatchObject({ code: 'GLOSSARY_SOURCE_TERM_INVALID' });
+    await expect(repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: 'x', preferredTranslation: '😀'.repeat(201), note: null, caseSensitive: false }))
+      .rejects.toMatchObject({ code: 'GLOSSARY_TRANSLATION_INVALID' });
+    await expect(repo.createEntry('project-1', 'dev-user', 1, { ...VI, sourceTerm: 'x', preferredTranslation: 'y', note: '😀'.repeat(301), caseSensitive: false }))
+      .rejects.toMatchObject({ code: 'GLOSSARY_NOTE_INVALID' });
     expect(memory.project.translation_context_revision).toBe(1);
     expect(memory.glossary).toEqual([]);
   });

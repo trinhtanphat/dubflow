@@ -20,7 +20,7 @@ const shareTokenSource = read('worker/src/security/share-token.ts');
 const shareStoreSource = read('worker/src/db/shares.ts');
 const shareApiSource = read('src/features/sharing/shareApi.ts');
 const sharePanelSource = read('src/features/sharing/SharePanel.tsx');
-const studioShellSource = read('src/app/StudioShell.tsx');
+const studioShellSource = [read('src/app/StudioShell.tsx'), read('src/app/StudioShellBase.tsx')].join('\n');
 const deploymentStatus = read('docs/deployment-status.md');
 
 function assertInOrder(source, labels) {
@@ -105,16 +105,40 @@ test('Phase 3C safety gate locks validation-before-limit and limiter-before-expe
     "jobs.create(projectId, 'dubbing')",
     'DUBBING_WORKFLOW.create',
   ]);
-  assertInOrder(exportRouteSource, [
+
+  const exportValidationStart = exportRouteSource.indexOf('async function validateTarget(');
+  const exportLaunchStart = exportRouteSource.indexOf('async function launchValidated(', exportValidationStart);
+  const exportStartSingle = exportRouteSource.indexOf('async function startSingle(', exportLaunchStart);
+  const exportBatchRoute = exportRouteSource.indexOf("routes.post('/:id/exports/batch'", exportStartSingle);
+  assert.ok(
+    exportValidationStart >= 0 && exportLaunchStart > exportValidationStart
+      && exportStartSingle > exportLaunchStart && exportBatchRoute > exportStartSingle,
+    'export validation, launch, and single-start boundaries must remain identifiable',
+  );
+  const exportValidationSource = exportRouteSource.slice(exportValidationStart, exportLaunchStart);
+  const exportLaunchSource = exportRouteSource.slice(exportLaunchStart, exportStartSingle);
+  const exportSingleSource = exportRouteSource.slice(exportStartSingle, exportBatchRoute);
+
+  assertInOrder(exportValidationSource, [
     'getByIdForUser(projectId, userId)',
     'project.sourceObjectKey',
     "['needs_review', 'completed']",
-    'voiceConfigured(c.env)',
+    'makeLanguages(env).getConfig(projectId, userId)',
+    'translationsComplete(sourceSegments, variants)',
+    'voiceTargetError(getVoiceCapabilities(env), targetLanguage)',
+  ]);
+  assertInOrder(exportSingleSource, [
+    'validateTarget(c.env, projectId, userId, targetLanguage, output)',
     "enforceRateLimit(c, 'export'",
-    "jobs.create(projectId, 'export')",
+    'launchValidated(',
+  ]);
+  assertInOrder(exportLaunchSource, [
+    'exportsStore.create(projectId, userId, targetLanguage, output, batchId)',
+    'jobs.create(projectId, legacy ? \'export\'',
     "setStatus(projectId, userId, 'processing')",
     'EXPORT_WORKFLOW.create',
   ]);
+
   assertInOrder(uploadRouteSource, [
     'validateBegin(projectId, userId, await c.req.json())',
     "enforceRateLimit(c, 'upload'",
@@ -166,11 +190,8 @@ test('Phase 3C safety gate locks one-time Studio bearer-link semantics', () => {
   assert.match(sharePanelSource, /listShares\(projectId\)/);
   assert.match(sharePanelSource, /Mã cuối: \{share\.tokenHint\}/);
   assert.doesNotMatch(sharePanelSource, /tokenHint[^\n]*(?:shareUrl|\/api\/shares)/);
-  assert.match(
-    studioShellSource,
-    /shareOpen && (?:state\.project\.exportObjectKey|\(state\.project\.exportObjectKey \|\| shareExportId\))/, 
-  );
-  assert.match(studioShellSource, /<SharePanel[\s\S]*?projectId=\{state\.project\.id\}/);
+  assert.match(studioShellSource, /shareOpen && state\.project\.exportObjectKey/);
+  assert.match(studioShellSource, /<SharePanel projectId=\{state\.project\.id\}/);
 });
 
 test('Phase 3C safety gate requires source-only qualification docs without upgrading runtime status', () => {

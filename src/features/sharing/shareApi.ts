@@ -5,7 +5,6 @@ export type ShareStatus = 'active' | 'expired' | 'revoked';
 export type ExportShare = {
   id: string;
   projectId: string;
-  exportId?: string | null;
   tokenHint: string;
   exportObjectKey: string;
   expiresAt: string;
@@ -19,15 +18,12 @@ export type CreateShareResult = {
   shareUrl: string;
 };
 
-export function createShare(projectId: string, expiresInSeconds?: number, exportId?: string) {
-  const body: { expiresInSeconds?: number; exportId?: string } = {};
-  if (expiresInSeconds !== undefined) body.expiresInSeconds = expiresInSeconds;
-  if (exportId !== undefined) body.exportId = exportId;
+export function createShare(projectId: string, expiresInSeconds?: number) {
   return apiFetch<CreateShareResult>(
     `/api/projects/${encodeURIComponent(projectId)}/shares`,
     {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
     },
   );
 }

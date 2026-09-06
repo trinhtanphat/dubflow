@@ -1,4 +1,3 @@
-import { SUPPORTED_TARGET_LANGUAGES, isTargetLanguage, type TargetLanguage } from '../../domain/target-language';
 import type { VoiceGenerateInput, VoiceProvider } from './types';
 import { VoiceProviderError } from './types';
 
@@ -10,7 +9,7 @@ export type ElevenLabsVoiceConfig = {
 export type ElevenLabsVoiceCapabilities = {
   provider: 'elevenlabs';
   configured: boolean;
-  languages: TargetLanguage[];
+  languages: ['vi'];
   cloning: boolean;
   preview: boolean;
   cloneEnrollment: {
@@ -37,7 +36,7 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
     return {
       provider: 'elevenlabs',
       configured: previewConfigured,
-      languages: [...SUPPORTED_TARGET_LANGUAGES],
+      languages: ['vi'],
       cloning: apiConfigured,
       preview: previewConfigured,
       cloneEnrollment: {
@@ -52,10 +51,10 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
     const apiKey = this.apiKey.trim();
     const voiceId = (input.voice ?? this.config.defaultVoiceId ?? '').trim();
     if (!apiKey || !voiceId) {
-      throw new VoiceProviderError('VOICE_PROVIDER_UNCONFIGURED', 'ElevenLabs API key and voice id are required before voice generation can run.');
+      throw new VoiceProviderError('VOICE_PROVIDER_UNCONFIGURED', 'ElevenLabs API key and voice id are required before voice preview can run.');
     }
-    if (!isTargetLanguage(input.language)) {
-      throw new VoiceProviderError('VOICE_LANGUAGE_UNSUPPORTED', 'Voice target language is outside the YupVox bounded target set.');
+    if (input.language !== 'vi') {
+      throw new VoiceProviderError('VOICE_LANGUAGE_UNVERIFIED', 'This YupVox ElevenLabs integration is currently qualified for Vietnamese dubbing only.');
     }
 
     const response = await this.fetcher(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {

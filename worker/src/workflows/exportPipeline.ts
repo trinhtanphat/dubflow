@@ -1,26 +1,33 @@
 import type { ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
-import type { MultilangStore, TargetTranslation } from '../db/multilang';
-import type { TranslationContextStore } from '../db/translation-context';
 import type { UsageStore } from '../db/usage';
-import type { TargetLanguage } from '../domain/target-language';
+import type { ExportOutput, TargetLanguage } from '../domain/language';
+import { isTargetLanguage } from '../domain/language';
 import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
-import type { ExportRenderOptions } from '../services/media/types';
-import { isTranslationContextActive } from '../services/translation/context';
-import type { TranslationRouter } from '../services/translation/router';
 import type { VoiceGenerateInput } from '../services/voice/types';
+import type { RenderExportOptions } from '../services/media/types';
+import { serializeSrt } from '../services/subtitles/srt';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type ExportWorkflowParams = {
   projectId: string;
   userId: string;
   jobId: string;
+  exportId: string;
+  targetLanguage: TargetLanguage;
+  output: ExportOutput;
   requestId?: string;
-  exportId?: string;
-  batchId?: string;
-  targetLanguage?: TargetLanguage;
 };
+
+type LegacyExportWorkflowParams = {
+  projectId: string;
+  userId: string;
+  jobId: string;
+  requestId?: string;
+};
+
+type RunExportWorkflowParams = ExportWorkflowParams | LegacyExportWorkflowParams;
 
 export type ExportClip = {
   segmentId: string;
@@ -36,7 +43,6 @@ export interface ExportWorkflowStepLike {
 type ExportProject = {
   id: string;
   sourceObjectKey?: string | null;
-  sourceLanguage?: 'auto' | 'zh' | 'en' | 'ja' | 'ko';
   durationMs?: number | null;
 };
 
@@ -45,12 +51,31 @@ type ExportSegment = {
   speakerId?: string | null;
   startMs: number;
   endMs: number;
-  sourceText?: string;
   translatedText: string;
-  translationEngine?: string;
-  version?: number;
   voiceStatus: string;
   dubbedObjectKey?: string | null;
+  version?: number;
+};
+
+type ExportVariant = {
+  segmentId: string;
+  targetLanguage: TargetLanguage;
+  translatedText: string;
+  translationStatus: string;
+  voiceStatus: string;
+  dubbedObjectKey: string | null;
+  version: number;
+};
+
+type ExportWorkItem = {
+  id: string;
+  speakerId?: string | null;
+  startMs: number;
+  endMs: number;
+  translatedText: string;
+  voiceStatus: string;
+  dubbedObjectKey: string | null;
+  version: number;
 };
 
 type ExportSpeaker = {
@@ -68,8 +93,6 @@ type ExportJobs = {
 } & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 
 type ExportUsage = Pick<UsageStore, 'record' | 'getByOperation'>;
-type ExportTranslationContext = Pick<TranslationContextStore, 'getContext'>;
-type ExportTranslationRouter = Pick<TranslationRouter, 'translate'>;
 
 export type ExportPipelineDeps = {
   projects: {
@@ -82,6 +105,25 @@ export type ExportPipelineDeps = {
     list(projectId: string, userId: string): Promise<ExportSegment[]>;
     setVoiceResult(projectId: string, segmentId: string, userId: string, objectKey: string): Promise<void>;
   };
+  translations?: {
+    list(projectId: string, userId: string, targetLanguage: TargetLanguage): Promise<ExportVariant[]>;
+    setVoiceResult(
+      projectId: string,
+      segmentId: string,
+      userId: string,
+      targetLanguage: TargetLanguage,
+      objectKey: string,
+    ): Promise<void>;
+  };
+  exports?: {
+    complete(
+      projectId: string,
+      exportId: string,
+      userId: string,
+      keys: { exportObjectKey?: string | null; subtitleObjectKey?: string | null },
+    ): Promise<void>;
+    fail(projectId: string, exportId: string, userId: string, code: string, message: string): Promise<void>;
+  };
   speakers?: {
     list(projectId: string, userId: string): Promise<ExportSpeaker[]>;
   };
@@ -93,17 +135,55 @@ export type ExportPipelineDeps = {
   };
   media: {
     probe(objectKey: string): Promise<{ durationMs: number }>;
-    renderExport(projectId: string, sourceObjectKey: string, clips: ExportClip[], options?: ExportRenderOptions): Promise<{ exportObjectKey: string }>;
+    renderExport(
+      projectId: string,
+      sourceObjectKey: string,
+      clips: ExportClip[],
+      options?: RenderExportOptions,
+    ): Promise<{ exportObjectKey: string }>;
   };
   usage: ExportUsage;
   telemetry: TelemetrySink;
-  multilang?: MultilangStore;
-  translationContext?: ExportTranslationContext;
-  translationRouter?: ExportTranslationRouter;
+};
+
+type NormalizedExportParams = {
+  projectId: string;
+  userId: string;
+  jobId: string;
+  requestId?: string;
+  modern: boolean;
+  exportId: string | null;
+  targetLanguage: TargetLanguage;
+  output: ExportOutput;
 };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown export failure.';
+}
+
+function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParams {
+  const candidate = params as Partial<ExportWorkflowParams> & LegacyExportWorkflowParams;
+  const modernFieldPresent = candidate.exportId !== undefined || candidate.targetLanguage !== undefined || candidate.output !== undefined;
+  if (!modernFieldPresent) {
+    return { ...params, modern: false, exportId: null, targetLanguage: 'vi', output: 'dubbed' };
+  }
+  if (
+    typeof candidate.exportId !== 'string' || !candidate.exportId.trim() ||
+    !isTargetLanguage(candidate.targetLanguage) ||
+    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles')
+  ) {
+    throw new Error('Export workflow parameters are invalid.');
+  }
+  return {
+    projectId: params.projectId,
+    userId: params.userId,
+    jobId: params.jobId,
+    requestId: params.requestId,
+    modern: true,
+    exportId: candidate.exportId,
+    targetLanguage: candidate.targetLanguage,
+    output: candidate.output,
+  };
 }
 
 function legacyAudioObjectKey(projectId: string, segmentId: string): string {
@@ -111,22 +191,14 @@ function legacyAudioObjectKey(projectId: string, segmentId: string): string {
 }
 
 function targetAudioObjectKey(projectId: string, targetLanguage: TargetLanguage, segmentId: string, version: number): string {
-  return `projects/${projectId}/dubbed/${targetLanguage}/${segmentId}/${version}.mp3`;
+  return `projects/${projectId}/voices/${targetLanguage}/${segmentId}/${version}.mp3`;
 }
 
 function operationKey(jobId: string, retryCount: number, stage: string, item: string, provider: string): string {
   return `job:${jobId}:retry:${retryCount}:${stage}:${item}:${provider}`;
 }
 
-function targetOperationKey(jobId: string, retryCount: number, targetLanguage: TargetLanguage, stage: string, item: string, provider: string): string {
-  return `job:${jobId}:retry:${retryCount}:target:${targetLanguage}:${stage}:${item}:${provider}`;
-}
-
-function sourceCharacters(texts: string[]): number {
-  return Array.from(texts.join('')).length;
-}
-
-function speakerVoiceId(segment: ExportSegment, speakers: Map<string, ExportSpeaker>): string | undefined {
+function speakerVoiceId(segment: ExportWorkItem, speakers: Map<string, ExportSpeaker>): string | undefined {
   const speakerId = segment.speakerId?.trim();
   if (!speakerId) return undefined;
   const speaker = speakers.get(speakerId);
@@ -137,391 +209,325 @@ function speakerVoiceId(segment: ExportSegment, speakers: Map<string, ExportSpea
   return speaker.voiceId.trim();
 }
 
+function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
+
 async function probeTtsSeconds(deps: ExportPipelineDeps, objectKey: string): Promise<number> {
   const metadata = await deps.media.probe(objectKey);
   const seconds = metadata.durationMs / 1000;
-  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('Generated voice duration is invalid.');
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error('Generated voice duration is invalid.');
+  }
   return seconds;
 }
 
-function targetVersion(segment: ExportSegment): number {
-  if (!Number.isInteger(segment.version) || Number(segment.version) < 1) throw new Error(`Segment ${segment.id} has an invalid version.`);
-  return Number(segment.version);
-}
-
-function sourceText(segment: ExportSegment): string {
-  const text = segment.sourceText?.trim() ?? '';
-  if (!text) throw new Error(`Segment ${segment.id} has no source text.`);
-  return text;
-}
-
-async function reconcileBatchProjectStatus(
-  params: Required<Pick<ExportWorkflowParams, 'projectId' | 'userId' | 'batchId'>>,
-  deps: ExportPipelineDeps,
-): Promise<void> {
-  if (!deps.multilang) return;
-  const siblings = await deps.multilang.listBatchExports(params.projectId, params.userId, params.batchId);
-  if (siblings.length === 0) return;
-  if (siblings.some((row) => row.status === 'queued' || row.status === 'running')) {
-    await deps.projects.setStatus(params.projectId, params.userId, 'processing');
-    return;
-  }
-  if (siblings.some((row) => row.status === 'failed' || row.status === 'cancelled')) {
-    await deps.projects.setStatus(params.projectId, params.userId, 'needs_review');
-    return;
-  }
-  await deps.projects.setStatus(params.projectId, params.userId, 'completed');
-}
-
-async function loadOrTranslateTarget(
-  params: Required<Pick<ExportWorkflowParams, 'projectId' | 'userId' | 'jobId' | 'targetLanguage'>> & Pick<ExportWorkflowParams, 'requestId'>,
-  project: ExportProject,
-  segments: ExportSegment[],
-  retryCount: number,
-  deps: ExportPipelineDeps,
-  step: ExportWorkflowStepLike,
-): Promise<Map<string, TargetTranslation>> {
-  if (!deps.multilang || !deps.translationContext || !deps.translationRouter) throw new Error('Multi-language translation dependencies are unavailable.');
-  if (!project.sourceLanguage || project.sourceLanguage === 'auto') throw new Error('Resolve source language before multi-language export.');
-
-  const current = new Map<string, TargetTranslation>();
-  const missing: ExportSegment[] = [];
-  for (const segment of segments) {
-    const version = targetVersion(segment);
-    const existing = await step.do(`load ${params.targetLanguage} translation ${segment.id}`, () =>
-      deps.multilang!.getTranslation(params.projectId, segment.id, params.userId, params.targetLanguage),
-    );
-    if (existing?.translationStatus === 'completed' && existing.sourceSegmentVersion === version && existing.translatedText.trim()) {
-      current.set(segment.id, existing);
-      continue;
+function targetWorkItems(sourceSegments: ExportSegment[], variants: ExportVariant[], targetLanguage: TargetLanguage): ExportWorkItem[] {
+  if (variants.length !== sourceSegments.length) throw new Error(`Translation variants for ${targetLanguage} are incomplete.`);
+  const bySegment = new Map<string, ExportVariant>();
+  for (const variant of variants) {
+    if (variant.targetLanguage !== targetLanguage || bySegment.has(variant.segmentId)) {
+      throw new Error(`Translation variants for ${targetLanguage} are structurally invalid.`);
     }
-    if (params.targetLanguage === 'vi' && segment.translatedText.trim()) {
-      const mirrored: TargetTranslation = {
-        segmentId: segment.id,
-        projectId: params.projectId,
-        targetLanguage: 'vi',
-        translatedText: segment.translatedText,
-        translationEngine: segment.translationEngine ?? 'workers-ai',
-        translationStatus: 'completed',
-        contextRevision: null,
-        sourceSegmentVersion: version,
-        version: (existing?.version ?? 0) + 1,
-      };
-      await step.do(`mirror Vietnamese translation ${segment.id}`, () => deps.multilang!.upsertTranslation({ ...mirrored, userId: params.userId }));
-      current.set(segment.id, mirrored);
-      continue;
-    }
-    missing.push(segment);
+    bySegment.set(variant.segmentId, variant);
   }
-  if (missing.length === 0) return current;
-
-  const context = await step.do(`load ${params.targetLanguage} translation context snapshot`, () =>
-    deps.translationContext!.getContext(params.projectId, params.userId),
-  );
-  if (!context) throw new Error('Project translation context not found.');
-  const expectedProvider = isTranslationContextActive(context) ? 'workers-ai-contextual' : 'workers-ai';
-  const batchSize = 25;
-  for (let offset = 0; offset < missing.length; offset += batchSize) {
-    const batch = missing.slice(offset, offset + batchSize);
-    const items = batch.map((segment) => ({ id: segment.id, text: sourceText(segment) }));
-    const usageKey = targetOperationKey(params.jobId, retryCount, params.targetLanguage, 'translation', `batch-${offset}`, expectedProvider);
-    const units = sourceCharacters(items.map((item) => item.text));
-    const common = {
-      userId: params.userId,
-      projectId: params.projectId,
-      jobId: params.jobId,
-      kind: 'translation_character' as const,
-      units,
-      provider: expectedProvider,
-      operationKey: usageKey,
+  const sourceIds = new Set(sourceSegments.map((segment) => segment.id));
+  if ([...bySegment.keys()].some((id) => !sourceIds.has(id))) {
+    throw new Error(`Translation variants for ${targetLanguage} include an unknown segment.`);
+  }
+  return sourceSegments.map((segment) => {
+    const variant = bySegment.get(segment.id);
+    if (!variant || variant.translationStatus !== 'completed' || !variant.translatedText.trim()) {
+      throw new Error(`Segment ${segment.id} has no completed ${targetLanguage} translation.`);
+    }
+    if (!Number.isInteger(variant.version) || variant.version < 1) {
+      throw new Error(`Segment ${segment.id} has an invalid ${targetLanguage} version.`);
+    }
+    return {
+      id: segment.id,
+      speakerId: segment.speakerId,
+      startMs: segment.startMs,
+      endMs: segment.endMs,
+      translatedText: variant.translatedText,
+      voiceStatus: variant.voiceStatus,
+      dubbedObjectKey: variant.dubbedObjectKey,
+      version: variant.version,
     };
-    await step.do(`start ${params.targetLanguage} translation usage ${offset}`, () => deps.usage.record({ ...common, phase: 'started' }));
-    const routed = await step.do(`translate ${params.targetLanguage} segments ${offset + 1}-${offset + batch.length}`, () =>
-      withProviderTelemetry(deps.telemetry, {
-        requestId: params.requestId,
-        actorId: params.userId,
-        projectId: params.projectId,
-        jobId: params.jobId,
-        operation: 'translate',
-        provider: expectedProvider,
-        errorCode: 'TRANSLATION_FAILED',
-      }, () => deps.translationRouter!.translate(undefined, items, project.sourceLanguage!, params.targetLanguage, context)),
+  });
+}
+
+function legacyWorkItems(segments: ExportSegment[]): ExportWorkItem[] {
+  return segments.map((segment) => ({
+    id: segment.id,
+    speakerId: segment.speakerId,
+    startMs: segment.startMs,
+    endMs: segment.endMs,
+    translatedText: segment.translatedText,
+    voiceStatus: segment.voiceStatus,
+    dubbedObjectKey: segment.dubbedObjectKey ?? null,
+    version: Number.isInteger(segment.version) && Number(segment.version) > 0 ? Number(segment.version) : 1,
+  }));
+}
+
+export async function runExportPipeline(
+  inputParams: RunExportWorkflowParams,
+  deps: ExportPipelineDeps,
+  step: ExportWorkflowStepLike,
+): Promise<{ status: 'completed'; exportObjectKey: string } | { status: 'completed'; subtitleObjectKey: string }> {
+  let params: NormalizedExportParams | null = null;
+  try {
+    params = normalizeParams(inputParams);
+    const ensureActive = () => assertJobActive(deps.jobs, params!.projectId, params!.jobId, params!.userId);
+    const project = await step.do('authorize export project', async () =>
+      deps.projects.getByIdForUser(params!.projectId, params!.userId),
     );
-    if (routed.mode === 'compare') throw new Error('Compare mode cannot be persisted by export workflow.');
-    const actualProvider = routed.mode === 'contextual' ? 'workers-ai-contextual' : routed.mode === 'google' ? 'google' : 'workers-ai';
-    if (actualProvider !== expectedProvider) throw new Error(`Translation provider mismatch: expected ${expectedProvider}, received ${actualProvider}.`);
-    const byId = new Map(routed.primary.map((row) => [row.id, row]));
-    if (byId.size !== items.length) throw new Error('Translation results did not preserve segment ids.');
-    for (const segment of batch) {
-      const translated = byId.get(segment.id);
-      if (!translated?.text.trim()) throw new Error(`Missing translation result for ${segment.id}.`);
-      const previous = await deps.multilang.getTranslation(params.projectId, segment.id, params.userId, params.targetLanguage);
-      const row: TargetTranslation = {
-        segmentId: segment.id,
-        projectId: params.projectId,
-        targetLanguage: params.targetLanguage,
-        translatedText: translated.text,
-        translationEngine: routed.mode === 'google' ? 'google' : 'workers-ai',
-        translationStatus: 'completed',
-        contextRevision: routed.contextRevision,
-        sourceSegmentVersion: targetVersion(segment),
-        version: (previous?.version ?? 0) + 1,
-      };
-      await deps.multilang.upsertTranslation({ ...row, userId: params.userId });
-      current.set(segment.id, row);
-    }
-    await step.do(`complete ${params.targetLanguage} translation usage ${offset}`, () => deps.usage.record({ ...common, phase: 'completed' }));
-  }
-  return current;
-}
-
-async function runTargetExportPipeline(
-  params: ExportWorkflowParams,
-  deps: ExportPipelineDeps,
-  step: ExportWorkflowStepLike,
-): Promise<{ status: 'completed'; exportObjectKey: string }> {
-  if (!params.exportId || !params.batchId || !params.targetLanguage || !deps.multilang) {
-    throw new Error('Target export identity is incomplete.');
-  }
-  const targetLanguage = params.targetLanguage;
-  const targetParams = { projectId: params.projectId, userId: params.userId, jobId: params.jobId, targetLanguage, requestId: params.requestId };
-  const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
-  try {
-    const project = await step.do('authorize target export project', () => deps.projects.getByIdForUser(params.projectId, params.userId));
-    if (!project?.sourceObjectKey) throw new Error('Project source media is missing.');
-    const job = await step.do('load target export retry generation', () => deps.jobs.getForProject(params.projectId, params.jobId, params.userId));
-    if (!job) throw new Error('Job not found.');
-    if (job.status === 'cancelled') throw new JobCancelledError();
-    if (!Number.isInteger(job.retryCount) || job.retryCount < 0) throw new Error('Job retry generation is invalid.');
-    const retryCount = job.retryCount;
-
-    const segments = await step.do('load target export segments', () => deps.segments.list(params.projectId, params.userId));
-    if (segments.length === 0) throw new Error('No segments are available for export.');
-    const translations = await loadOrTranslateTarget(targetParams, project, segments, retryCount, deps, step);
-    const speakerRows = deps.speakers ? await step.do('load target export speaker voices', () => deps.speakers!.list(params.projectId, params.userId)) : [];
-    const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
-
-    await step.do('mark target export processing', async () => {
-      await deps.multilang!.setExportRunning(params.projectId, params.exportId!, params.userId);
-      await deps.projects.setStatus(params.projectId, params.userId, 'processing');
-      await deps.jobs.setProgress(params.jobId, 0.08, 'generating_voice');
-    });
-
-    const clips: ExportClip[] = [];
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
-      await step.do(`check cancellation before target voice ${segment.id}`, ensureActive);
-      const translation = translations.get(segment.id);
-      if (!translation?.translatedText.trim()) throw new Error(`Segment ${segment.id} has no ${targetLanguage} translation.`);
-      const segmentVersion = targetVersion(segment);
-      const existingDub = await step.do(`load ${targetLanguage} dub ${segment.id}`, () =>
-        deps.multilang!.getDub(params.projectId, segment.id, params.userId, targetLanguage),
-      );
-      let objectKey = existingDub?.status === 'completed'
-        && existingDub.objectKey
-        && existingDub.segmentVersion === segmentVersion
-        && existingDub.translationVersion === translation.version
-        ? existingDub.objectKey
-        : null;
-      const provider = 'elevenlabs';
-      const usageKey = targetOperationKey(params.jobId, retryCount, targetLanguage, 'tts', segment.id, provider);
-      const started = await step.do(`load target TTS started ${segment.id}`, () => deps.usage.getByOperation(usageKey, 'started'));
-      const completed = await step.do(`load target TTS completed ${segment.id}`, () => deps.usage.getByOperation(usageKey, 'completed'));
-
-      if (objectKey) {
-        if (started && !completed) {
-          await step.do(`recover target TTS usage ${segment.id}`, async () => {
-            const units = await probeTtsSeconds(deps, objectKey!);
-            await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units, provider, phase: 'completed', operationKey: usageKey });
-          });
-        }
-      } else {
-        if (completed) throw new Error(`Segment ${segment.id} has completed target TTS usage without a durable artifact.`);
-        if (!deps.bucket.put) throw new Error('R2 put is unavailable for voice generation.');
-        objectKey = targetAudioObjectKey(params.projectId, targetLanguage, segment.id, segmentVersion);
-        await step.do(`generate ${targetLanguage} voice ${segment.id}`, async () => {
-          await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units: 0, provider, phase: 'started', operationKey: usageKey });
-          const voice = speakerVoiceId(segment, speakers);
-          const input: VoiceGenerateInput = voice
-            ? { text: translation.translatedText.trim(), language: targetLanguage, voice }
-            : { text: translation.translatedText.trim(), language: targetLanguage };
-          const generated = await withProviderTelemetry(deps.telemetry, {
-            requestId: params.requestId, actorId: params.userId, projectId: params.projectId, jobId: params.jobId,
-            operation: 'voice', provider, errorCode: 'VOICE_PROVIDER_FAILED',
-          }, () => deps.voice.generate(input));
-          if (!(generated instanceof Response) || !generated.ok) throw new Error('Voice provider returned an invalid response.');
-          const audio = await generated.arrayBuffer();
-          if (audio.byteLength === 0) throw new Error('Voice provider returned empty audio.');
-          await deps.bucket.put!(objectKey!, audio);
-          const durationSeconds = await probeTtsSeconds(deps, objectKey!);
-          await deps.multilang!.upsertDub({
-            segmentId: segment.id, projectId: params.projectId, targetLanguage, status: 'completed', objectKey,
-            voiceProvider: provider, voiceId: voice ?? null, translationVersion: translation.version,
-            segmentVersion, durationMs: Math.round(durationSeconds * 1000), userId: params.userId,
-          });
-          if (targetLanguage === 'vi') await deps.segments.setVoiceResult(params.projectId, segment.id, params.userId, objectKey!);
-          await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units: durationSeconds, provider, phase: 'completed', operationKey: usageKey });
-        });
-      }
-      clips.push({ segmentId: segment.id, startMs: segment.startMs, endMs: segment.endMs, objectKey });
-      await step.do(`persist target voice progress ${segment.id}`, () => deps.jobs.setProgress(params.jobId, 0.1 + ((index + 1) / segments.length) * 0.55, 'generating_voice'));
-    }
-
-    await step.do('check cancellation before target render', ensureActive);
-    const renderSeconds = Number(project.durationMs) / 1000;
-    if (!Number.isFinite(renderSeconds) || renderSeconds <= 0) throw new Error('Project duration is missing or invalid for render metering.');
-    const renderProvider = 'ffmpeg-container';
-    const renderKey = targetOperationKey(params.jobId, retryCount, targetLanguage, 'render', params.exportId, renderProvider);
-    const rendered = await step.do(`render ${targetLanguage} dubbed media`, async () => {
-      await deps.jobs.setProgress(params.jobId, 0.72, 'rendering_export');
-      const common = { userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'render_second' as const, units: renderSeconds, provider: renderProvider, operationKey: renderKey };
-      await deps.usage.record({ ...common, phase: 'started' });
-      const options: ExportRenderOptions = { targetLanguage, exportId: params.exportId! };
-      const result = await withProviderTelemetry(deps.telemetry, {
-        requestId: params.requestId, actorId: params.userId, projectId: params.projectId, jobId: params.jobId,
-        operation: 'render', provider: renderProvider, errorCode: 'MEDIA_RENDER_FAILED',
-      }, () => deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips, options));
-      const expectedPrefix = `projects/${params.projectId}/exports/${targetLanguage}/${params.exportId}`;
-      if (!result.exportObjectKey?.startsWith(expectedPrefix)) throw new Error('Media processor returned an invalid target export object key.');
-      await deps.usage.record({ ...common, phase: 'completed' });
-      return result;
-    });
-
-    await step.do('publish target export', async () => {
-      await deps.multilang!.completeExport(params.projectId, params.exportId!, params.userId, rendered.exportObjectKey);
-      if (targetLanguage === 'vi') await deps.projects.setExportObject(params.projectId, params.userId, rendered.exportObjectKey);
-      await deps.jobs.complete(params.jobId);
-      await reconcileBatchProjectStatus({ projectId: params.projectId, userId: params.userId, batchId: params.batchId! }, deps);
-    });
-    return { status: 'completed', exportObjectKey: rendered.exportObjectKey };
-  } catch (error) {
-    try {
-      if (params.exportId && deps.multilang) {
-        if (isJobCancelledError(error)) {
-          await deps.multilang.cancelExport(params.projectId, params.exportId, params.userId, 'EXPORT_CANCELLED');
-        } else {
-          await deps.multilang.failExport(params.projectId, params.exportId, params.userId, 'EXPORT_FAILED');
-        }
-      }
-      if (!isJobCancelledError(error)) await deps.jobs.fail(params.jobId, 'EXPORT_FAILED', errorMessage(error));
-      if (params.batchId) await reconcileBatchProjectStatus({ projectId: params.projectId, userId: params.userId, batchId: params.batchId }, deps);
-    } catch {
-      // Preserve the target export failure if durable failure recording also fails.
-    }
-    throw error;
-  }
-}
-
-async function runLegacyExportPipeline(
-  params: ExportWorkflowParams,
-  deps: ExportPipelineDeps,
-  step: ExportWorkflowStepLike,
-): Promise<{ status: 'completed'; exportObjectKey: string }> {
-  const ensureActive = () => assertJobActive(deps.jobs, params.projectId, params.jobId, params.userId);
-  try {
-    const project = await step.do('authorize export project', async () => deps.projects.getByIdForUser(params.projectId, params.userId));
     if (!project) throw new Error('Project not found.');
-    if (!project.sourceObjectKey) throw new Error('Project source media is missing.');
-    const job = await step.do('load export retry generation', async () => deps.jobs.getForProject(params.projectId, params.jobId, params.userId));
+    if (params.output === 'dubbed' && !project.sourceObjectKey) throw new Error('Project source media is missing.');
+
+    const job = await step.do('load export retry generation', async () =>
+      deps.jobs.getForProject(params!.projectId, params!.jobId, params!.userId),
+    );
     if (!job) throw new Error('Job not found.');
     if (job.status === 'cancelled') throw new JobCancelledError();
     if (!Number.isInteger(job.retryCount) || job.retryCount < 0) throw new Error('Job retry generation is invalid.');
     const retryCount = job.retryCount;
-    const segments = await step.do('load translated export segments', async () => deps.segments.list(params.projectId, params.userId));
-    if (segments.length === 0) throw new Error('No translated segments are available for export.');
-    const emptyTranslation = segments.find((segment) => !segment.translatedText.trim());
-    if (emptyTranslation) throw new Error(`Segment ${emptyTranslation.id} has no translated text.`);
-    const speakerRows = deps.speakers ? await step.do('load export speaker voices', async () => deps.speakers!.list(params.projectId, params.userId)) : [];
-    const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
+
+    const sourceSegments = await step.do('load canonical export segments', async () =>
+      deps.segments.list(params!.projectId, params!.userId),
+    );
+    if (sourceSegments.length === 0) throw new Error('No translated segments are available for export.');
+
+    let segments: ExportWorkItem[];
+    if (params.modern) {
+      if (!deps.translations || !deps.exports || !params.exportId) throw new Error('Target export persistence is unavailable.');
+      const variants = await step.do(`load ${params.targetLanguage} export variants`, async () =>
+        deps.translations!.list(params!.projectId, params!.userId, params!.targetLanguage),
+      );
+      segments = targetWorkItems(sourceSegments, variants, params.targetLanguage);
+    } else {
+      segments = legacyWorkItems(sourceSegments);
+      const emptyTranslation = segments.find((segment) => !segment.translatedText.trim());
+      if (emptyTranslation) throw new Error(`Segment ${emptyTranslation.id} has no translated text.`);
+    }
+
     await step.do('check cancellation before export processing', ensureActive);
+
+    if (params.output === 'subtitles') {
+      if (!params.modern || !params.exportId || !deps.exports) throw new Error('Subtitle export requires target export persistence.');
+      if (!deps.bucket.put) throw new Error('R2 put is unavailable for subtitle export.');
+      const subtitleObjectKey = `projects/${params.projectId}/subtitles/${params.targetLanguage}/${params.exportId}.srt`;
+      const text = serializeSrt(segments.map((segment, index) => ({
+        index: index + 1,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        text: segment.translatedText,
+      })));
+      await step.do('publish target subtitles', async () => {
+        await deps.bucket.put!(subtitleObjectKey, arrayBuffer(new TextEncoder().encode(text)));
+        await deps.exports!.complete(params!.projectId, params!.exportId!, params!.userId, { subtitleObjectKey });
+        await deps.jobs.complete(params!.jobId);
+      });
+      return { status: 'completed', subtitleObjectKey };
+    }
+
+    const speakerRows = deps.speakers
+      ? await step.do('load export speaker voices', async () => deps.speakers!.list(params!.projectId, params!.userId))
+      : [];
+    const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
+
     await step.do('mark export processing', async () => {
-      await deps.projects.setStatus(params.projectId, params.userId, 'processing');
-      await deps.jobs.setProgress(params.jobId, 0.05, 'generating_voice');
+      if (!params!.modern) await deps.projects.setStatus(params!.projectId, params!.userId, 'processing');
+      await deps.jobs.setProgress(params!.jobId, 0.05, 'generating_voice');
     });
+
     const clips: ExportClip[] = [];
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index];
       await step.do(`check cancellation before voice ${segment.id}`, ensureActive);
-      let objectKey = segment.voiceStatus === 'completed' && segment.dubbedObjectKey ? segment.dubbedObjectKey : null;
+      const expectedObjectKey = params.modern
+        ? targetAudioObjectKey(params.projectId, params.targetLanguage, segment.id, segment.version)
+        : legacyAudioObjectKey(params.projectId, segment.id);
+      let objectKey = segment.voiceStatus === 'completed' && segment.dubbedObjectKey
+        && (!params.modern || segment.dubbedObjectKey === expectedObjectKey)
+        ? segment.dubbedObjectKey
+        : null;
+
       const ttsProvider = 'elevenlabs';
-      const ttsKey = operationKey(params.jobId, retryCount, 'tts', segment.id, ttsProvider);
+      const ttsItem = params.modern ? `${params.targetLanguage}:${segment.id}` : segment.id;
+      const ttsKey = operationKey(params.jobId, retryCount, 'tts', ttsItem, ttsProvider);
       const started = await step.do(`load TTS started usage ${segment.id}`, async () => deps.usage.getByOperation(ttsKey, 'started'));
       const completed = await step.do(`load TTS completed usage ${segment.id}`, async () => deps.usage.getByOperation(ttsKey, 'completed'));
+
       if (objectKey) {
         if (started && !completed) {
           await step.do(`recover TTS usage ${segment.id}`, async () => {
             const units = await probeTtsSeconds(deps, objectKey!);
-            await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units, provider: ttsProvider, phase: 'completed', operationKey: ttsKey });
+            await deps.usage.record({
+              userId: params!.userId,
+              projectId: params!.projectId,
+              jobId: params!.jobId,
+              kind: 'tts_audio_second',
+              units,
+              provider: ttsProvider,
+              phase: 'completed',
+              operationKey: ttsKey,
+            });
           });
         }
       } else {
         if (completed) throw new Error(`Segment ${segment.id} has completed TTS usage without a durable voice artifact.`);
-        objectKey = legacyAudioObjectKey(params.projectId, segment.id);
+        objectKey = expectedObjectKey;
         await step.do(`generate voice ${segment.id}`, async () => {
           if (!deps.bucket.put) throw new Error('R2 put is unavailable for voice generation.');
-          await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units: 0, provider: ttsProvider, phase: 'started', operationKey: ttsKey });
+          await deps.usage.record({
+            userId: params!.userId,
+            projectId: params!.projectId,
+            jobId: params!.jobId,
+            kind: 'tts_audio_second',
+            units: 0,
+            provider: ttsProvider,
+            phase: 'started',
+            operationKey: ttsKey,
+          });
           const text = segment.translatedText.trim();
           const voice = speakerVoiceId(segment, speakers);
-          const input: VoiceGenerateInput = voice ? { text, language: 'vi', voice } : { text, language: 'vi' };
+          const input: VoiceGenerateInput = voice
+            ? { text, language: params!.targetLanguage, voice }
+            : { text, language: params!.targetLanguage };
           const generated = await withProviderTelemetry(deps.telemetry, {
-            requestId: params.requestId, actorId: params.userId, projectId: params.projectId, jobId: params.jobId,
-            operation: 'voice', provider: ttsProvider, errorCode: 'VOICE_PROVIDER_FAILED',
+            requestId: params!.requestId,
+            actorId: params!.userId,
+            projectId: params!.projectId,
+            jobId: params!.jobId,
+            operation: 'voice',
+            provider: ttsProvider,
+            errorCode: 'VOICE_PROVIDER_FAILED',
           }, () => deps.voice.generate(input));
           if (!(generated instanceof Response)) throw new Error('Voice provider returned an unsupported response.');
           if (!generated.ok) throw new Error(`Voice provider failed (${generated.status}).`);
           const audio = await generated.arrayBuffer();
           if (audio.byteLength === 0) throw new Error('Voice provider returned empty audio.');
           await deps.bucket.put(objectKey!, audio);
-          await deps.segments.setVoiceResult(params.projectId, segment.id, params.userId, objectKey!);
+          if (params!.modern) {
+            await deps.translations!.setVoiceResult(params!.projectId, segment.id, params!.userId, params!.targetLanguage, objectKey!);
+          } else {
+            await deps.segments.setVoiceResult(params!.projectId, segment.id, params!.userId, objectKey!);
+          }
           const units = await probeTtsSeconds(deps, objectKey!);
-          await deps.usage.record({ userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'tts_audio_second', units, provider: ttsProvider, phase: 'completed', operationKey: ttsKey });
+          await deps.usage.record({
+            userId: params!.userId,
+            projectId: params!.projectId,
+            jobId: params!.jobId,
+            kind: 'tts_audio_second',
+            units,
+            provider: ttsProvider,
+            phase: 'completed',
+            operationKey: ttsKey,
+          });
         });
       }
+
       clips.push({ segmentId: segment.id, startMs: segment.startMs, endMs: segment.endMs, objectKey });
-      await step.do(`persist voice progress ${segment.id}`, async () => deps.jobs.setProgress(params.jobId, 0.1 + ((index + 1) / segments.length) * 0.55, 'generating_voice'));
+      const progress = 0.1 + ((index + 1) / segments.length) * 0.55;
+      await step.do(`persist voice progress ${segment.id}`, async () =>
+        deps.jobs.setProgress(params!.jobId, progress, 'generating_voice'),
+      );
     }
+
     await step.do('check cancellation before export render', ensureActive);
-    await step.do('mark render stage', async () => deps.jobs.setProgress(params.jobId, 0.72, 'rendering_export'));
+    await step.do('mark render stage', async () => deps.jobs.setProgress(params!.jobId, 0.72, 'rendering_export'));
+
     const renderSeconds = Number(project.durationMs) / 1000;
     if (!Number.isFinite(renderSeconds) || renderSeconds <= 0) throw new Error('Project duration is missing or invalid for render metering.');
     const renderProvider = 'ffmpeg-container';
-    const renderKey = operationKey(params.jobId, retryCount, 'render', 'final', renderProvider);
+    const renderItem = params.modern ? `${params.targetLanguage}:final` : 'final';
+    const renderKey = operationKey(params.jobId, retryCount, 'render', renderItem, renderProvider);
     const rendered = await step.do('render final dubbed media', async () => {
-      const common = { userId: params.userId, projectId: params.projectId, jobId: params.jobId, kind: 'render_second' as const, units: renderSeconds, provider: renderProvider, operationKey: renderKey };
+      const common = {
+        userId: params!.userId,
+        projectId: params!.projectId,
+        jobId: params!.jobId,
+        kind: 'render_second' as const,
+        units: renderSeconds,
+        provider: renderProvider,
+        operationKey: renderKey,
+      };
       await deps.usage.record({ ...common, phase: 'started' });
+      const options = params!.modern
+        ? { targetLanguage: params!.targetLanguage, exportId: params!.exportId! }
+        : undefined;
       const result = await withProviderTelemetry(deps.telemetry, {
-        requestId: params.requestId, actorId: params.userId, projectId: params.projectId, jobId: params.jobId,
-        operation: 'render', provider: renderProvider, errorCode: 'MEDIA_RENDER_FAILED',
-      }, () => deps.media.renderExport(params.projectId, project.sourceObjectKey!, clips));
-      if (!result.exportObjectKey?.startsWith(`projects/${params.projectId}/export/`)) throw new Error('Media processor returned an invalid export object key.');
+        requestId: params!.requestId,
+        actorId: params!.userId,
+        projectId: params!.projectId,
+        jobId: params!.jobId,
+        operation: 'render',
+        provider: renderProvider,
+        errorCode: 'MEDIA_RENDER_FAILED',
+      }, () => options
+        ? deps.media.renderExport(params!.projectId, project.sourceObjectKey!, clips, options)
+        : deps.media.renderExport(params!.projectId, project.sourceObjectKey!, clips));
+      const expected = params!.modern
+        ? `projects/${params!.projectId}/exports/${params!.targetLanguage}/${params!.exportId}.mp4`
+        : null;
+      if (
+        typeof result.exportObjectKey !== 'string' ||
+        (expected ? result.exportObjectKey !== expected : !result.exportObjectKey.startsWith(`projects/${params!.projectId}/export/`))
+      ) {
+        throw new Error('Media processor returned an invalid export object key.');
+      }
       await deps.usage.record({ ...common, phase: 'completed' });
       return result;
     });
+
     await step.do('check cancellation before export publish', ensureActive);
     await step.do('publish final export', async () => {
-      await deps.projects.setExportObject(params.projectId, params.userId, rendered.exportObjectKey);
-      await deps.projects.setStatus(params.projectId, params.userId, 'completed');
-      await deps.jobs.complete(params.jobId);
+      if (params!.modern) {
+        await deps.exports!.complete(params!.projectId, params!.exportId!, params!.userId, { exportObjectKey: rendered.exportObjectKey });
+        if (params!.targetLanguage === 'vi') {
+          await deps.projects.setExportObject(params!.projectId, params!.userId, rendered.exportObjectKey);
+        }
+      } else {
+        await deps.projects.setExportObject(params!.projectId, params!.userId, rendered.exportObjectKey);
+        await deps.projects.setStatus(params!.projectId, params!.userId, 'completed');
+      }
+      await deps.jobs.complete(params!.jobId);
     });
+
     return { status: 'completed', exportObjectKey: rendered.exportObjectKey };
   } catch (error) {
+    const effective = params ?? {
+      projectId: inputParams.projectId,
+      userId: inputParams.userId,
+      jobId: inputParams.jobId,
+      requestId: inputParams.requestId,
+      modern: false,
+      exportId: null,
+      targetLanguage: 'vi' as const,
+      output: 'dubbed' as const,
+    };
     if (isJobCancelledError(error)) {
-      try { await deps.projects.setStatus(params.projectId, params.userId, 'cancelled'); } catch { /* preserve cancellation */ }
+      if (!effective.modern) {
+        try {
+          await deps.projects.setStatus(effective.projectId, effective.userId, 'cancelled');
+        } catch {
+          // Preserve the cancellation error if the project status write also fails.
+        }
+      }
       throw error;
     }
+
+    const message = errorMessage(error);
     try {
-      await deps.jobs.fail(params.jobId, 'EXPORT_FAILED', errorMessage(error));
-      await deps.projects.setStatus(params.projectId, params.userId, 'needs_review');
-    } catch { /* preserve original export failure */ }
+      await deps.jobs.fail(effective.jobId, 'EXPORT_FAILED', message);
+      if (effective.modern && effective.exportId && deps.exports) {
+        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, 'EXPORT_FAILED', message);
+      } else {
+        await deps.projects.setStatus(effective.projectId, effective.userId, 'needs_review');
+      }
+    } catch {
+      // Preserve the original export failure if durable failure recording also fails.
+    }
     throw error;
   }
-}
-
-export async function runExportPipeline(
-  params: ExportWorkflowParams,
-  deps: ExportPipelineDeps,
-  step: ExportWorkflowStepLike,
-): Promise<{ status: 'completed'; exportObjectKey: string }> {
-  if (params.exportId || params.targetLanguage || params.batchId) return runTargetExportPipeline(params, deps, step);
-  return runLegacyExportPipeline(params, deps, step);
 }

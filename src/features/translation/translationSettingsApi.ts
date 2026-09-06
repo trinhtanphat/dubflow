@@ -1,4 +1,5 @@
 import { ApiError, apiFetch } from '../../lib/api/client';
+import type { TargetLanguage } from './languageVariantsApi';
 
 export type TranslationStyle = 'neutral' | 'natural' | 'formal' | 'casual' | 'cinematic';
 
@@ -18,6 +19,7 @@ export type GlossaryEntryInputDto = {
 export type GlossaryEntryDto = {
   id: string;
   projectId: string;
+  targetLanguage?: TargetLanguage;
   sourceTerm: string;
   preferredTranslation: string;
   note: string | null;
@@ -33,6 +35,7 @@ export type TranslationContextSnapshotDto = {
 };
 
 export type GlossaryListDto = {
+  targetLanguage: TargetLanguage;
   contextRevision: number;
   glossary: GlossaryEntryDto[];
 };
@@ -44,6 +47,7 @@ export type GlossaryMutationDto = {
 };
 
 export type GlossaryDeleteDto = {
+  targetLanguage?: TargetLanguage;
   contextRevision: number;
   context: TranslationContextSnapshotDto;
 };
@@ -69,6 +73,7 @@ function isGlossaryEntry(value: unknown): value is GlossaryEntryDto {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
     && typeof value.projectId === 'string'
+    && (value.targetLanguage === undefined || typeof value.targetLanguage === 'string')
     && typeof value.sourceTerm === 'string'
     && typeof value.preferredTranslation === 'string'
     && (value.note === null || typeof value.note === 'string')
@@ -112,12 +117,16 @@ function projectPath(projectId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}`;
 }
 
+function glossaryQuery(targetLanguage: TargetLanguage) {
+  return `?targetLanguage=${encodeURIComponent(targetLanguage)}`;
+}
+
 export function loadTranslationSettings(projectId: string) {
   return apiFetch<TranslationSettings>(`${projectPath(projectId)}/translation-settings`);
 }
 
-export function loadGlossary(projectId: string) {
-  return apiFetch<GlossaryListDto>(`${projectPath(projectId)}/glossary`);
+export function loadGlossary(projectId: string, targetLanguage: TargetLanguage = 'vi') {
+  return apiFetch<GlossaryListDto>(`${projectPath(projectId)}/glossary${glossaryQuery(targetLanguage)}`);
 }
 
 export function updateTranslationStyle(
@@ -138,12 +147,13 @@ export function createGlossaryEntry(
   projectId: string,
   expectedContextRevision: number,
   input: GlossaryEntryInputDto,
+  targetLanguage: TargetLanguage = 'vi',
 ) {
   return withContextConflict(() => apiFetch<GlossaryMutationDto>(
     `${projectPath(projectId)}/glossary`,
     {
       method: 'POST',
-      body: JSON.stringify({ expectedContextRevision, ...input }),
+      body: JSON.stringify({ expectedContextRevision, targetLanguage, ...input }),
     },
   ));
 }
@@ -153,12 +163,13 @@ export function updateGlossaryEntry(
   entryId: string,
   expectedContextRevision: number,
   input: GlossaryEntryInputDto,
+  targetLanguage: TargetLanguage = 'vi',
 ) {
   return withContextConflict(() => apiFetch<GlossaryMutationDto>(
     `${projectPath(projectId)}/glossary/${encodeURIComponent(entryId)}`,
     {
       method: 'PATCH',
-      body: JSON.stringify({ expectedContextRevision, ...input }),
+      body: JSON.stringify({ expectedContextRevision, targetLanguage, ...input }),
     },
   ));
 }
@@ -167,12 +178,13 @@ export function deleteGlossaryEntry(
   projectId: string,
   entryId: string,
   expectedContextRevision: number,
+  targetLanguage: TargetLanguage = 'vi',
 ) {
   return withContextConflict(() => apiFetch<GlossaryDeleteDto>(
     `${projectPath(projectId)}/glossary/${encodeURIComponent(entryId)}`,
     {
       method: 'DELETE',
-      body: JSON.stringify({ expectedContextRevision }),
+      body: JSON.stringify({ expectedContextRevision, targetLanguage }),
     },
   ));
 }

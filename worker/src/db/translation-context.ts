@@ -1,4 +1,5 @@
 import type { D1DatabaseLike, D1RunResultLike } from './projects';
+import type { TargetLanguage } from '../domain/language';
 import {
   MAX_GLOSSARY_ENTRIES,
   normalizeGlossaryInput,
@@ -11,7 +12,7 @@ import {
 } from '../services/translation/context';
 
 export interface TranslationContextStore {
-  getContext(projectId: string, userId: string): Promise<TranslationContext | null>;
+  getContext(projectId: string, userId: string, targetLanguage?: TargetLanguage): Promise<TranslationContext | null>;
   updateStyle(projectId: string, userId: string, expectedRevision: number, style: TranslationStyle): Promise<TranslationContext>;
   createEntry(
     projectId: string,
@@ -26,7 +27,13 @@ export interface TranslationContextStore {
     expectedRevision: number,
     input: GlossaryEntryInput,
   ): Promise<{ entry: GlossaryEntry; context: TranslationContext }>;
-  deleteEntry(projectId: string, entryId: string, userId: string, expectedRevision: number): Promise<TranslationContext>;
+  deleteEntry(
+    projectId: string,
+    entryId: string,
+    userId: string,
+    expectedRevision: number,
+    targetLanguage?: TargetLanguage,
+  ): Promise<TranslationContext>;
 }
 
 export class TranslationContextPersistenceError extends Error {
@@ -48,6 +55,7 @@ type ProjectContextRow = {
 type GlossaryRow = {
   id: string;
   project_id: string;
+  target_language: TargetLanguage;
   source_term: string;
   preferred_translation: string;
   note: string | null;
@@ -65,6 +73,7 @@ function glossaryFromRow(row: GlossaryRow): GlossaryEntry {
   return {
     id: row.id,
     projectId: row.project_id,
+    targetLanguage: row.target_language,
     sourceTerm: row.source_term,
     preferredTranslation: row.preferred_translation,
     note: row.note ?? null,
@@ -80,7 +89,8 @@ function isUniqueGlossaryError(error: unknown): boolean {
 }
 
 function entryMatches(entry: GlossaryEntry, input: NormalizedGlossaryEntryInput): boolean {
-  return entry.sourceTerm === input.sourceTerm
+  return entry.targetLanguage === input.targetLanguage
+    && entry.sourceTerm === input.sourceTerm
     && entry.preferredTranslation === input.preferredTranslation
     && entry.note === input.note
     && entry.caseSensitive === input.caseSensitive;
@@ -98,7 +108,7 @@ function requireExpectedRevision(expectedRevision: number): void {
 export class TranslationContextRepository implements TranslationContextStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
-  async getContext(projectId: string, userId: string): Promise<TranslationContext | null> {
+  async getContext(projectId: string, userId: string, targetLanguage: TargetLanguage = 'vi'): Promise<TranslationContext | null> {
     const project = await this.db.prepare(
       `SELECT translation_style, translation_context_revision
        FROM projects
@@ -108,11 +118,11 @@ export class TranslationContextRepository implements TranslationContextStore {
     if (!project) return null;
 
     const glossary = await this.db.prepare(
-      `SELECT id, project_id, source_term, preferred_translation, note, case_sensitive, created_at, updated_at
+      `SELECT id, project_id, target_language, source_term, preferred_translation, note, case_sensitive, created_at, updated_at
        FROM project_glossary_entries
-       WHERE project_id = ?
+       WHERE project_id = ? AND target_language = ?
        ORDER BY source_term_key ASC, case_sensitive ASC, id ASC`,
-    ).bind(projectId).all<GlossaryRow>();
+    ).bind(projectId, targetLanguage).all<GlossaryRow>();
 
     return {
       revision: Number(project.translation_context_revision),
@@ -141,9 +151,7 @@ export class TranslationContextRepository implements TranslationContextStore {
          AND translation_style <> ?`,
     ).bind(normalizedStyle, projectId, userId, expectedRevision, normalizedStyle).run();
 
-    if (affectedRows(changed) > 0) {
-      return this.requireCanonical(projectId, userId);
-    }
+    if (affectedRows(changed) > 0) return this.requireCanonical(projectId, userId, 'vi');
 
     const noOp = await this.db.prepare(
       `UPDATE projects
@@ -154,11 +162,9 @@ export class TranslationContextRepository implements TranslationContextStore {
          AND translation_style = ?`,
     ).bind(projectId, userId, expectedRevision, normalizedStyle).run();
 
-    if (affectedRows(noOp) > 0) {
-      return this.requireCanonical(projectId, userId);
-    }
+    if (affectedRows(noOp) > 0) return this.requireCanonical(projectId, userId, 'vi');
 
-    const canonical = await this.getContext(projectId, userId);
+    const canonical = await this.getContext(projectId, userId, 'vi');
     if (!canonical) throw this.projectNotFound();
     if (canonical.revision === expectedRevision && canonical.style === normalizedStyle) return canonical;
     throw this.contextConflict(canonical);
@@ -177,9 +183,9 @@ export class TranslationContextRepository implements TranslationContextStore {
     try {
       const result = await this.db.prepare(
         `INSERT INTO project_glossary_entries (
-           id, project_id, source_term, source_term_key, preferred_translation, note, case_sensitive
+           id, project_id, target_language, source_term, source_term_key, preferred_translation, note, case_sensitive
          )
-         SELECT ?, ?, ?, ?, ?, ?, ?
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
          WHERE EXISTS (
            SELECT 1 FROM projects
            WHERE id = ? AND user_id = ? AND translation_context_revision = ?
@@ -188,6 +194,7 @@ export class TranslationContextRepository implements TranslationContextStore {
       ).bind(
         id,
         projectId,
+        normalized.targetLanguage,
         normalized.sourceTerm,
         normalized.sourceTermKey,
         normalized.preferredTranslation,
@@ -200,44 +207,34 @@ export class TranslationContextRepository implements TranslationContextStore {
       ).run();
 
       if (affectedRows(result) > 0) {
-        const context = await this.requireCanonical(projectId, userId);
+        const context = await this.requireCanonical(projectId, userId, normalized.targetLanguage);
         const entry = context.glossary.find((candidate) => candidate.id === id);
-        if (!entry) {
-          throw new TranslationContextPersistenceError(
-            'GLOSSARY_CREATE_FAILED',
-            'Glossary entry was not found after creation.',
-            context,
-          );
-        }
+        if (!entry) throw new TranslationContextPersistenceError('GLOSSARY_CREATE_FAILED', 'Glossary entry was not found after creation.', context);
         return { entry, context };
       }
     } catch (error) {
       if (!isUniqueGlossaryError(error)) throw error;
-      const canonical = await this.getContext(projectId, userId);
+      const canonical = await this.getContext(projectId, userId, normalized.targetLanguage);
       if (!canonical) throw this.projectNotFound();
       if (canonical.revision !== expectedRevision) throw this.contextConflict(canonical);
       throw new TranslationContextPersistenceError(
         'GLOSSARY_ENTRY_CONFLICT',
-        'A glossary entry with the same canonical source term already exists.',
+        'A glossary entry with the same canonical source term already exists for this target language.',
         canonical,
       );
     }
 
-    const canonical = await this.getContext(projectId, userId);
+    const canonical = await this.getContext(projectId, userId, normalized.targetLanguage);
     if (!canonical) throw this.projectNotFound();
     if (canonical.revision !== expectedRevision) throw this.contextConflict(canonical);
-    if (canonical.glossary.length >= MAX_GLOSSARY_ENTRIES) {
+    if (await this.countProjectGlossary(projectId) >= MAX_GLOSSARY_ENTRIES) {
       throw new TranslationContextPersistenceError(
         'GLOSSARY_LIMIT_REACHED',
         `A project can contain at most ${MAX_GLOSSARY_ENTRIES} glossary entries.`,
         canonical,
       );
     }
-    throw new TranslationContextPersistenceError(
-      'GLOSSARY_CREATE_FAILED',
-      'Glossary entry could not be created.',
-      canonical,
-    );
+    throw new TranslationContextPersistenceError('GLOSSARY_CREATE_FAILED', 'Glossary entry could not be created.', canonical);
   }
 
   async updateEntry(
@@ -253,7 +250,8 @@ export class TranslationContextRepository implements TranslationContextStore {
     try {
       const result = await this.db.prepare(
         `UPDATE project_glossary_entries
-         SET source_term = ?,
+         SET target_language = ?,
+             source_term = ?,
              source_term_key = ?,
              preferred_translation = ?,
              note = ?,
@@ -266,13 +264,15 @@ export class TranslationContextRepository implements TranslationContextStore {
              WHERE id = ? AND user_id = ? AND translation_context_revision = ?
            )
            AND (
-             source_term <> ?
+             target_language <> ?
+             OR source_term <> ?
              OR source_term_key <> ?
              OR preferred_translation <> ?
              OR note IS NOT ?
              OR case_sensitive <> ?
            )`,
       ).bind(
+        normalized.targetLanguage,
         normalized.sourceTerm,
         normalized.sourceTermKey,
         normalized.preferredTranslation,
@@ -283,6 +283,7 @@ export class TranslationContextRepository implements TranslationContextStore {
         projectId,
         userId,
         expectedRevision,
+        normalized.targetLanguage,
         normalized.sourceTerm,
         normalized.sourceTermKey,
         normalized.preferredTranslation,
@@ -291,46 +292,30 @@ export class TranslationContextRepository implements TranslationContextStore {
       ).run();
 
       if (affectedRows(result) > 0) {
-        const context = await this.requireCanonical(projectId, userId);
+        const context = await this.requireCanonical(projectId, userId, normalized.targetLanguage);
         const entry = context.glossary.find((candidate) => candidate.id === entryId);
-        if (!entry) {
-          throw new TranslationContextPersistenceError(
-            'GLOSSARY_ENTRY_NOT_FOUND',
-            'Glossary entry not found.',
-            context,
-          );
-        }
+        if (!entry) throw new TranslationContextPersistenceError('GLOSSARY_ENTRY_NOT_FOUND', 'Glossary entry not found.', context);
         return { entry, context };
       }
     } catch (error) {
       if (!isUniqueGlossaryError(error)) throw error;
-      const canonical = await this.getContext(projectId, userId);
+      const canonical = await this.getContext(projectId, userId, normalized.targetLanguage);
       if (!canonical) throw this.projectNotFound();
       if (canonical.revision !== expectedRevision) throw this.contextConflict(canonical);
       throw new TranslationContextPersistenceError(
         'GLOSSARY_ENTRY_CONFLICT',
-        'A glossary entry with the same canonical source term already exists.',
+        'A glossary entry with the same canonical source term already exists for this target language.',
         canonical,
       );
     }
 
-    const canonical = await this.getContext(projectId, userId);
+    const canonical = await this.getContext(projectId, userId, normalized.targetLanguage);
     if (!canonical) throw this.projectNotFound();
     if (canonical.revision !== expectedRevision) throw this.contextConflict(canonical);
     const entry = canonical.glossary.find((candidate) => candidate.id === entryId);
-    if (!entry) {
-      throw new TranslationContextPersistenceError(
-        'GLOSSARY_ENTRY_NOT_FOUND',
-        'Glossary entry not found.',
-        canonical,
-      );
-    }
+    if (!entry) throw new TranslationContextPersistenceError('GLOSSARY_ENTRY_NOT_FOUND', 'Glossary entry not found.', canonical);
     if (entryMatches(entry, normalized)) return { entry, context: canonical };
-    throw new TranslationContextPersistenceError(
-      'GLOSSARY_UPDATE_FAILED',
-      'Glossary entry could not be updated.',
-      canonical,
-    );
+    throw new TranslationContextPersistenceError('GLOSSARY_UPDATE_FAILED', 'Glossary entry could not be updated.', canonical);
   }
 
   async deleteEntry(
@@ -338,39 +323,40 @@ export class TranslationContextRepository implements TranslationContextStore {
     entryId: string,
     userId: string,
     expectedRevision: number,
+    targetLanguage: TargetLanguage = 'vi',
   ): Promise<TranslationContext> {
     requireExpectedRevision(expectedRevision);
     const result = await this.db.prepare(
       `DELETE FROM project_glossary_entries
        WHERE id = ?
          AND project_id = ?
+         AND target_language = ?
          AND EXISTS (
            SELECT 1 FROM projects
            WHERE id = ? AND user_id = ? AND translation_context_revision = ?
          )`,
-    ).bind(entryId, projectId, projectId, userId, expectedRevision).run();
+    ).bind(entryId, projectId, targetLanguage, projectId, userId, expectedRevision).run();
 
-    if (affectedRows(result) > 0) return this.requireCanonical(projectId, userId);
+    if (affectedRows(result) > 0) return this.requireCanonical(projectId, userId, targetLanguage);
 
-    const canonical = await this.getContext(projectId, userId);
+    const canonical = await this.getContext(projectId, userId, targetLanguage);
     if (!canonical) throw this.projectNotFound();
     if (canonical.revision !== expectedRevision) throw this.contextConflict(canonical);
     if (!canonical.glossary.some((entry) => entry.id === entryId)) {
-      throw new TranslationContextPersistenceError(
-        'GLOSSARY_ENTRY_NOT_FOUND',
-        'Glossary entry not found.',
-        canonical,
-      );
+      throw new TranslationContextPersistenceError('GLOSSARY_ENTRY_NOT_FOUND', 'Glossary entry not found.', canonical);
     }
-    throw new TranslationContextPersistenceError(
-      'GLOSSARY_DELETE_FAILED',
-      'Glossary entry could not be deleted.',
-      canonical,
-    );
+    throw new TranslationContextPersistenceError('GLOSSARY_DELETE_FAILED', 'Glossary entry could not be deleted.', canonical);
   }
 
-  private async requireCanonical(projectId: string, userId: string): Promise<TranslationContext> {
-    const canonical = await this.getContext(projectId, userId);
+  private async countProjectGlossary(projectId: string): Promise<number> {
+    const row = await this.db.prepare(
+      `SELECT COUNT(*) AS entry_count FROM project_glossary_entries WHERE project_id = ?`,
+    ).bind(projectId).first<{ entry_count: number }>();
+    return Math.max(0, Number(row?.entry_count ?? 0));
+  }
+
+  private async requireCanonical(projectId: string, userId: string, targetLanguage: TargetLanguage): Promise<TranslationContext> {
+    const canonical = await this.getContext(projectId, userId, targetLanguage);
     if (!canonical) throw this.projectNotFound();
     return canonical;
   }

@@ -201,7 +201,7 @@ export async function runDubbingPipeline(
 
     failureCode = 'TRANSLATION_FAILED';
     const context = await step.do('load translation context snapshot', async () =>
-      deps.translationContext.getContext(params.projectId, params.userId),
+      deps.translationContext.getContext(params.projectId, params.userId, 'vi'),
     );
     if (!context) throw new Error('Project translation context not found.');
     const expectedTranslationProvider = isTranslationContextActive(context)

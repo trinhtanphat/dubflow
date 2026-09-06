@@ -5,6 +5,7 @@ const glossary = [
   {
     id: 'g1',
     projectId: 'cloud-p1',
+    targetLanguage: 'vi' as const,
     sourceTerm: 'Acme',
     preferredTranslation: 'Acme',
     note: 'Tên thương hiệu',
@@ -15,6 +16,7 @@ const glossary = [
   {
     id: 'g2',
     projectId: 'cloud-p1',
+    targetLanguage: 'vi' as const,
     sourceTerm: 'Azure Gate',
     preferredTranslation: 'Cổng Azure',
     note: null,
@@ -119,5 +121,49 @@ describe('TranslationSettingsPanel view contract', () => {
       conflictMessage: 'Thiết lập dịch đã thay đổi ở nơi khác. Đã tải bản mới nhất.',
     });
     expect(replay).not.toHaveBeenCalled();
+  });
+
+  it('renders a glossary target selector and filters entries to only the selected language', async () => {
+    const panel = await panelModule();
+    const jaEntry = {
+      ...glossary[0],
+      id: 'g-ja',
+      targetLanguage: 'ja' as const,
+      preferredTranslation: 'エーシーエムイー',
+    };
+    const mixed = [...glossary, jaEntry];
+
+    expect(panel.filterGlossaryEntries(mixed, '', 'ja')).toEqual([jaEntry]);
+
+    const html = renderToStaticMarkup(
+      <panel.TranslationSettingsPanelView
+        settings={{ stylePreset: 'natural', contextRevision: 10, contextualAvailable: true }}
+        glossary={mixed}
+        glossaryTargetLanguage="ja"
+        glossaryTargets={['vi', 'ja']}
+        filter=""
+        draft={null}
+        editingEntryId={null}
+        loading={false}
+        saving={false}
+        error=""
+        changed={false}
+        conflictMessage=""
+        onGlossaryTargetChange={vi.fn()}
+        onFilterChange={vi.fn()}
+        onStyleChange={vi.fn()}
+        onStartCreate={vi.fn()}
+        onStartEdit={vi.fn()}
+        onDraftChange={vi.fn()}
+        onCancelEdit={vi.fn()}
+        onSaveDraft={vi.fn()}
+        onDeleteEntry={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Ngôn ngữ thuật ngữ"');
+    expect(html).toContain('日本語');
+    expect(html).toContain('エーシーエムイー');
+    expect(html).not.toContain('Cổng Azure');
   });
 });

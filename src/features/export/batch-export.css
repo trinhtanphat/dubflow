@@ -1,0 +1,104 @@
+.phase4c-studio-wrapper { position: relative; }
+.phase4c-studio-dock {
+  position: fixed;
+  left: 14px;
+  bottom: 42px;
+  z-index: 40;
+  width: min(330px, calc(100vw - 28px));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(17, 18, 24, .97);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .34);
+}
+.phase4c-studio-dock > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.phase4c-studio-dock > summary::-webkit-details-marker { display: none; }
+.phase4c-studio-dock__body { display: grid; gap: 10px; padding: 0 10px 10px; max-height: 68vh; overflow: auto; }
+.target-languages,
+.batch-export { display: grid; gap: 8px; }
+.target-languages__head,
+.batch-export__head,
+.target-languages__row,
+.batch-export__result,
+.batch-export__actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.target-languages__head,
+.batch-export__head { justify-content: space-between; }
+.target-languages__head > div { display: flex; align-items: baseline; gap: 6px; }
+.target-languages__head strong,
+.batch-export__head strong { font-size: 11px; }
+.target-languages__head small,
+.target-languages__current span { color: var(--muted); font-size: 8px; }
+.target-languages__current { display: grid; gap: 4px; }
+.target-languages select,
+.batch-export select,
+.translation-settings__target-select select {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0 7px;
+  font-size: 9px;
+}
+.target-languages__grid,
+.batch-export__languages,
+.batch-export__results { display: grid; gap: 5px; }
+.target-languages__row,
+.batch-export__result {
+  min-height: 30px;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.target-languages__row > label:first-child { display: flex; align-items: center; gap: 5px; min-width: 88px; font-size: 9px; }
+.target-languages__row input,
+.batch-export__languages input { accent-color: var(--purple); }
+.target-languages__row small { margin-left: auto; color: var(--muted); font-size: 8px; }
+.target-languages__status.is-ready,
+.target-languages__status.is-completed { color: var(--green); }
+.target-languages__status.is-failed { color: var(--red); }
+.target-languages__status.is-translating,
+.target-languages__status.is-exporting { color: #d8b46a; }
+.target-languages__batch { display: flex; align-items: center; gap: 3px; color: var(--muted); font-size: 8px; }
+.target-languages__row .ghost-button,
+.batch-export__result .ghost-button { padding: 4px 6px; font-size: 8px; }
+.target-languages__error,
+.batch-export__error,
+.batch-export__guard,
+.batch-export__success,
+.phase4c-target-conflict { margin: 0; font-size: 9px; line-height: 1.4; }
+.target-languages__error,
+.batch-export__error { color: var(--red); }
+.batch-export__guard,
+.phase4c-target-conflict { color: #e5bd70; }
+.batch-export__success { color: var(--green); }
+.batch-export__languages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.batch-export__languages label { display: flex; align-items: center; gap: 5px; color: #c9c4d4; font-size: 9px; }
+.batch-export__actions { align-items: stretch; }
+.batch-export__actions button { flex: 1; padding: 6px 7px; font-size: 8px; }
+.batch-export__result span { min-width: 72px; font-size: 9px; }
+.batch-export__result strong { margin-left: auto; font-size: 8px; }
+.batch-export__result.is-queued strong { color: var(--green); }
+.batch-export__result.is-failed strong { color: var(--red); }
+.translation-settings-target-shell { display: grid; gap: 7px; }
+.translation-settings__target-select { display: grid; gap: 4px; }
+.translation-settings__target-select > span { color: var(--muted); font-size: 9px; }
+.phase4c-target-conflict { position: fixed; right: 16px; bottom: 48px; z-index: 45; max-width: 360px; padding: 8px 10px; border: 1px solid rgba(229,189,112,.35); border-radius: 8px; background: #18150f; }
+@media (max-width: 760px) {
+  .phase4c-studio-dock { left: 10px; right: 10px; bottom: 10px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .phase4c-studio-dock, .phase4c-studio-dock * { transition: none !important; animation: none !important; }
+}

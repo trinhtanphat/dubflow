@@ -17,9 +17,13 @@ const activeContext = {
 };
 
 describe('Workers AI translation', () => {
-  it('advertises raw-only availability', () => {
+  it('advertises raw-only availability for every Phase 4C target', () => {
     const provider = new WorkersAITranslationProvider(new FakeAI());
-    expect(provider).toHaveProperty('capabilities', { contextual: false, available: true });
+    expect(provider).toHaveProperty('capabilities', {
+      contextual: false,
+      available: true,
+      targets: ['vi', 'en', 'zh', 'ja', 'ko'],
+    });
   });
 
   it('preserves ids and maps source/target languages without trusting model identity', async () => {

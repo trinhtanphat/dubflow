@@ -29,7 +29,8 @@
   "ai": { "binding": "AI" },
   "workflows": [
     { "binding": "DUBBING_WORKFLOW", "name": "dubflow-dubbing", "class_name": "DubbingWorkflow" },
-    { "binding": "EXPORT_WORKFLOW", "name": "dubflow-export", "class_name": "ExportWorkflow" }
+    { "binding": "EXPORT_WORKFLOW", "name": "dubflow-export", "class_name": "ExportWorkflow" },
+    { "binding": "LANGUAGE_TRANSLATION_WORKFLOW", "name": "dubflow-language-translation", "class_name": "LanguageTranslationWorkflow" }
   ],
   "containers": [
     { "class_name": "FfmpegContainer", "image": "./containers/ffmpeg/Dockerfile", "max_instances": 4, "instance_type": "standard-1" }
