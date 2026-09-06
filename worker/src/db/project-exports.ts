@@ -109,6 +109,25 @@ export class ProjectExportRepository {
     return row ? fromRow(row) : null;
   }
 
+  async latestCompleted(
+    projectId: string,
+    userId: string,
+    targetLanguage: TargetLanguage,
+    output: ExportOutput,
+  ): Promise<ProjectExport | null> {
+    const row = await this.db.prepare(
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
+       FROM project_exports e
+       JOIN projects p ON p.id = e.project_id
+       WHERE e.project_id = ? AND e.target_language = ? AND e.output = ?
+         AND e.status = 'completed' AND p.user_id = ?
+       ORDER BY e.created_at DESC, e.id DESC
+       LIMIT 1`,
+    ).bind(projectId, targetLanguage, output, userId).first<ProjectExportRow>();
+    return row ? fromRow(row) : null;
+  }
+
   async listBatch(projectId: string, userId: string, batchId: string): Promise<ProjectExport[]> {
     const result = await this.db.prepare(
       `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
