@@ -1,10 +1,14 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { ShareRepository, type ShareStore } from '../db/shares';
 import { errorBody } from '../http/json';
+import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
+import { createTelemetry, emitTelemetry, type TelemetrySink } from '../observability/telemetry';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
-import { createShareToken } from '../security/share-token';
+import { createShareToken, hashShareToken } from '../security/share-token';
 
 const DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MIN_SHARE_TTL_SECONDS = 60 * 60;
@@ -14,6 +18,14 @@ export type ProjectShareRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
   makeShares?: (env: Env) => ShareStore;
   createToken?: typeof createShareToken;
+  now?: () => Date;
+};
+
+export type PublicShareRouteDeps = {
+  makeShares?: (env: Env) => ShareStore;
+  makeBucket?: (env: Env) => R2ReadableBucketLike;
+  makeTelemetry?: (env: Env) => TelemetrySink;
+  hashToken?: typeof hashShareToken;
   now?: () => Date;
 };
 
@@ -35,6 +47,19 @@ async function readCreateBody(request: Request): Promise<Record<string, unknown>
   } catch {
     return null;
   }
+}
+
+function readableBucket(env: Env): R2ReadableBucketLike {
+  return {
+    async head(key) {
+      if (!env.MEDIA.head) return null;
+      return env.MEDIA.head(key);
+    },
+    async get(key, options) {
+      if (!env.MEDIA.get) return null;
+      return env.MEDIA.get(key, options);
+    },
+  };
 }
 
 export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
@@ -98,6 +123,79 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     const share = await makeShares(c.env).revoke(projectId, c.req.param('shareId'), userId, now());
     if (!share) return c.json(errorBody('SHARE_NOT_FOUND', 'Share not found.'), 404);
     return c.json(share);
+  });
+
+  return routes;
+}
+
+export function createPublicShareRoutes(deps: PublicShareRouteDeps = {}) {
+  const routes = new Hono<WorkerHonoEnv>();
+  const makeShares = deps.makeShares ?? ((env: Env) => new ShareRepository(env.DB));
+  const makeBucket = deps.makeBucket ?? readableBucket;
+  const makeTelemetry = deps.makeTelemetry ?? createTelemetry;
+  const hashToken = deps.hashToken ?? hashShareToken;
+  const now = deps.now ?? (() => new Date());
+
+  routes.get('/shares/:shareId/media', async (c) => {
+    const shareId = c.req.param('shareId');
+    const requestId = c.get('requestId');
+    const telemetry = makeTelemetry(c.env);
+    const rawToken = c.req.query('token')?.trim() ?? '';
+
+    const notFound = () => {
+      emitTelemetry(telemetry, {
+        name: 'share_access',
+        requestId,
+        shareId,
+        accessMode: 'share',
+        httpStatus: 404,
+        status: 'not_found',
+      });
+      return c.json(errorBody('SHARE_NOT_FOUND', 'Share not found.'), 404);
+    };
+
+    if (!rawToken) return notFound();
+
+    const tokenHash = await hashToken(rawToken);
+    const share = await makeShares(c.env).resolveActive(shareId, tokenHash, now());
+    if (!share) return notFound();
+
+    try {
+      const response = await streamMediaObject(
+        makeBucket(c.env),
+        share.exportObjectKey,
+        c.req.raw,
+        `${share.projectId}-dubbed.mp4`,
+      );
+      const rangeRequest = Boolean(c.req.header('range'));
+      const success = response.status === 200 || response.status === 206;
+      emitTelemetry(telemetry, {
+        name: 'share_access',
+        requestId,
+        shareId: share.id,
+        projectId: share.projectId,
+        accessMode: 'share',
+        httpStatus: response.status,
+        rangeRequest,
+        status: success ? 'success' : 'rejected',
+      });
+      if (success) {
+        emitTelemetry(telemetry, {
+          name: 'export_download',
+          requestId,
+          shareId: share.id,
+          projectId: share.projectId,
+          accessMode: 'share',
+          httpStatus: response.status,
+          rangeRequest,
+          status: 'success',
+        });
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof MediaObjectNotFoundError) return notFound();
+      throw error;
+    }
   });
 
   return routes;
