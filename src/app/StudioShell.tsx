@@ -4,6 +4,7 @@ import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPan
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
 import { ScriptInspector } from '../features/transcript/ScriptInspector';
+import { SharePanel } from '../features/sharing/SharePanel';
 import { MIN_SEGMENT_MS } from '../features/timeline/editing';
 import { Timeline, type SegmentEditIntent } from '../features/timeline/Timeline';
 import {
@@ -248,6 +249,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
   const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
   const previousSelectedSegmentId = useRef(state.selectedSegmentId);
@@ -507,6 +509,8 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         canExport={canExport}
         exportBusy={exportBusy}
         exportHref={exportHref}
+        canShare={Boolean(exportHref)}
+        onShare={() => setShareOpen((value) => !value)}
         onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
@@ -514,6 +518,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         onOpenSources={() => toggleMobilePanel('sources')}
         onOpenInspector={() => toggleMobilePanel('inspector')}
       />
+
+      {shareOpen && state.project.exportObjectKey ? (
+        <SharePanel projectId={state.project.id} onClose={() => setShareOpen(false)} />
+      ) : null}
 
       <CommandPalette
         open={commandPaletteOpen}

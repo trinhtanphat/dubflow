@@ -21,7 +21,7 @@ const [
   packageSource,
   deploymentStatus,
 ] = await Promise.all([
-  source('migrations/0006_translation_context.sql'),
+  source('migrations/0007_translation_context.sql'),
   source('worker/src/services/translation/context.ts'),
   source('worker/src/db/translation-context.ts'),
   source('worker/src/services/translation/router.ts'),

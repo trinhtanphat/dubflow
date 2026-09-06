@@ -1,5 +1,9 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import { createTelemetry, withProviderTelemetry } from '../observability/telemetry';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
+import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { VoiceProviderError } from '../services/voice/types';
 import { WorkersAIVoiceProvider } from '../services/voice/workers-ai';
@@ -11,7 +15,7 @@ function hasElevenLabs(env: Env) {
 }
 
 export function createVoiceRoutes(fetcher: FetchLike = fetch) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
 
   routes.get('/capabilities', (c) => {
     if (hasElevenLabs(c.env)) {
@@ -50,6 +54,10 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
       return c.json({ code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'ElevenLabs voice preview is not configured.' }, 503);
     }
 
+    const userId = getCurrentUserId();
+    const rateLimited = await enforceRateLimit(c, 'voice', userId);
+    if (rateLimited) return rateLimited;
+
     const provider = new ElevenLabsVoiceProvider(
       c.env.ELEVENLABS_API_KEY ?? '',
       { defaultVoiceId: c.env.ELEVENLABS_DEFAULT_VOICE_ID },
@@ -57,7 +65,13 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
     );
 
     try {
-      const audio = await provider.generate({ text, language, ...(voice ? { voice } : {}) });
+      const audio = await withProviderTelemetry(createTelemetry(c.env), {
+        requestId: c.get('requestId'),
+        actorId: userId,
+        operation: 'voice',
+        provider: 'elevenlabs',
+        errorCode: 'VOICE_PROVIDER_FAILED',
+      }, () => provider.generate({ text, language, ...(voice ? { voice } : {}) }));
       const headers = new Headers();
       headers.set('content-type', audio.headers.get('content-type') ?? 'audio/mpeg');
       headers.set('cache-control', 'no-store');

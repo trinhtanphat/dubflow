@@ -59,6 +59,22 @@ describe('R2 multipart upload service', () => {
     expect(() => normalizeUploadInput({ filename: 'movie.mp4', sizeBytes: 5 * 1024 ** 3 + 1, contentType: 'video/mp4' })).toThrow(UploadInputError);
   });
 
+  it('validates ownership and media before creating any multipart upload', async () => {
+    const store = new MemoryProjectStore();
+    const bucket = new MemoryBucket();
+    const service = new UploadService(bucket, store, () => 'asset-1');
+
+    const validated = await service.validateBegin('project-1', 'dev-user', {
+      filename: 'movie.mp4', sizeBytes: 1000, contentType: 'video/mp4',
+    });
+    expect(bucket.multipart).toBeUndefined();
+    expect(validated.extension).toBe('mp4');
+
+    const begun = await service.beginValidated('project-1', validated);
+    expect(bucket.multipart?.key).toBe('projects/project-1/source/asset-1.mp4');
+    expect(begun.objectKey).toBe('projects/project-1/source/asset-1.mp4');
+  });
+
   it('confines keys to the project, uploads a stream part, and persists completed object size', async () => {
     const store = new MemoryProjectStore();
     const bucket = new MemoryBucket();

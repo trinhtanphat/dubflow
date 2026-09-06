@@ -10,6 +10,8 @@ type SegmentRow = {
   translation_status: string; voice_status: string; version: number; split_parent_id: string | null;
 };
 
+type AnalyticsPoint = { blobs?: string[]; doubles?: number[]; indexes?: string[] };
+
 class Statement implements D1StatementLike {
   values: unknown[] = [];
   constructor(private readonly db: FakeDb, readonly sql: string) {}
@@ -74,15 +76,31 @@ function makeApp() {
   return app;
 }
 
-function envFor(db: FakeDb) {
+function envFor(db: FakeDb, options: {
+  allowed?: boolean;
+  calls?: string[];
+  points?: AnalyticsPoint[];
+  providerFailure?: string;
+} = {}) {
+  const calls = options.calls ?? [];
+  const points = options.points ?? [];
   return {
     DB: db,
     AI: {
       async run(_model: string, input: unknown) {
+        calls.push('provider:workers-ai');
+        if (options.providerFailure) throw new Error(options.providerFailure);
         if (input && typeof input === 'object' && Array.isArray((input as any).messages)) {
           return { response: JSON.stringify({ translations: [{ id: 's1', text: 'contextual-result' }] }) };
         }
         return { translated_text: 'provider-result' };
+      },
+    },
+    ANALYTICS: { writeDataPoint(point: AnalyticsPoint) { points.push(point); } },
+    RATE_LIMIT_TRANSLATE: {
+      async limit({ key }: { key: string }) {
+        calls.push(`limit:${key}`);
+        return { success: options.allowed ?? true };
       },
     },
     CONTEXT_TRANSLATION_MODEL: '@cf/example/context-model',
@@ -107,6 +125,57 @@ describe('revision-aware retranslation route', () => {
       segment: { id: 's1', version: 2, translatedText: 'server-new' },
     });
     expect(db.segment.translated_text).toBe('server-new');
+  });
+
+  it('rejects a valid retranslation after validation but before provider work', async () => {
+    const db = new FakeDb();
+    const calls: string[] = [];
+    const response = await makeApp().request('/api/projects/p1/segments/s1/retranslate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 2, mode: 'workers-ai' }),
+    }, envFor(db, { allowed: false, calls }));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(calls).toEqual(['limit:dev-user:translate']);
+    expect(db.translationWrites).toBe(0);
+  });
+
+  it('emits sanitized provider success telemetry for direct translation', async () => {
+    const db = new FakeDb();
+    const points: AnalyticsPoint[] = [];
+    const response = await makeApp().request('/api/projects/p1/segments/s1/retranslate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 2, mode: 'workers-ai' }),
+    }, envFor(db, { points }));
+
+    expect(response.status).toBe(200);
+    const event = points.find((point) => point.blobs?.[0] === 'provider_success');
+    expect(event?.blobs).toEqual(expect.arrayContaining([
+      'provider_success', 'dev-user', 'p1', 'translate', 'workers-ai', 'success',
+    ]));
+    expect(JSON.stringify(event)).not.toContain('hello');
+    expect(JSON.stringify(event)).not.toContain('provider-result');
+  });
+
+  it('emits normalized provider failure telemetry without raw upstream errors', async () => {
+    const db = new FakeDb();
+    const points: AnalyticsPoint[] = [];
+    const rawError = 'secret upstream translation response';
+    const response = await makeApp().request('/api/projects/p1/segments/s1/retranslate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 2, mode: 'workers-ai' }),
+    }, envFor(db, { points, providerFailure: rawError }));
+
+    expect(response.status).toBe(500);
+    const event = points.find((point) => point.blobs?.[0] === 'provider_failure');
+    expect(event?.blobs?.[7]).toBe('workers-ai');
+    expect(event?.blobs?.[9]).toBe('TRANSLATION_PROVIDER_FAILED');
+    expect(JSON.stringify(event)).not.toContain(rawError);
   });
 
   it('compare mode never persists either provider result for inactive context', async () => {

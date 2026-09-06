@@ -1,12 +1,13 @@
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
+import { buildAudioWindows } from './audio-windows.mjs';
 import { buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -85,30 +86,30 @@ async function probe(input) {
 
 async function extractAudioChunks(input) {
   const chunkSeconds = Number(input.chunkSeconds ?? 300);
-  if (!Number.isInteger(chunkSeconds) || chunkSeconds < 30 || chunkSeconds > 600) {
-    throw new Error('chunkSeconds must be an integer between 30 and 600.');
-  }
+  const overlapSeconds = Number(input.overlapSeconds ?? 0);
   return withSource(input, async ({ root, source }) => {
-    const pattern = join(root, 'chunk-%05d.wav');
-    await execFileAsync('ffmpeg', [
-      '-nostdin', '-y', '-v', 'error', '-i', source,
-      '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
-      '-f', 'segment', '-segment_time', String(chunkSeconds), '-reset_timestamps', '1', pattern,
-    ], { maxBuffer: 1024 * 1024 });
-
-    const files = (await readdir(root)).filter((name) => /^chunk-\d+\.wav$/.test(name)).sort();
-    if (files.length === 0) throw new Error('FFmpeg produced no audio chunks.');
+    const sourceDurationMs = await durationMs(source);
+    const windows = buildAudioWindows(sourceDurationMs, chunkSeconds, overlapSeconds);
+    if (windows.length === 0) throw new Error('FFmpeg produced no audio chunks.');
 
     const chunks = [];
-    for (let index = 0; index < files.length; index += 1) {
-      const filePath = join(root, files[index]);
+    for (let index = 0; index < windows.length; index += 1) {
+      const window = windows[index];
+      const filePath = join(root, `chunk-${String(index).padStart(5, '0')}.wav`);
+      await execFileAsync('ffmpeg', [
+        '-nostdin', '-y', '-v', 'error',
+        '-ss', String(window.offsetMs / 1000),
+        '-i', source,
+        '-t', String(window.durationMs / 1000),
+        '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
+        filePath,
+      ], { maxBuffer: 1024 * 1024 });
+
       const objectKey = `projects/${input.projectId}/audio/${String(index).padStart(5, '0')}.wav`;
-      const body = await readFile(filePath);
-      const uploaded = await fetch(r2Url(objectKey), { method: 'PUT', body });
-      if (!uploaded.ok) throw new Error(`Unable to write audio chunk ${index} to R2 (${uploaded.status}).`);
+      await uploadFile(objectKey, filePath, 'audio/wav');
       chunks.push({
         objectKey,
-        offsetMs: index * chunkSeconds * 1000,
+        offsetMs: window.offsetMs,
         durationMs: await durationMs(filePath),
       });
     }

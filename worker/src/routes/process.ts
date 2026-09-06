@@ -2,8 +2,10 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
-import { getCurrentUserId } from '../security/current-user';
 import { errorBody } from '../http/json';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
+import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 
 export type ProcessRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
@@ -11,7 +13,7 @@ export type ProcessRouteDeps = {
 };
 
 export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeJobs = deps.makeJobs ?? ((env: Env) => new JobRepository(env.DB));
 
@@ -25,9 +27,14 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
       if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before processing.'), 400);
 
+      const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
+      if (rateLimited) return rateLimited;
+
       const job = await jobs.create(projectId, 'dubbing');
       try {
-        const instance = await c.env.DUBBING_WORKFLOW.create({ params: { projectId, userId, jobId: job.id } });
+        const instance = await c.env.DUBBING_WORKFLOW.create({
+          params: { projectId, userId, jobId: job.id, requestId: c.get('requestId') },
+        });
         return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to start Cloudflare Workflow.';

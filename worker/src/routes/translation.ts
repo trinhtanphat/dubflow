@@ -4,10 +4,14 @@ import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { SegmentPersistenceError, SegmentRepository, type SegmentStore } from '../db/segments';
 import { TranslationContextRepository, type TranslationContextStore } from '../db/translation-context';
 import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
+import { createTelemetry, withProviderTelemetry } from '../observability/telemetry';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
+import { isTranslationContextActive } from '../services/translation/context';
 import { TranslationRouter, type TranslationMode } from '../services/translation/router';
 import { TranslationProviderError } from '../services/translation/types';
 
@@ -28,7 +32,7 @@ function providerErrorStatus(code: string): 400 | 409 | 502 | 503 {
 }
 
 export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeSegments = deps.makeSegments ?? ((env: Env) => new SegmentRepository(env.DB));
   const makeContext = deps.makeContext ?? ((env: Env) => new TranslationContextRepository(env.DB));
@@ -72,17 +76,32 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
       }, 409);
     }
 
+    const rateLimited = await enforceRateLimit(c, 'translate', userId, projectId);
+    if (rateLimited) return rateLimited;
+
     try {
       const context = await contexts.getContext(projectId, userId);
       if (!context) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
 
-      const result = await makeRouter(c.env).translate(
+      const provider = input.mode === 'compare'
+        ? 'translation-router'
+        : input.mode === 'contextual'
+          ? 'workers-ai-contextual'
+          : input.mode ?? (isTranslationContextActive(context) ? 'workers-ai-contextual' : 'workers-ai');
+      const result = await withProviderTelemetry(createTelemetry(c.env), {
+        requestId: c.get('requestId'),
+        actorId: userId,
+        projectId,
+        operation: 'translate',
+        provider,
+        errorCode: 'TRANSLATION_PROVIDER_FAILED',
+      }, () => makeRouter(c.env).translate(
         input.mode,
         [{ id: segment.id, text: segment.sourceText }],
         project.sourceLanguage,
         'vi',
         context,
-      );
+      ));
       if (result.mode === 'compare') return c.json(result);
 
       const translated = result.primary[0];

@@ -3,6 +3,7 @@ import type { UsageRecordInput } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
 const noUsage = { async record(input: UsageRecordInput) { return input as never; } };
+const noTelemetry = { write() {} };
 const neutralContext = { revision: 1, style: 'neutral' as const, glossary: [] };
 
 function rawTranslationDeps(onBatch?: (items: Array<{ id: string; text: string }>) => void) {
@@ -82,7 +83,7 @@ describe('dubbing workflow pipeline', () => {
     const usage = { async record(input: UsageRecordInput) { usageEvents.push(input); return input as never; } };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
     const deps = {
-      projects, jobs, media, bucket, asr, segments, usage,
+      projects, jobs, media, bucket, asr, segments, usage, telemetry: noTelemetry,
       asrProviderId: 'deepgram-nova-3',
       ...rawTranslationDeps(() => calls.push('translation:batch')),
     };
@@ -135,6 +136,7 @@ describe('dubbing workflow pipeline', () => {
         asr: { async transcribe() { return { text: '', segments: [] }; } },
         segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
         usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
+        telemetry: noTelemetry,
         asrProviderId: 'workers-ai-whisper-large-v3-turbo',
         ...rawTranslationDeps(),
       };
@@ -171,6 +173,7 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { throw new Error('provider down'); } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       usage: noUsage,
+      telemetry: noTelemetry,
       asrProviderId: 'deepgram-nova-3',
       ...rawTranslationDeps(),
     };
@@ -208,6 +211,7 @@ describe('dubbing workflow pipeline', () => {
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       usage: noUsage,
+      telemetry: noTelemetry,
       asrProviderId: 'workers-ai-whisper-large-v3-turbo',
       ...rawTranslationDeps(),
     };

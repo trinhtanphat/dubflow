@@ -13,11 +13,29 @@ export interface WorkflowBindingLike {
   create(input: { id?: string; params?: unknown }): Promise<WorkflowInstanceLike>;
 }
 
+export interface AnalyticsEngineDatasetLike {
+  writeDataPoint(point: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void;
+}
+
+export interface RateLimitBindingLike {
+  limit(input: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface Env {
   DB: D1DatabaseLike;
   MEDIA: R2BucketLike;
   AI: AiBinding;
   ASSETS: AssetFetcher;
+  ANALYTICS: AnalyticsEngineDatasetLike;
+  RATE_LIMIT_PROCESS: RateLimitBindingLike;
+  RATE_LIMIT_EXPORT: RateLimitBindingLike;
+  RATE_LIMIT_TRANSLATE: RateLimitBindingLike;
+  RATE_LIMIT_VOICE: RateLimitBindingLike;
+  RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;

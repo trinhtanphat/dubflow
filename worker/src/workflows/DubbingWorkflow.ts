@@ -6,6 +6,7 @@ import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
+import { createTelemetry } from '../observability/telemetry';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { asrCapabilities, createAsrProvider } from '../services/asr/router';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
@@ -39,6 +40,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         translationContext: contextStore,
         translationRouter,
         usage: new UsageRepository(this.env.DB),
+        telemetry: createTelemetry(this.env),
       },
       step,
     );

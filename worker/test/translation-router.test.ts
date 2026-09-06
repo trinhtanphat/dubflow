@@ -140,6 +140,8 @@ function translationEnv(db: TranslationDb, model = '@cf/example/context-model'):
   return {
     DB: db,
     AI: ai,
+    ANALYTICS: { writeDataPoint() {} },
+    RATE_LIMIT_TRANSLATE: { async limit() { return { success: true }; } },
     CONTEXT_TRANSLATION_MODEL: model,
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-key',
   } as unknown as Env;
@@ -218,22 +220,16 @@ describe('revision-aware translation HTTP route', () => {
 
   it('keeps compare mode read-only when translation context is inactive', async () => {
     const db = new TranslationDb();
-    vi.stubGlobal('fetch', async () => Response.json({
-      data: { translations: [{ translatedText: 'google translated' }] },
-    }));
+    vi.stubGlobal('fetch', async () => Response.json({ data: { translations: [{ translatedText: 'google translated' }] } }));
     const routes = createTranslationRoutes();
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ expectedVersion: 3, mode: 'compare' }),
     }), translationEnv(db));
-
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      mode: 'compare',
-      contextRevision: null,
-      workersAI: [{ text: 'workers translated' }],
-      google: [{ text: 'google translated' }],
+      mode: 'compare', contextRevision: null,
+      workersAI: [{ text: 'workers translated' }], google: [{ text: 'google translated' }],
     });
     expect(db.translationWrites).toBe(0);
     expect(db.segment.version).toBe(3);
@@ -244,19 +240,12 @@ describe('revision-aware translation HTTP route', () => {
     db.context = { ...activeContext };
     const routes = createTranslationRoutes();
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedVersion: 3 }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedVersion: 3 }),
     }), translationEnv(db));
-
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      mode: 'contextual',
-      result: { text: 'contextual translated', provider: 'workers-ai-contextual' },
-      segment: {
-        translationEngine: 'workers-ai',
-        translationContextRevision: 7,
-      },
+      mode: 'contextual', result: { text: 'contextual translated', provider: 'workers-ai-contextual' },
+      segment: { translationEngine: 'workers-ai', translationContextRevision: 7 },
     });
     expect(db.translationWrites).toBe(1);
     expect(db.segment.translation_engine).toBe('workers-ai');
@@ -266,16 +255,12 @@ describe('revision-aware translation HTTP route', () => {
   it('rejects an explicit raw provider when active context would be discarded', async () => {
     const db = new TranslationDb();
     db.context = { ...activeContext };
-    vi.stubGlobal('fetch', async () => Response.json({
-      data: { translations: [{ translatedText: 'google translated' }] },
-    }));
+    vi.stubGlobal('fetch', async () => Response.json({ data: { translations: [{ translatedText: 'google translated' }] } }));
     const routes = createTranslationRoutes();
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ expectedVersion: 3, mode: 'google' }),
     }), translationEnv(db));
-
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
     expect(db.translationWrites).toBe(0);
@@ -287,11 +272,8 @@ describe('revision-aware translation HTTP route', () => {
     db.context = { ...activeContext };
     const routes = createTranslationRoutes();
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ expectedVersion: 3 }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ expectedVersion: 3 }),
     }), translationEnv(db, '   '));
-
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: 'CONTEXT_TRANSLATION_UNAVAILABLE' });
     expect(db.translationWrites).toBe(0);
@@ -301,16 +283,11 @@ describe('revision-aware translation HTTP route', () => {
     const db = new TranslationDb();
     const routes = createTranslationRoutes();
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/segments/segment-1/retranslate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ expectedVersion: 3, mode: 'workers-ai' }),
     }), translationEnv(db));
-
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      mode: 'workers-ai',
-      segment: { translationContextRevision: null },
-    });
+    await expect(response.json()).resolves.toMatchObject({ mode: 'workers-ai', segment: { translationContextRevision: null } });
     expect(db.translationWrites).toBe(1);
     expect(db.segment.translation_context_revision).toBeNull();
   });

@@ -25,6 +25,19 @@
       "binding": "MEDIA"
     }
   ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "dubflow_events"
+    }
+  ],
+  "ratelimits": [
+    { "name": "RATE_LIMIT_PROCESS", "namespace_id": "31001", "simple": { "limit": 4, "period": 60 } },
+    { "name": "RATE_LIMIT_EXPORT", "namespace_id": "31002", "simple": { "limit": 4, "period": 60 } },
+    { "name": "RATE_LIMIT_TRANSLATE", "namespace_id": "31003", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RATE_LIMIT_VOICE", "namespace_id": "31004", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RATE_LIMIT_UPLOAD", "namespace_id": "31005", "simple": { "limit": 20, "period": 60 } }
+  ],
   "ai": {
     "binding": "AI"
   },
@@ -61,6 +74,17 @@
     }
   },
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    },
+    "redact_query_string": true
   }
 }

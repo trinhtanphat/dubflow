@@ -5,13 +5,16 @@ import type { SegmentStore } from '../db/segments';
 import type { TranslationContextStore } from '../db/translation-context';
 import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
+import type { TelemetrySink } from '../observability/telemetry';
+import { withProviderTelemetry } from '../observability/telemetry';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
-import { normalizeAsrChunks } from '../services/asr/normalize';
+import { stitchAsrChunks } from '../services/asr/stitch';
+import { isTranslationContextActive } from '../services/translation/context';
 import type { TranslationRouter } from '../services/translation/router';
 import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
-export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
+export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string; requestId?: string };
 
 export interface WorkflowStepLike {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
@@ -45,6 +48,7 @@ export type DubbingPipelineDeps = {
   translationContext: PipelineTranslationContextStore;
   translationRouter: PipelineTranslationRouter;
   usage: UsageMeter;
+  telemetry: TelemetrySink;
 };
 
 function asMessage(error: unknown): string {
@@ -134,7 +138,15 @@ export async function runDubbingPipeline(
           operationKey: key,
         };
         await deps.usage.record({ ...common, phase: 'started' });
-        const result = await deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+        const result = await withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'asr',
+          provider: asrProvider,
+          errorCode: 'ASR_FAILED',
+        }, () => deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage }));
         await deps.usage.record({ ...common, phase: 'completed' });
         return result;
       });
@@ -149,7 +161,7 @@ export async function runDubbingPipeline(
     }
 
     failureCode = 'PIPELINE_FAILED';
-    const normalized = normalizeAsrChunks(normalizedInputs).map((segment) => ({
+    const normalized = stitchAsrChunks(normalizedInputs).map((segment) => ({
       id: segment.id,
       speakerId: segment.speakerId ?? null,
       startMs: segment.startMs,
@@ -165,6 +177,9 @@ export async function runDubbingPipeline(
       deps.translationContext.getContext(params.projectId, params.userId),
     );
     if (!context) throw new Error('Project translation context not found.');
+    const expectedTranslationProvider = isTranslationContextActive(context)
+      ? 'workers-ai-contextual'
+      : 'workers-ai';
 
     const batchSize = 25;
     for (let offset = 0; offset < persisted.length; offset += batchSize) {
@@ -172,13 +187,33 @@ export async function runDubbingPipeline(
       await step.do(`check cancellation before translation ${offset + 1}`, ensureActive);
       const routed = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () => {
         const items = batch.map((segment) => ({ id: segment.id, text: segment.sourceText }));
-        const result = await deps.translationRouter.translate(
+        const units = sourceCharacters(items.map((item) => item.text));
+        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, expectedTranslationProvider);
+        const common = {
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'translation_character' as const,
+          units,
+          provider: expectedTranslationProvider,
+          operationKey: key,
+        };
+        await deps.usage.record({ ...common, phase: 'started' });
+        const result = await withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'translate',
+          provider: expectedTranslationProvider,
+          errorCode: 'TRANSLATION_FAILED',
+        }, () => deps.translationRouter.translate(
           undefined,
           items,
           project.sourceLanguage,
           'vi',
           context,
-        );
+        ));
         if (result.mode === 'compare') {
           throw new Error('Compare mode cannot be persisted by the dubbing workflow.');
         }
@@ -188,19 +223,9 @@ export async function runDubbingPipeline(
           : result.mode === 'google'
             ? 'google'
             : 'workers-ai';
-        const units = sourceCharacters(items.map((item) => item.text));
-        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, usageProvider);
-        const common = {
-          userId: params.userId,
-          projectId: params.projectId,
-          jobId: params.jobId,
-          kind: 'translation_character' as const,
-          units,
-          provider: usageProvider,
-          operationKey: key,
-        };
-        await deps.usage.record({ ...common, phase: 'started' });
-
+        if (usageProvider !== expectedTranslationProvider) {
+          throw new Error(`Translation provider mismatch: expected ${expectedTranslationProvider}, received ${usageProvider}.`);
+        }
         if (result.primary.length !== items.length) {
           throw new Error(`Translation result count mismatch: expected ${items.length}, received ${result.primary.length}.`);
         }
