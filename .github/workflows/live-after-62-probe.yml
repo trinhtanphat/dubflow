@@ -1,0 +1,58 @@
+name: Live production probe after #62
+
+on:
+  push:
+    branches:
+      - probe/live-after-62
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production API recovery
+        shell: bash
+        run: |
+          set -u
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+
+          status() {
+            curl --silent --show-error --location \
+              --output "$2" \
+              --write-out '%{http_code}' \
+              --max-time 20 \
+              "$1" || printf '000'
+          }
+
+          for attempt in $(seq 1 45); do
+            ready_file="$(mktemp)"
+            sink="$(mktemp)"
+            ready="$(status "$base/api/ready" "$ready_file")"
+            projects="$(status "$base/api/projects" "$sink")"
+            usage="$(status "$base/api/usage" "$sink")"
+            p1="$(status "$base/api/projects/$project1" "$sink")"
+            p2="$(status "$base/api/projects/$project2" "$sink")"
+
+            schema10='no'
+            if grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file"; then
+              schema10='yes'
+            fi
+
+            printf 'attempt=%s ready=%s schema10=%s projects=%s usage=%s project1=%s project2=%s\n' \
+              "$attempt" "$ready" "$schema10" "$projects" "$usage" "$p1" "$p2"
+
+            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$p1" != '500' && "$p1" != '000' && "$p2" != '500' && "$p2" != '000' ]]; then
+              echo 'Production API recovery verified for #62.'
+              exit 0
+            fi
+
+            rm -f "$ready_file" "$sink"
+            sleep 10
+          done
+
+          echo 'Production API did not recover within the probe window.' >&2
+          exit 1
