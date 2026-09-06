@@ -6,7 +6,7 @@ describe('Phase 4A workflow stitching', () => {
   it('persists one overlap utterance, stitches its speaker, and meters all provider-processed seconds', async () => {
     const usageEvents: UsageRecordInput[] = [];
     let asrIndex = 0;
-    let persistedInput: Array<{ id: string; speakerId?: string | null; startMs: number; endMs: number; sourceText: string }> = [];
+    let persistedInput: Array<{ id: string; speakerId: string | null; startMs: number; endMs: number; sourceText: string }> = [];
 
     const deps = {
       projects: {
