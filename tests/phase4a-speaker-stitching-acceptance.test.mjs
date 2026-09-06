@@ -9,12 +9,13 @@ function source(path) {
 test('Phase 4A wires bounded overlapping ASR windows', () => {
   const mediaClient = source('worker/src/services/media/container.ts');
   const containerServer = source('containers/ffmpeg/server.mjs');
+  const audioWindows = source('containers/ffmpeg/audio-windows.mjs');
 
   assert.match(mediaClient, /chunkSeconds:\s*300/);
   assert.match(mediaClient, /overlapSeconds:\s*8/);
   assert.match(containerServer, /overlapSeconds/);
-  assert.match(containerServer, /chunkSeconds\s*-\s*overlapSeconds/);
-  assert.match(containerServer, /overlapSeconds[^\n]*30|30[^\n]*overlapSeconds/);
+  assert.match(audioWindows, /chunkSeconds\s*-\s*overlapSeconds/);
+  assert.match(audioWindows, /overlapSeconds[^\n]*30|30[^\n]*overlapSeconds/);
 });
 
 test('Phase 4A uses a dedicated conservative speaker stitching boundary', () => {
