@@ -1,4 +1,5 @@
 import type { TargetLanguage } from '../../domain/language';
+import type { DubbedAudioMode } from '../../domain/audio-mode';
 
 export type AudioChunk = {
   objectKey: string;
@@ -18,6 +19,8 @@ export type ExportClip = {
 export type RenderExportOptions = {
   targetLanguage: TargetLanguage;
   exportId: string;
+  audioMode?: DubbedAudioMode;
+  backgroundObjectKey?: string;
 };
 
 export interface MediaProcessor {

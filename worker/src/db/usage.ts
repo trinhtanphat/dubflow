@@ -4,6 +4,7 @@ export type UsageKind =
   | 'asr_audio_second'
   | 'translation_character'
   | 'tts_audio_second'
+  | 'dialogue_separation_second'
   | 'render_second';
 
 export type UsagePhase = 'started' | 'completed';
@@ -28,6 +29,7 @@ export type UsageTotals = {
   asrAudioSeconds: number;
   translationCharacters: number;
   ttsAudioSeconds: number;
+  dialogueSeparationSeconds: number;
   renderSeconds: number;
 };
 
@@ -73,6 +75,7 @@ const USAGE_KINDS = new Set<UsageKind>([
   'asr_audio_second',
   'translation_character',
   'tts_audio_second',
+  'dialogue_separation_second',
   'render_second',
 ]);
 
@@ -97,6 +100,7 @@ function emptyTotals(): UsageTotals {
     asrAudioSeconds: 0,
     translationCharacters: 0,
     ttsAudioSeconds: 0,
+    dialogueSeparationSeconds: 0,
     renderSeconds: 0,
   };
 }
@@ -105,6 +109,7 @@ function addUnits(totals: UsageTotals, kind: UsageKind, units: number): void {
   if (kind === 'asr_audio_second') totals.asrAudioSeconds += units;
   else if (kind === 'translation_character') totals.translationCharacters += units;
   else if (kind === 'tts_audio_second') totals.ttsAudioSeconds += units;
+  else if (kind === 'dialogue_separation_second') totals.dialogueSeparationSeconds += units;
   else totals.renderSeconds += units;
 }
 

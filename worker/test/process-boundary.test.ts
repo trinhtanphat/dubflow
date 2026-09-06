@@ -17,12 +17,12 @@ class Store implements ProjectStore {
 
 describe('media processing boundary', () => {
   it('requires an uploaded source object', async () => {
-    const service = new ProcessService(new Store({ id: 'p', userId: 'u', title: 'x', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, status: 'draft' }));
+    const service = new ProcessService(new Store({ id: 'p', userId: 'u', title: 'x', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, sourceGeneration: 1, status: 'draft' }));
     await expect(service.start('p', 'u')).rejects.toMatchObject({ code: 'SOURCE_MEDIA_REQUIRED' });
   });
 
   it('returns explicit unavailable status instead of fake export completion', async () => {
-    const service = new ProcessService(new Store({ id: 'p', userId: 'u', title: 'x', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, status: 'ready', sourceObjectKey: 'projects/p/source/x.mp4' }));
+    const service = new ProcessService(new Store({ id: 'p', userId: 'u', title: 'x', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, sourceGeneration: 1, status: 'ready', sourceObjectKey: 'projects/p/source/x.mp4' }));
     expect(await service.start('p', 'u')).toEqual({
       status: 'blocked',
       code: 'MEDIA_PROCESSOR_UNAVAILABLE',

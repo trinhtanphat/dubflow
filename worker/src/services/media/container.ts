@@ -1,3 +1,4 @@
+import { parseDubbedAudioMode } from '../../domain/audio-mode';
 import type { AudioChunk, ExportClip, MediaProcessor, RenderExportOptions } from './types';
 
 export interface ContainerStubLike {
@@ -41,12 +42,26 @@ function assertProjectObject(projectId: string, objectKey: string, folder?: stri
   }
 }
 
-function assertRenderOptions(options: RenderExportOptions): void {
+function assertRenderOptions(projectId: string, options: RenderExportOptions): void {
   if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(options.targetLanguage)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export target language is invalid.');
   }
   if (!/^[A-Za-z0-9._-]{1,200}$/.test(options.exportId)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export id is invalid.');
+  }
+  const audioMode = parseDubbedAudioMode(options.audioMode);
+  if (!audioMode) {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export audio mode is invalid.');
+  }
+  if (audioMode === 'separated_background') {
+    if (typeof options.backgroundObjectKey !== 'string' || options.backgroundObjectKey.length === 0) {
+      throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Separated background object is required.');
+    }
+    if (!options.backgroundObjectKey.startsWith(`${projectPrefix(projectId)}stems/`)) {
+      throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Separated background object does not belong to the project.');
+    }
+  } else if (options.backgroundObjectKey !== undefined) {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Background object is only valid for separated_background.');
   }
 }
 
@@ -148,7 +163,7 @@ export class ContainerMediaProcessor implements MediaProcessor {
     if (!Array.isArray(clips) || clips.length === 0) {
       throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'At least one dubbed clip is required for export.');
     }
-    if (options) assertRenderOptions(options);
+    if (options) assertRenderOptions(projectId, options);
     const validated = clips.map((clip) => assertExportClip(projectId, clip, options));
     const result = await this.call(projectId, '/render-export', {
       projectId,

@@ -1,5 +1,11 @@
 const MAX_EXPORT_CLIPS = 4096;
 const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
+const AUDIO_MODES = new Set(['dubbed_only', 'duck_original', 'separated_background']);
+
+export const DUCK_GAIN_DB = -18;
+export const DUCK_ATTACK_MS = 80;
+export const DUCK_RELEASE_MS = 120;
+export const DUCK_GAIN_LINEAR = 10 ** (DUCK_GAIN_DB / 20);
 
 function projectPrefix(projectId) {
   return `projects/${projectId}/`;
@@ -13,12 +19,38 @@ function renderOptions(input) {
   const hasTarget = input?.targetLanguage !== undefined;
   const hasExport = input?.exportId !== undefined;
   if (hasTarget !== hasExport) throw new Error('targetLanguage and exportId must be provided together.');
-  if (!hasTarget) return null;
+  if (!hasTarget) {
+    if (input?.audioMode !== undefined || input?.backgroundObjectKey !== undefined) {
+      throw new Error('Audio render options require targetLanguage and exportId.');
+    }
+    return null;
+  }
   if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
   if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
     throw new Error('Invalid exportId.');
   }
-  return { targetLanguage: input.targetLanguage, exportId: input.exportId };
+
+  const audioMode = input.audioMode === undefined ? 'dubbed_only' : input.audioMode;
+  if (!AUDIO_MODES.has(audioMode)) throw new Error('Invalid audio mode.');
+
+  const backgroundObjectKey = input.backgroundObjectKey;
+  if (audioMode === 'separated_background') {
+    if (typeof backgroundObjectKey !== 'string' || backgroundObjectKey.length === 0) {
+      throw new Error('Separated backgroundObjectKey is required.');
+    }
+    if (!backgroundObjectKey.startsWith(`${projectPrefix(input.projectId)}stems/`)) {
+      throw new Error('Separated background object is outside the project.');
+    }
+  } else if (backgroundObjectKey !== undefined) {
+    throw new Error('backgroundObjectKey is only valid for separated_background.');
+  }
+
+  return {
+    targetLanguage: input.targetLanguage,
+    exportId: input.exportId,
+    audioMode,
+    ...(audioMode === 'separated_background' ? { backgroundObjectKey } : {}),
+  };
 }
 
 export function validateRenderExportInput(input) {
@@ -48,7 +80,7 @@ export function validateRenderExportInput(input) {
     if (seen.has(clip.segmentId)) throw new Error(`Duplicate segmentId: ${clip.segmentId}`);
     seen.add(clip.segmentId);
   }
-  return input;
+  return options ? { ...input, ...options } : input;
 }
 
 function seconds(ms) {
@@ -80,7 +112,48 @@ export function buildAtempoChain(sourceDurationMs, targetDurationMs) {
   return filters.join(',');
 }
 
-export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clips, clipPaths, clipDurationsMs }) {
+export function mergeDialogueWindows(clips, attackMs = DUCK_ATTACK_MS, releaseMs = DUCK_RELEASE_MS) {
+  if (!Array.isArray(clips)) throw new Error('Dialogue clips are required.');
+  if (!Number.isFinite(attackMs) || attackMs < 0 || !Number.isFinite(releaseMs) || releaseMs < 0) {
+    throw new Error('Dialogue duck timing is invalid.');
+  }
+  const ranges = clips.map((clip) => {
+    if (!clip || !Number.isFinite(clip.startMs) || !Number.isFinite(clip.endMs) || clip.startMs < 0 || clip.endMs <= clip.startMs) {
+      throw new Error('Dialogue clip timing is invalid.');
+    }
+    return {
+      startMs: Math.max(0, clip.startMs - attackMs),
+      endMs: clip.endMs + releaseMs,
+    };
+  }).sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+
+  const merged = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (!last || range.startMs > last.endMs) merged.push({ ...range });
+    else last.endMs = Math.max(last.endMs, range.endMs);
+  }
+  return merged;
+}
+
+function buildDuckBaseFilter(clips) {
+  const windows = mergeDialogueWindows(clips);
+  const gainFilters = windows.map((window) => (
+    `volume=${DUCK_GAIN_DB}dB:enable='between(t,${seconds(window.startMs)},${seconds(window.endMs)})'`
+  ));
+  return `[0:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS,${gainFilters.join(',')}[base]`;
+}
+
+export function buildRenderExportArgs({
+  sourcePath,
+  outputPath,
+  durationMs,
+  clips,
+  clipPaths,
+  clipDurationsMs,
+  audioMode = 'dubbed_only',
+  backgroundPath,
+}) {
   if (typeof sourcePath !== 'string' || !sourcePath || typeof outputPath !== 'string' || !outputPath) {
     throw new Error('Source and output paths are required.');
   }
@@ -95,15 +168,36 @@ export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clip
   )) {
     throw new Error('Clip durations must align with local clip files.');
   }
+  if (!AUDIO_MODES.has(audioMode)) throw new Error('Invalid audio mode.');
+  if (audioMode === 'separated_background') {
+    if (typeof backgroundPath !== 'string' || !backgroundPath) throw new Error('Separated background path is required.');
+  } else if (backgroundPath !== undefined) {
+    throw new Error('Background path is only valid for separated_background.');
+  }
 
   const durationSeconds = seconds(durationMs);
-  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath, '-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo'];
+  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath];
+  let clipInputOffset;
+  const filters = [];
+
+  if (audioMode === 'dubbed_only') {
+    args.push('-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo');
+    clipInputOffset = 2;
+    filters.push('[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]');
+  } else if (audioMode === 'duck_original') {
+    clipInputOffset = 1;
+    filters.push(buildDuckBaseFilter(clips));
+  } else {
+    args.push('-i', backgroundPath);
+    clipInputOffset = 2;
+    filters.push('[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]');
+  }
+
   for (const path of clipPaths) args.push('-i', path);
 
-  const filters = [`[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]`];
   const labels = ['[base]'];
   clips.forEach((clip, index) => {
-    const inputIndex = index + 2;
+    const inputIndex = index + clipInputOffset;
     const label = `dub${index}`;
     const targetDurationMs = clip.endMs - clip.startMs;
     const clipDuration = seconds(targetDurationMs);

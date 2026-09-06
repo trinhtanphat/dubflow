@@ -19,6 +19,7 @@ function project() {
 function attempt(overrides: Partial<ProjectExport> = {}): ProjectExport {
   return {
     id: 'vi-exp', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
+    audioMode: 'dubbed_only',
     status: 'completed', exportObjectKey: 'projects/p1/exports/vi/vi-exp.mp4', subtitleObjectKey: null,
     errorCode: null, errorMessage: null, ...overrides,
   };
