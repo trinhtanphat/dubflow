@@ -17,7 +17,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
     steps:
-      - name: Compare deployed Worker D1 binding and repository SQL
+      - name: Inspect deployed Worker bindings, domain mapping, and repository SQL
         shell: bash
         run: |
           set -euo pipefail
@@ -29,9 +29,11 @@ jobs:
 
           async function cf(url, init = {}) {
             const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers ?? {}) } });
-            const body = await response.json();
+            const text = await response.text();
+            let body;
+            try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 800) }; }
             if (!response.ok || body?.success === false) {
-              throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 800)}`);
+              throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 1000)}`);
             }
             return body;
           }
@@ -39,15 +41,41 @@ jobs:
           const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
           const settings = await cf(`${base}/workers/scripts/dubflow/settings`);
           const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
+
+          const safeFields = [
+            'name','type','database_id','bucket_name','dataset','class_name','script_name',
+            'service','environment','namespace','workflow_name','id','namespace_id'
+          ];
+          const safeBindings = bindings.map((binding) => {
+            const out = {};
+            for (const key of safeFields) {
+              const value = binding?.[key];
+              if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') out[key] = value;
+            }
+            return out;
+          });
+          console.log(`production safe bindings=${JSON.stringify(safeBindings)}`);
+
           const dbBinding = bindings.find((binding) => binding?.type === 'd1' && binding?.name === 'DB');
           if (!dbBinding?.database_id) throw new Error('Deployed Worker DB binding was not found.');
           const databaseId = dbBinding.database_id;
           console.log(`production Worker DB binding database_id=${databaseId}`);
 
+          const domains = await cf(`${base}/workers/domains?hostname=${encodeURIComponent('yupvox.qs3d.site')}`);
+          const domainRows = Array.isArray(domains?.result) ? domains.result : [];
+          const safeDomains = domainRows.map((row) => ({
+            id: row?.id ?? '', hostname: row?.hostname ?? '', service: row?.service ?? '',
+            environment: row?.environment ?? '', zone_name: row?.zone_name ?? ''
+          }));
+          console.log(`production custom domains=${JSON.stringify(safeDomains)}`);
+          const exact = domainRows.filter((row) => row?.hostname === 'yupvox.qs3d.site');
+          if (exact.length !== 1 || exact[0]?.service !== 'dubflow') {
+            throw new Error(`Unexpected yupvox custom-domain mapping: ${JSON.stringify(safeDomains)}`);
+          }
+
           async function query(sql, params = []) {
             const response = await cf(`${base}/d1/database/${databaseId}/query`, {
-              method: 'POST',
-              body: JSON.stringify({ sql, params }),
+              method: 'POST', body: JSON.stringify({ sql, params }),
             });
             const page = Array.isArray(response?.result) ? response.result[0] : response?.result;
             if (page?.success === false) throw new Error(JSON.stringify(page?.error ?? page));
@@ -57,15 +85,10 @@ jobs:
           const projectSql = `SELECT id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC`;
           const usageSql = `SELECT kind, units, provider FROM usage_events WHERE user_id = ? AND phase = 'completed' ORDER BY created_at ASC, id ASC`;
           const balanceSql = `SELECT credit_balance FROM users WHERE id = ? LIMIT 1`;
-
           const projectRows = await query(projectSql, ['dev-user']);
           const usageRows = await query(usageSql, ['dev-user']);
           const balanceRows = await query(balanceSql, ['dev-user']);
           console.log(`ProjectRepository exact SQL PASS rows=${projectRows.length}`);
           console.log(`UsageRepository summary SQL PASS rows=${usageRows.length}`);
           console.log(`UsageRepository balance SQL PASS rows=${balanceRows.length}`);
-
-          const projectCount = await query(`SELECT COUNT(*) AS count FROM projects WHERE user_id = ?`, ['dev-user']);
-          const usageCount = await query(`SELECT COUNT(*) AS count FROM usage_events WHERE user_id = ? AND phase = 'completed'`, ['dev-user']);
-          console.log(`project count=${projectCount[0]?.count ?? 'unknown'} usage count=${usageCount[0]?.count ?? 'unknown'}`);
           NODE
