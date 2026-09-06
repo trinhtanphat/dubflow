@@ -78,7 +78,7 @@ function fromRow(row: ProjectRow): Project {
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
     targetLanguagesRevision: row.target_languages_revision,
-    sourceRevision: row.source_revision,
+    sourceRevision: Number(row.source_revision ?? 0),
     status: row.status,
     sourceObjectKey: row.source_object_key,
     exportObjectKey: row.export_object_key,
@@ -115,7 +115,7 @@ export class ProjectRepository implements ProjectStore {
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
       targetLanguagesRevision: 1,
-      sourceRevision: 1,
+      sourceRevision: 0,
       status: 'draft',
     };
   }
@@ -137,11 +137,10 @@ export class ProjectRepository implements ProjectStore {
   async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
     await this.db.prepare(
       `UPDATE projects
-       SET source_revision = source_revision + 1 - CASE
-             WHEN source_object_key IS NULL OR source_object_key = ? THEN 1 ELSE 0 END,
+       SET source_revision = source_revision + 1,
            source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
-    ).bind(objectKey, objectKey, sizeBytes, id, userId).run();
+    ).bind(objectKey, sizeBytes, id, userId).run();
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
