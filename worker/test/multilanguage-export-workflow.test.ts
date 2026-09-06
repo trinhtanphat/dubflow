@@ -20,7 +20,7 @@ function harness() {
   const jaVariants = [{
     segmentId: 's1', projectId: 'p1', targetLanguage: 'ja' as const,
     translatedText: 'こんにちは', translationEngine: 'workers-ai', translationStatus: 'completed',
-    translationContextRevision: 8, voiceStatus: 'pending', dubbedObjectKey: null, version: 3,
+    translationContextRevision: 8, voiceStatus: 'pending', dubbedObjectKey: null as string | null, version: 3,
   }];
   const usage = {
     record: vi.fn(async (input: UsageRecordInput) => {
@@ -53,6 +53,8 @@ function harness() {
     exports: {
       complete: vi.fn(async () => {}),
       fail: vi.fn(async () => {}),
+      invalidateTarget: vi.fn(async () => {}),
+      invalidateAll: vi.fn(async () => {}),
     },
     speakers: { list: vi.fn(async () => []) },
     bucket: { put: vi.fn(async () => ({})) },
@@ -69,12 +71,14 @@ function harness() {
   return { deps, usageEvents, sourceSegments, jaVariants };
 }
 
+const jaDubbed = {
+  projectId: 'p1', userId: 'dev-user', jobId: 'j-ja', exportId: 'export-ja-1', targetLanguage: 'ja', output: 'dubbed',
+} as const;
+
 describe('Phase 4C language-aware export workflow', () => {
   it('feeds JA target variants into JA TTS and publishes a language-scoped immutable MP4', async () => {
     const h = harness();
-    await runExportPipeline({
-      projectId: 'p1', userId: 'dev-user', jobId: 'j-ja', exportId: 'export-ja-1', targetLanguage: 'ja', output: 'dubbed',
-    } as never, h.deps as never, step() as never);
+    await runExportPipeline(jaDubbed as never, h.deps as never, step() as never);
 
     expect(h.deps.translations.list).toHaveBeenCalledWith('p1', 'dev-user', 'ja');
     expect(h.deps.voice.generate).toHaveBeenCalledWith({ text: 'こんにちは', language: 'ja' });
@@ -116,5 +120,37 @@ describe('Phase 4C language-aware export workflow', () => {
     expect(h.deps.exports.complete).toHaveBeenCalledWith('p1', 'export-sub-1', 'dev-user', {
       subtitleObjectKey: 'projects/p1/subtitles/ja/export-sub-1.srt',
     });
+  });
+
+  it('reuses a completed JA voice artifact without new TTS usage on retry', async () => {
+    const h = harness();
+    h.jaVariants[0].voiceStatus = 'completed';
+    h.jaVariants[0].dubbedObjectKey = 'projects/p1/voices/ja/s1/3.mp3';
+
+    await runExportPipeline(jaDubbed as never, h.deps as never, step() as never);
+
+    expect(h.deps.voice.generate).not.toHaveBeenCalled();
+    expect(h.deps.bucket.put).not.toHaveBeenCalledWith('projects/p1/voices/ja/s1/3.mp3', expect.anything());
+    expect(h.deps.media.renderExport).toHaveBeenCalledWith(
+      'p1',
+      'projects/p1/source/video.mp4',
+      [{ segmentId: 's1', startMs: 0, endMs: 2_000, objectKey: 'projects/p1/voices/ja/s1/3.mp3' }],
+      { targetLanguage: 'ja', exportId: 'export-ja-1' },
+    );
+    expect(h.usageEvents.some((event) => event.kind === 'tts_audio_second')).toBe(false);
+  });
+
+  it('fails only the current JA export row without invalidating other language exports', async () => {
+    const h = harness();
+    h.deps.media.renderExport.mockRejectedValueOnce(new Error('JA render failed'));
+
+    await expect(runExportPipeline(jaDubbed as never, h.deps as never, step() as never)).rejects.toThrow('JA render failed');
+
+    expect(h.deps.exports.fail).toHaveBeenCalledWith(
+      'p1', 'export-ja-1', 'dev-user', 'EXPORT_FAILED', 'JA render failed',
+    );
+    expect(h.deps.exports.complete).not.toHaveBeenCalled();
+    expect(h.deps.exports.invalidateTarget).not.toHaveBeenCalled();
+    expect(h.deps.exports.invalidateAll).not.toHaveBeenCalled();
   });
 });
