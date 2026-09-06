@@ -98,6 +98,31 @@ describe('managed voice clone enrollment cleanup', () => {
     expect(remove).toHaveBeenCalledWith('sample-key');
   });
 
+  it('deletes an orphaned provider voice if D1 persistence fails after provider creation', async () => {
+    const { store, markProviderResult, markFailed } = storeHarness();
+    markProviderResult.mockRejectedValueOnce(new Error('d1 write failed'));
+    const remove = vi.fn(async () => undefined);
+    const deleteClone = vi.fn(async () => undefined);
+    const provider: VoiceCloneProvider = {
+      createInstantClone: vi.fn(async () => ({ providerVoiceId: 'voice-orphan', requiresVerification: false })),
+      deleteClone,
+    };
+
+    await expect(enrollVoiceClone({
+      clone,
+      userId: 'user-1',
+      store,
+      bucket: { delete: remove } as any,
+      sample: sample(),
+      sampleKey: 'sample-key',
+      provider,
+    })).rejects.toMatchObject({ code: 'VOICE_CLONE_PROVIDER_FAILED' });
+
+    expect(deleteClone).toHaveBeenCalledWith('voice-orphan');
+    expect(markFailed).toHaveBeenCalledWith('project-1', 'clone-1', 'user-1', 'VOICE_CLONE_PROVIDER_FAILED');
+    expect(remove).toHaveBeenCalledWith('sample-key');
+  });
+
   it('overrides a provider success with cleanup failure instead of returning a ready clone', async () => {
     const { store, markFailed } = storeHarness();
     const provider: VoiceCloneProvider = {
