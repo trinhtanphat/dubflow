@@ -20,6 +20,9 @@ import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
 
 const app = new Hono<WorkerHonoEnv>();
+const exportRoutes = createExportRoutes();
+const languageRoutes = createLanguageRoutes();
+const translationVariantRoutes = createTranslationVariantRoutes();
 
 app.use('/api/*', requestTelemetryMiddleware());
 app.get('/api/health', (c) => c.json(healthPayload()));
@@ -30,13 +33,13 @@ app.get('/api/ready', async (c) => {
 app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
-app.route('/api/projects', createExportRoutes());
+app.route('/api/projects', exportRoutes);
 app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
 app.route('/api/projects', createVoiceCloneRoutes());
-app.route('/api/projects', createLanguageRoutes());
-app.route('/api/projects', createTranslationVariantRoutes());
+app.route('/api/projects', languageRoutes);
+app.route('/api/projects', translationVariantRoutes);
 app.route('/api/projects', createTranslationRoutes());
 app.route('/api/projects', createTranslationContextRoutes());
 app.route('/api/projects', createJobRoutes());
