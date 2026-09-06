@@ -23,11 +23,13 @@ function deps() {
     contextRevision: 7,
   }));
   const setTranslationResult = vi.fn(async () => ({ ...segment, version: 3 }));
+  const getTranslation = vi.fn(async () => null);
   const upsertTranslation = vi.fn(async (input) => input);
   const invalidateSegmentTarget = vi.fn(async () => {});
   return {
     translate,
     setTranslationResult,
+    getTranslation,
     upsertTranslation,
     invalidateSegmentTarget,
     routeDeps: {
@@ -42,7 +44,7 @@ function deps() {
         })),
       }),
       makeRouter: () => ({ translate }),
-      makeMultilang: () => ({ upsertTranslation, invalidateSegmentTarget }),
+      makeMultilang: () => ({ getTranslation, upsertTranslation, invalidateSegmentTarget }),
     },
   };
 }
@@ -59,9 +61,10 @@ describe('Phase 4C target-aware retranslation route', () => {
 
     expect(response.status).toBe(200);
     expect(d.translate).toHaveBeenCalledWith('workers-ai', [{ id: 's1', text: 'Hello' }], 'en', 'ja', expect.objectContaining({ revision: 7 }));
+    expect(d.getTranslation).toHaveBeenCalledWith('p1', 's1', 'dev-user', 'ja');
     expect(d.upsertTranslation).toHaveBeenCalledWith(expect.objectContaining({
       projectId: 'p1', segmentId: 's1', userId: 'dev-user', targetLanguage: 'ja', translatedText: 'こんにちは',
-      translationStatus: 'completed', contextRevision: 7, sourceSegmentVersion: 2,
+      translationStatus: 'completed', contextRevision: 7, sourceSegmentVersion: 2, version: 1,
     }));
     expect(d.invalidateSegmentTarget).toHaveBeenCalledWith('p1', 's1', 'dev-user', 'ja');
     expect(d.setTranslationResult).not.toHaveBeenCalled();
