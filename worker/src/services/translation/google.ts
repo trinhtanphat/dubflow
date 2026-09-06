@@ -1,4 +1,5 @@
 import type { SourceLanguage } from '../../domain/project';
+import type { TargetLanguage } from '../../domain/target-language';
 import { isTranslationContextActive, type TranslationContext } from './context';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
@@ -32,7 +33,7 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
   async translateBatch(
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
     if (context && isTranslationContextActive(context)) {
@@ -44,7 +45,6 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
     if (!this.apiKey.trim()) {
       throw new TranslationProviderError('GOOGLE_TRANSLATE_SECRET_MISSING', 'Google Cloud Translation API key is not configured.');
     }
-    if (target !== 'vi') throw new TranslationProviderError('TRANSLATION_TARGET_UNSUPPORTED', 'Vietnamese is the only supported target.');
     const sourceCode = GOOGLE_SOURCE[source];
     if (!sourceCode) throw new TranslationProviderError('TRANSLATION_SOURCE_UNRESOLVED', 'Resolve auto-detected source language before translation.');
 
@@ -58,7 +58,7 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
       response = await this.fetchImpl(`${GOOGLE_ENDPOINT}?key=${encodeURIComponent(this.apiKey)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ q: nonEmpty.map((item) => item.text), source: sourceCode, target: 'vi', format: 'text' }),
+        body: JSON.stringify({ q: nonEmpty.map((item) => item.text), source: sourceCode, target, format: 'text' }),
         signal: controller.signal,
       });
     } catch (error) {
