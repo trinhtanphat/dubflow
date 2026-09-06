@@ -27,6 +27,20 @@ const partial = [
   },
 ];
 
+const separationAvailable = {
+  dialogueBackgroundSeparation: {
+    available: true,
+    modes: ['source_mix', 'preserve_background'] as const,
+  },
+};
+
+const separationUnavailable = {
+  dialogueBackgroundSeparation: {
+    available: false,
+    modes: ['source_mix'] as const,
+  },
+};
+
 describe('Phase 4C batch export studio controls', () => {
   it('keeps partial batch results and exposes retry only for failed targets', () => {
     const html = renderToStaticMarkup(
@@ -35,6 +49,8 @@ describe('Phase 4C batch export studio controls', () => {
         enabledLanguages={[...enabledLanguages]}
         selectedLanguages={['vi', 'ja']}
         output="dubbed"
+        separationMode="source_mix"
+        exportCapabilities={separationAvailable}
         voiceCapabilities={{
           configured: true,
           languages: ['vi', 'ja'],
@@ -46,6 +62,7 @@ describe('Phase 4C batch export studio controls', () => {
         results={partial}
         error=""
         onOutputChange={vi.fn()}
+        onSeparationModeChange={vi.fn()}
         onToggleLanguage={vi.fn()}
         onExportCurrent={vi.fn()}
         onBatchExport={vi.fn()}
@@ -90,6 +107,8 @@ describe('Phase 4C batch export studio controls', () => {
         enabledLanguages={['ja']}
         selectedLanguages={['ja']}
         output="subtitles"
+        separationMode="source_mix"
+        exportCapabilities={separationUnavailable}
         voiceCapabilities={{
           configured: false,
           languages: 'unknown',
@@ -101,6 +120,7 @@ describe('Phase 4C batch export studio controls', () => {
         results={[]}
         error=""
         onOutputChange={vi.fn()}
+        onSeparationModeChange={vi.fn()}
         onToggleLanguage={vi.fn()}
         onExportCurrent={vi.fn()}
         onBatchExport={vi.fn()}
@@ -109,5 +129,73 @@ describe('Phase 4C batch export studio controls', () => {
     );
     expect(html).toContain('value="subtitles" selected=""');
     expect(html).not.toContain('disabled="" data-testid="export-current-language"');
+  });
+});
+
+describe('Phase 4D dialogue/background export controls', () => {
+  it('shows both dubbed separation choices and keeps source_mix as the safe default', () => {
+    const html = renderToStaticMarkup(
+      <BatchExportPanelView
+        currentTargetLanguage="vi"
+        enabledLanguages={['vi']}
+        selectedLanguages={['vi']}
+        output="dubbed"
+        separationMode="source_mix"
+        exportCapabilities={separationAvailable}
+        voiceCapabilities={{
+          configured: true,
+          languages: ['vi'],
+          cloning: true,
+          preview: true,
+          cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
+        }}
+        busy={false}
+        results={[]}
+        error=""
+        onOutputChange={vi.fn()}
+        onSeparationModeChange={vi.fn()}
+        onToggleLanguage={vi.fn()}
+        onExportCurrent={vi.fn()}
+        onBatchExport={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('Source mix');
+    expect(html).toContain('Preserve background/music');
+    expect(html).toContain('value="source_mix" checked=""');
+    expect(html).toContain('value="preserve_background"');
+  });
+
+  it('disables preserve-background with an explanatory reason when capability is absent', () => {
+    const html = renderToStaticMarkup(
+      <BatchExportPanelView
+        currentTargetLanguage="vi"
+        enabledLanguages={['vi']}
+        selectedLanguages={['vi']}
+        output="dubbed"
+        separationMode="source_mix"
+        exportCapabilities={separationUnavailable}
+        voiceCapabilities={{
+          configured: true,
+          languages: ['vi'],
+          cloning: true,
+          preview: true,
+          cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
+        }}
+        busy={false}
+        results={[]}
+        error=""
+        onOutputChange={vi.fn()}
+        onSeparationModeChange={vi.fn()}
+        onToggleLanguage={vi.fn()}
+        onExportCurrent={vi.fn()}
+        onBatchExport={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />,
+    );
+
+    expect(html).toMatch(/value="preserve_background"[^>]*disabled=""/);
+    expect(html).toMatch(/tách thoại|background|không khả dụng/i);
   });
 });
