@@ -20,12 +20,15 @@ test('Phase 4B uses a dedicated provider boundary and clone rate limit lane', ()
   const wrangler = read('wrangler.jsonc');
   const provider = read('worker/src/services/voice-clone/elevenlabs.ts');
   const route = read('worker/src/routes/voice-clones.ts');
+  const app = read('worker/src/app.ts');
   assert.match(env, /RATE_LIMIT_VOICE_CLONE/);
   assert.match(wrangler, /RATE_LIMIT_VOICE_CLONE/);
   assert.match(provider, /createInstantClone/);
   assert.match(provider, /deleteClone/);
   assert.match(route, /VOICE_CLONE_CONSENT_REQUIRED/);
   assert.match(route, /VOICE_CLONE_SAMPLE_CLEANUP_FAILED|enrollVoiceClone/);
+  assert.match(app, /createVoiceCloneRoutes/);
+  assert.match(app, /app\.route\('\/api\/projects', createVoiceCloneRoutes\(\)\)/);
 });
 
 test('Phase 4B capability is explicit instead of a generic cloning claim', () => {
