@@ -51,7 +51,7 @@ export interface MultilangStore {
   createExport(input: { id: string; projectId: string; batchId: string; userId: string; targetLanguage: TargetLanguage; jobId: string; generation: number }): Promise<ExportVariant>;
   getExport(projectId: string, exportId: string, userId: string): Promise<ExportVariant | null>;
   listExports(projectId: string, userId: string): Promise<ExportVariant[]>;
-  listBatchExports(projectId: string, userId: string, batchId: string): Promise<ExportVariant[]>;
+  listBatchExports(projectId: string, batchId: string, userId: string): Promise<ExportVariant[]>;
   setExportRunning(projectId: string, exportId: string, userId: string): Promise<void>;
   completeExport(projectId: string, exportId: string, userId: string, objectKey: string): Promise<void>;
   failExport(projectId: string, exportId: string, userId: string, errorCode: string): Promise<void>;
@@ -86,7 +86,6 @@ const exportFromRow = (row: ExportRow): ExportVariant => ({
   id: row.id, projectId: row.project_id, batchId: row.batch_id, targetLanguage: row.target_language, status: row.status,
   objectKey: row.object_key, jobId: row.job_id, errorCode: row.error_code, generation: row.generation,
 });
-const EXPORT_COLUMNS = 'id, project_id, batch_id, target_language, status, object_key, job_id, error_code, generation';
 
 export class MultilangRepository implements MultilangStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -101,14 +100,14 @@ export class MultilangRepository implements MultilangStore {
     const result = await this.db.prepare(
       'SELECT target_language FROM project_targets WHERE project_id = ? AND enabled = 1 ORDER BY created_at, target_language',
     ).bind(projectId).all<{ target_language: TargetLanguage }>();
-    const targets = (result.results ?? []).map((row) => row.target_language);
-    return targets.includes('vi') ? targets : ['vi', ...targets];
+    const targets: TargetLanguage[] = (result.results ?? []).map((row) => row.target_language);
+    return targets.includes('vi') ? targets : (['vi', ...targets] satisfies TargetLanguage[]);
   }
 
   async replaceTargets(projectId: string, userId: string, targets: TargetLanguage[]): Promise<TargetLanguage[]> {
     if (!(await this.ownsProject(projectId, userId))) return [];
     const normalized = parseProjectTargetLanguages(targets);
-    const effective = normalized.includes('vi') ? normalized : ['vi', ...normalized];
+    const effective: TargetLanguage[] = normalized.includes('vi') ? normalized : ['vi', ...normalized];
     const statements = [
       this.db.prepare('DELETE FROM project_targets WHERE project_id = ?').bind(projectId),
       ...effective.map((target) => this.db.prepare(
@@ -142,8 +141,7 @@ export class MultilangRepository implements MultilangStore {
          source_segment_version=excluded.source_segment_version, version=excluded.version, updated_at=datetime('now')`,
     ).bind(input.segmentId, input.projectId, input.targetLanguage, input.translatedText, input.translationEngine,
       input.translationStatus, input.contextRevision, input.sourceSegmentVersion, input.version).run();
-    const { userId: _userId, ...result } = input;
-    return result;
+    return { ...input };
   }
 
   async getDub(projectId: string, segmentId: string, userId: string, targetLanguage: TargetLanguage): Promise<TargetDub | null> {
@@ -171,8 +169,7 @@ export class MultilangRepository implements MultilangStore {
          updated_at=datetime('now')`,
     ).bind(input.segmentId, input.projectId, input.targetLanguage, input.status, input.objectKey, input.voiceProvider,
       input.voiceId, input.translationVersion, input.segmentVersion, input.durationMs).run();
-    const { userId: _userId, ...result } = input;
-    return result;
+    return { ...input };
   }
 
   async invalidateSegmentAllTargets(projectId: string, segmentId: string, userId: string): Promise<void> {
@@ -205,30 +202,33 @@ export class MultilangRepository implements MultilangStore {
   async createExport(input: { id: string; projectId: string; batchId: string; userId: string; targetLanguage: TargetLanguage; jobId: string; generation: number }): Promise<ExportVariant> {
     if (!(await this.ownsProject(input.projectId, input.userId))) throw new Error('Project not found.');
     await this.db.prepare(
-      `INSERT INTO project_exports (id, project_id, batch_id, target_language, status, job_id, generation)
-       VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
+      `INSERT INTO project_exports (id, project_id, batch_id, target_language, status, job_id, generation) VALUES (?, ?, ?, ?, 'queued', ?, ?)`,
     ).bind(input.id, input.projectId, input.batchId, input.targetLanguage, input.jobId, input.generation).run();
     return { id: input.id, projectId: input.projectId, batchId: input.batchId, targetLanguage: input.targetLanguage, status: 'queued', objectKey: null, jobId: input.jobId, errorCode: null, generation: input.generation };
   }
 
   async getExport(projectId: string, exportId: string, userId: string): Promise<ExportVariant | null> {
     if (!(await this.ownsProject(projectId, userId))) return null;
-    const row = await this.db.prepare(`SELECT ${EXPORT_COLUMNS} FROM project_exports WHERE project_id=? AND id=? LIMIT 1`)
-      .bind(projectId, exportId).first<ExportRow>();
+    const row = await this.db.prepare(
+      `SELECT id, project_id, batch_id, target_language, status, object_key, job_id, error_code, generation FROM project_exports WHERE project_id=? AND id=? LIMIT 1`,
+    ).bind(projectId, exportId).first<ExportRow>();
     return row ? exportFromRow(row) : null;
   }
 
   async listExports(projectId: string, userId: string): Promise<ExportVariant[]> {
     if (!(await this.ownsProject(projectId, userId))) return [];
-    const result = await this.db.prepare(`SELECT ${EXPORT_COLUMNS} FROM project_exports WHERE project_id=? ORDER BY created_at DESC`)
-      .bind(projectId).all<ExportRow>();
+    const result = await this.db.prepare(
+      `SELECT id, project_id, batch_id, target_language, status, object_key, job_id, error_code, generation FROM project_exports WHERE project_id=? ORDER BY created_at DESC`,
+    ).bind(projectId).all<ExportRow>();
     return (result.results ?? []).map(exportFromRow);
   }
 
-  async listBatchExports(projectId: string, userId: string, batchId: string): Promise<ExportVariant[]> {
+  async listBatchExports(projectId: string, batchId: string, userId: string): Promise<ExportVariant[]> {
     if (!(await this.ownsProject(projectId, userId))) return [];
-    const result = await this.db.prepare(`SELECT ${EXPORT_COLUMNS} FROM project_exports WHERE project_id=? AND batch_id=? ORDER BY created_at, target_language`)
-      .bind(projectId, batchId).all<ExportRow>();
+    const result = await this.db.prepare(
+      `SELECT id, project_id, batch_id, target_language, status, object_key, job_id, error_code, generation
+       FROM project_exports WHERE project_id=? AND batch_id=? ORDER BY target_language, id`,
+    ).bind(projectId, batchId).all<ExportRow>();
     return (result.results ?? []).map(exportFromRow);
   }
 
@@ -242,8 +242,9 @@ export class MultilangRepository implements MultilangStore {
     if (!(await this.ownsProject(projectId, userId))) throw new Error('Project not found.');
     const current = await this.getExport(projectId, exportId, userId);
     if (!current) throw new Error('Export not found.');
-    const expectedPrefix = `projects/${projectId}/exports/${current.targetLanguage}/${exportId}`;
-    if (!objectKey.startsWith(expectedPrefix)) throw new Error('Export object key is outside the target export prefix.');
+    if (!objectKey.startsWith(`projects/${projectId}/exports/${current.targetLanguage}/${exportId}`)) {
+      throw new Error('Export object key is outside the target export prefix.');
+    }
     await this.db.prepare("UPDATE project_exports SET status='completed', object_key=?, error_code=NULL, updated_at=datetime('now') WHERE project_id=? AND id=?")
       .bind(objectKey, projectId, exportId).run();
   }
