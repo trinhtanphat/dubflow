@@ -1,0 +1,53 @@
+name: Runtime Probe
+
+on:
+  push:
+    branches:
+      - 'fix/runtime-qualification-probe'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe live production API errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const endpoints = [
+            'https://yupvox.qs3d.site/api/ready',
+            'https://yupvox.qs3d.site/api/projects',
+            'https://yupvox.qs3d.site/api/usage',
+          ];
+          let failed = false;
+          for (const url of endpoints) {
+            const response = await fetch(url, {
+              headers: { accept: 'application/json', 'cache-control': 'no-cache' },
+            });
+            const text = await response.text();
+            let rendered = text;
+            try {
+              const body = JSON.parse(text);
+              if (Array.isArray(body)) {
+                rendered = `array(length=${body.length})`;
+              } else if (body && typeof body === 'object') {
+                const allowed = {};
+                for (const key of ['ready', 'service', 'database', 'code', 'error', 'message']) {
+                  if (key in body) allowed[key] = body[key];
+                }
+                rendered = JSON.stringify(allowed);
+              }
+            } catch {
+              rendered = text.slice(0, 1000);
+            }
+            rendered = rendered.replace(/[\r\n]+/g, ' ').slice(0, 1000);
+            console.log(`${new URL(url).pathname}: status=${response.status} content-type=${response.headers.get('content-type') ?? ''} body=${rendered}`);
+            if (response.status >= 500) failed = true;
+          }
+          if (failed) process.exit(1);
+          NODE
