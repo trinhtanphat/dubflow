@@ -173,3 +173,163 @@ describe('final dubbing export pipeline', () => {
     expect(d.projects.setStatus).toHaveBeenLastCalledWith('p1', 'dev-user', 'cancelled');
   });
 });
+
+function phase4dDeps(stemsPresent = false) {
+  const d = deps();
+  d.project.sourceObjectKey = 'projects/p1/source/source_rev.mp4';
+  d.media.renderExport.mockResolvedValue({ exportObjectKey: 'projects/p1/exports/vi/export-1.mp4' });
+
+  const variants = d.segmentsData.map((segment) => ({
+    segmentId: segment.id,
+    projectId: 'p1',
+    targetLanguage: 'vi' as const,
+    translatedText: segment.translatedText,
+    translationStatus: 'completed',
+    translationContextRevision: 1,
+    voiceStatus: 'completed',
+    dubbedObjectKey: `projects/p1/voices/vi/${segment.id}/1.mp3`,
+    version: 1,
+  }));
+  const stemKeys = {
+    dialogueObjectKey: 'projects/p1/stems/source_rev/dialogue.wav',
+    backgroundObjectKey: 'projects/p1/stems/source_rev/background.wav',
+  };
+  const durable = new Set<string>(stemsPresent ? Object.values(stemKeys) : []);
+  const separate = vi.fn(async () => {
+    durable.add(stemKeys.dialogueObjectKey);
+    durable.add(stemKeys.backgroundObjectKey);
+    return stemKeys;
+  });
+  const head = vi.fn(async (key: string) => durable.has(key) ? { key, size: 1 } : null);
+  const exportsStore = {
+    complete: vi.fn(async () => {}),
+    fail: vi.fn(async () => {}),
+  };
+
+  return {
+    ...d,
+    translations: {
+      list: vi.fn(async () => variants),
+      setVoiceResult: vi.fn(async () => {}),
+    },
+    exports: exportsStore,
+    bucket: {
+      ...d.bucket,
+      head,
+    },
+    separation: {
+      id: 'elevenlabs-stems-v1',
+      available: true,
+      separate,
+    },
+    separate,
+    head,
+    stemKeys,
+    durable,
+  };
+}
+
+function phase4dParams(separationMode: 'source_mix' | 'preserve_background') {
+  return {
+    projectId: 'p1',
+    userId: 'dev-user',
+    jobId: 'j1',
+    exportId: 'export-1',
+    targetLanguage: 'vi' as const,
+    output: 'dubbed' as const,
+    separationMode,
+  };
+}
+
+const stemOperationKey = 'job:j1:retry:0:stem-separation:source_rev:elevenlabs-stems-v1';
+
+describe('Phase 4D idempotent dialogue/background separation', () => {
+  it('keeps source_mix free of stem-provider work', async () => {
+    const d = phase4dDeps(false);
+    await runExportPipeline(phase4dParams('source_mix') as any, d as any, step() as any);
+
+    expect(d.separate).not.toHaveBeenCalled();
+    expect(d.media.renderExport).toHaveBeenCalledWith(
+      'p1',
+      'projects/p1/source/source_rev.mp4',
+      expect.any(Array),
+      { targetLanguage: 'vi', exportId: 'export-1' },
+    );
+  });
+
+  it('separates preserve_background once, meters source seconds, and passes the background stem into render', async () => {
+    const d = phase4dDeps(false);
+    await runExportPipeline(phase4dParams('preserve_background') as any, d as any, step() as any);
+
+    expect(d.separate).toHaveBeenCalledTimes(1);
+    expect(d.separate).toHaveBeenCalledWith({
+      projectId: 'p1',
+      sourceObjectKey: 'projects/p1/source/source_rev.mp4',
+      sourceRevision: 'source_rev',
+    });
+    const separationUsage = d.usageEvents.filter((event) => String(event.kind) === 'stem_separation_audio_second');
+    expect(separationUsage).toEqual([
+      expect.objectContaining({ units: 0, phase: 'started', provider: 'elevenlabs-stems-v1', operationKey: stemOperationKey }),
+      expect.objectContaining({ units: 10, phase: 'completed', provider: 'elevenlabs-stems-v1', operationKey: stemOperationKey }),
+    ]);
+    expect(d.media.probe).toHaveBeenCalledWith('projects/p1/source/source_rev.mp4');
+    expect(d.media.renderExport).toHaveBeenCalledWith(
+      'p1',
+      'projects/p1/source/source_rev.mp4',
+      expect.any(Array),
+      expect.objectContaining({
+        targetLanguage: 'vi',
+        exportId: 'export-1',
+        backgroundObjectKey: d.stemKeys.backgroundObjectKey,
+      }),
+    );
+  });
+
+  it('reuses a durable canonical stem pair without duplicate provider work or usage', async () => {
+    const d = phase4dDeps(true);
+    await runExportPipeline(phase4dParams('preserve_background') as any, d as any, step() as any);
+
+    expect(d.separate).not.toHaveBeenCalled();
+    expect(d.usageEvents.some((event) => String(event.kind) === 'stem_separation_audio_second')).toBe(false);
+    expect(d.media.renderExport).toHaveBeenCalledWith(
+      'p1',
+      'projects/p1/source/source_rev.mp4',
+      expect.any(Array),
+      expect.objectContaining({ backgroundObjectKey: d.stemKeys.backgroundObjectKey }),
+    );
+  });
+
+  it('recovers a started separation usage event from a durable stem pair', async () => {
+    const d = phase4dDeps(true);
+    await d.usage.record({
+      userId: 'dev-user', projectId: 'p1', jobId: 'j1', kind: 'stem_separation_audio_second' as any,
+      units: 0, provider: 'elevenlabs-stems-v1', phase: 'started', operationKey: stemOperationKey,
+    });
+    d.usageEvents.length = 0;
+
+    await runExportPipeline(phase4dParams('preserve_background') as any, d as any, step() as any);
+
+    expect(d.separate).not.toHaveBeenCalled();
+    expect(d.usageEvents).toContainEqual(expect.objectContaining({
+      kind: 'stem_separation_audio_second',
+      units: 10,
+      provider: 'elevenlabs-stems-v1',
+      phase: 'completed',
+      operationKey: stemOperationKey,
+    }));
+  });
+
+  it('fails closed when usage is completed but the durable canonical stem pair is missing', async () => {
+    const d = phase4dDeps(false);
+    await d.usage.record({
+      userId: 'dev-user', projectId: 'p1', jobId: 'j1', kind: 'stem_separation_audio_second' as any,
+      units: 10, provider: 'elevenlabs-stems-v1', phase: 'completed', operationKey: stemOperationKey,
+    });
+    d.usageEvents.length = 0;
+
+    await expect(runExportPipeline(phase4dParams('preserve_background') as any, d as any, step() as any))
+      .rejects.toThrow(/completed stem separation usage without a durable stem pair/i);
+    expect(d.separate).not.toHaveBeenCalled();
+    expect(d.media.renderExport).not.toHaveBeenCalled();
+  });
+});
