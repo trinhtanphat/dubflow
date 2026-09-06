@@ -26,13 +26,22 @@ export async function checkRateLimit(
   return { allowed: result.success, retryAfterSeconds: 60 };
 }
 
+function effectiveOperation(c: Context<any>, operation: RateLimitOperation): RateLimitOperation {
+  // Main already shipped a dedicated batch-export admission budget. The canonical Phase 4C
+  // reconciliation keeps batch fan-out inside the export router, so preserve that budget at
+  // the shared limiter boundary instead of consuming both batch and single-export quotas.
+  if (operation === 'export' && c.req.path.endsWith('/exports/batch')) return 'batch-export';
+  return operation;
+}
+
 export async function enforceRateLimit(
   c: Context<any>,
   operation: RateLimitOperation,
   userId: string,
   projectId?: string,
 ): Promise<Response | null> {
-  const decision = await checkRateLimit(c.env as Env, operation, userId);
+  const admittedOperation = effectiveOperation(c, operation);
+  const decision = await checkRateLimit(c.env as Env, admittedOperation, userId);
   if (decision.allowed) return null;
 
   let requestId: string | undefined;
@@ -46,10 +55,10 @@ export async function enforceRateLimit(
     requestId,
     actorId: userId,
     projectId,
-    operation,
+    operation: admittedOperation,
     status: 'rejected',
     httpStatus: 429,
   });
   c.header('Retry-After', String(decision.retryAfterSeconds));
-  return c.json(errorBody('RATE_LIMITED', `Too many ${operation} requests.`), 429);
+  return c.json(errorBody('RATE_LIMITED', `Too many ${admittedOperation} requests.`), 429);
 }
