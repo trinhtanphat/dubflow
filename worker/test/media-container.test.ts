@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ContainerMediaProcessor } from '../src/services/media/container';
 
 describe('ContainerMediaProcessor', () => {
-  it('requests bounded overlapping five-minute ASR windows from a project-named container', async () => {
+  it('requests fixed overlapping audio chunks from a project-named container', async () => {
     const requests: Request[] = [];
     const namespace = {
       getByName(name: string) {
@@ -12,7 +12,20 @@ describe('ContainerMediaProcessor', () => {
             requests.push(request);
             return Response.json({
               chunks: [
-                { objectKey: 'projects/project-1/audio/000.wav', offsetMs: 0, durationMs: 300000 },
+                {
+                  objectKey: 'projects/project-1/audio/000.wav',
+                  offsetMs: 0,
+                  durationMs: 300000,
+                  overlapBeforeMs: 0,
+                  overlapAfterMs: 15000,
+                },
+                {
+                  objectKey: 'projects/project-1/audio/001.wav',
+                  offsetMs: 285000,
+                  durationMs: 300000,
+                  overlapBeforeMs: 15000,
+                  overlapAfterMs: 0,
+                },
               ],
             });
           },
@@ -24,15 +37,26 @@ describe('ContainerMediaProcessor', () => {
     const chunks = await processor.extractAudioChunks('project-1', 'projects/project-1/source/source.mp4');
 
     expect(chunks).toEqual([
-      { objectKey: 'projects/project-1/audio/000.wav', offsetMs: 0, durationMs: 300000 },
+      {
+        objectKey: 'projects/project-1/audio/000.wav',
+        offsetMs: 0,
+        durationMs: 300000,
+        overlapBeforeMs: 0,
+        overlapAfterMs: 15000,
+      },
+      {
+        objectKey: 'projects/project-1/audio/001.wav',
+        offsetMs: 285000,
+        durationMs: 300000,
+        overlapBeforeMs: 15000,
+        overlapAfterMs: 0,
+      },
     ]);
     expect(requests).toHaveLength(1);
     expect(new URL(requests[0].url).pathname).toBe('/extract-audio-chunks');
     expect(await requests[0].json()).toEqual({
       projectId: 'project-1',
       objectKey: 'projects/project-1/source/source.mp4',
-      chunkSeconds: 300,
-      overlapSeconds: 8,
     });
   });
 
@@ -84,23 +108,45 @@ describe('ContainerMediaProcessor', () => {
   });
 
   it('rejects malformed or cross-project chunk manifests', async () => {
-    const namespace = {
-      getByName() {
-        return {
-          async fetch() {
-            return Response.json({
-              chunks: [
-                { objectKey: 'projects/other/audio/000.wav', offsetMs: 0, durationMs: 300000 },
-              ],
-            });
+    const manifests = [
+      {
+        chunks: [
+          {
+            objectKey: 'projects/other/audio/000.wav',
+            offsetMs: 0,
+            durationMs: 300000,
+            overlapBeforeMs: 0,
+            overlapAfterMs: 15000,
           },
-        };
+        ],
       },
-    };
+      {
+        chunks: [
+          { objectKey: 'projects/project-1/audio/000.wav', offsetMs: 0, durationMs: 300000 },
+        ],
+      },
+      {
+        chunks: [
+          {
+            objectKey: 'projects/project-1/audio/000.wav',
+            offsetMs: 0,
+            durationMs: 1000,
+            overlapBeforeMs: 0,
+            overlapAfterMs: 1500,
+          },
+        ],
+      },
+    ];
 
-    const processor = new ContainerMediaProcessor(namespace);
-    await expect(
-      processor.extractAudioChunks('project-1', 'projects/project-1/source/source.mp4'),
-    ).rejects.toMatchObject({ code: 'MEDIA_PROCESSOR_RESPONSE_INVALID' });
+    for (const manifest of manifests) {
+      const processor = new ContainerMediaProcessor({
+        getByName() {
+          return { async fetch() { return Response.json(manifest); } };
+        },
+      });
+      await expect(
+        processor.extractAudioChunks('project-1', 'projects/project-1/source/source.mp4'),
+      ).rejects.toMatchObject({ code: 'MEDIA_PROCESSOR_RESPONSE_INVALID' });
+    }
   });
 });

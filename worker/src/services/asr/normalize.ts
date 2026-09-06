@@ -1,5 +1,6 @@
 import type { AsrSegment } from './types';
 import { AsrError } from './types';
+import { stableHash } from './stable-hash';
 
 export type AsrChunkForNormalization = {
   projectId: string;
@@ -14,15 +15,6 @@ export type NormalizedAsrSegment = AsrSegment & {
   chunkId: string;
   speakerId?: string;
 };
-
-export function stableHash(value: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, '0');
-}
 
 function chunkSpeakerId(projectId: string, chunkId: string, speakerIndex: number): string {
   return `spk_${stableHash(`${projectId}:${chunkId}:${speakerIndex}`)}`;
