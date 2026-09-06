@@ -10,6 +10,7 @@ import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { createShareToken, hashShareToken } from '../security/share-token';
 
+const CANONICAL_SHARE_ORIGIN = 'https://yupvox.qs3d.site';
 const DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MIN_SHARE_TTL_SECONDS = 60 * 60;
 const MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -106,8 +107,7 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
       exportObjectKey: project.exportObjectKey,
       expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000).toISOString(),
     });
-    const origin = new URL(c.req.url).origin;
-    const shareUrl = `${origin}/api/shares/${encodeURIComponent(share.id)}/media?token=${encodeURIComponent(secret.token)}`;
+    const shareUrl = `${CANONICAL_SHARE_ORIGIN}/api/shares/${encodeURIComponent(share.id)}/media?token=${encodeURIComponent(secret.token)}`;
     return c.json({ share, shareUrl }, 201);
   });
 
