@@ -47,9 +47,13 @@ export async function enrollVoiceClone(input: {
 }): Promise<VoiceClone> {
   let primaryError: unknown;
   let result: VoiceClone | null = null;
+  let createdProviderVoiceId: string | null = null;
+  let providerResultPersisted = false;
+
   try {
     const sample = await toBlob(input.sample);
     const providerResult = await input.provider.createInstantClone({ name: input.clone.name, sample });
+    createdProviderVoiceId = providerResult.providerVoiceId;
     result = await input.store.markProviderResult(
       input.clone.projectId,
       input.clone.id,
@@ -57,8 +61,19 @@ export async function enrollVoiceClone(input: {
       providerResult.providerVoiceId,
       providerResult.requiresVerification,
     );
+    providerResultPersisted = true;
   } catch (error) {
     primaryError = error;
+
+    if (createdProviderVoiceId && !providerResultPersisted) {
+      try {
+        await input.provider.deleteClone(createdProviderVoiceId);
+      } catch {
+        // The original persistence failure stays authoritative. The delete attempt is
+        // deliberately bounded and never exposes a raw provider response.
+      }
+    }
+
     const code = error instanceof VoiceCloneProviderError
       ? error.code
       : error instanceof VoiceCloneEnrollmentError
