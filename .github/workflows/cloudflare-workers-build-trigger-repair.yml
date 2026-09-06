@@ -1,0 +1,139 @@
+name: Repair Cloudflare Workers Builds trigger
+
+on:
+  push:
+    branches:
+      - repair/cloudflare-workers-build-trigger-62
+
+permissions:
+  contents: read
+
+jobs:
+  repair-and-qualify:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      WORKER_TAG: ed49a7dcf94c407aafa2bedf4311331f
+      TRIGGER_UUID: 6aba718f-e7bb-4726-ae2d-c48d617794aa
+      TARGET_SHA: 4b36730c27fd940c7eb97975f72380fb3a785525
+      EXPECTED_DEPLOY_COMMAND: node scripts/cloudflare-workers-build-deploy.mjs
+    steps:
+      - name: Verify known stale production trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          trigger="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$WORKER_TAG/triggers" -H "$auth" | jq -c --arg uuid "$TRIGGER_UUID" '.result[] | select(.trigger_uuid == $uuid)')"
+          current="$(printf '%s' "$trigger" | jq -r '.deploy_command')"
+          echo "current_deploy_command=$current"
+          if [[ "$current" == "$EXPECTED_DEPLOY_COMMAND" ]]; then
+            echo 'Trigger is already repaired; continuing idempotently.'
+          else
+            echo 'Confirmed stale trigger differs from repository-owned deployment command.'
+          fi
+
+      - name: Patch production deploy command
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          payload="$(jq -nc --arg deploy "$EXPECTED_DEPLOY_COMMAND" '{build_command:"npm run build",deploy_command:$deploy}')"
+          response="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/triggers/$TRIGGER_UUID" \
+            -X PATCH -H "$auth" -H 'Content-Type: application/json' --data "$payload")"
+          printf '%s' "$response" | jq -e '.success == true' >/dev/null
+          printf '%s' "$response" | jq -c '{success,result:{trigger_uuid:.result.trigger_uuid,build_command:.result.build_command,deploy_command:.result.deploy_command}}'
+
+      - name: Verify repaired trigger exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          trigger="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$WORKER_TAG/triggers" -H "$auth" | jq -c --arg uuid "$TRIGGER_UUID" '.result[] | select(.trigger_uuid == $uuid)')"
+          test "$(printf '%s' "$trigger" | jq -r '.build_command')" = 'npm run build'
+          test "$(printf '%s' "$trigger" | jq -r '.deploy_command')" = "$EXPECTED_DEPLOY_COMMAND"
+          test "$(printf '%s' "$trigger" | jq -r '.branch_includes | join(",")')" = 'main'
+          echo 'Cloudflare production trigger now matches the repository-owned deployment path.'
+
+      - name: Trigger exact main commit
+        id: trigger
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          payload="$(jq -nc --arg branch main --arg sha "$TARGET_SHA" '{branch:$branch,commit_hash:$sha}')"
+          response="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/triggers/$TRIGGER_UUID/builds" \
+            -X POST -H "$auth" -H 'Content-Type: application/json' --data "$payload")"
+          printf '%s' "$response" | jq -e '.success == true and (.result.build_uuid | type == "string")' >/dev/null
+          build_uuid="$(printf '%s' "$response" | jq -r '.result.build_uuid')"
+          echo "build_uuid=$build_uuid" >> "$GITHUB_OUTPUT"
+          echo "Triggered Cloudflare build $build_uuid for main@$TARGET_SHA"
+
+      - name: Wait for Cloudflare build success
+        shell: bash
+        env:
+          BUILD_UUID: ${{ steps.trigger.outputs.build_uuid }}
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          for attempt in $(seq 1 90); do
+            response="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/builds/$BUILD_UUID" -H "$auth")"
+            status="$(printf '%s' "$response" | jq -r '.result.status // "unknown"')"
+            outcome="$(printf '%s' "$response" | jq -r '.result.build_outcome // "pending"')"
+            commit="$(printf '%s' "$response" | jq -r '.result.build_trigger_metadata.commit_hash // "unknown"')"
+            deploy="$(printf '%s' "$response" | jq -r '.result.build_trigger_metadata.deploy_command // "unknown"')"
+            echo "attempt=$attempt status=$status outcome=$outcome commit=$commit deploy=$deploy"
+            test "$commit" = "$TARGET_SHA"
+            test "$deploy" = "$EXPECTED_DEPLOY_COMMAND"
+            if [[ "$status" == 'stopped' ]]; then
+              if [[ "$outcome" == 'success' ]]; then
+                echo 'Cloudflare build completed successfully.'
+                exit 0
+              fi
+              echo 'Cloudflare build stopped without success. Logs:' >&2
+              curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/builds/$BUILD_UUID/logs" -H "$auth" \
+                | jq -r '.result.lines[]? | if type == "array" then (map(tostring) | join("\t")) else tostring end' >&2 || true
+              exit 1
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for Cloudflare build.' >&2
+          exit 1
+
+      - name: Qualify live production APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+          probe() {
+            curl --silent --show-error --location --output "$2" --write-out '%{http_code}' --max-time 20 "$1" || printf '000'
+          }
+          for attempt in $(seq 1 30); do
+            ready_file="$(mktemp)"
+            sink="$(mktemp)"
+            ready="$(probe "$base/api/ready" "$ready_file")"
+            projects="$(probe "$base/api/projects" "$sink")"
+            usage="$(probe "$base/api/usage" "$sink")"
+            p1="$(probe "$base/api/projects/$project1" "$sink")"
+            p2="$(probe "$base/api/projects/$project2" "$sink")"
+            schema10='no'
+            grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file" && schema10='yes' || true
+            echo "attempt=$attempt ready=$ready schema10=$schema10 projects=$projects usage=$usage project1=$p1 project2=$p2"
+            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$p1" != '500' && "$p1" != '000' && "$p2" != '500' && "$p2" != '000' ]]; then
+              echo 'Live production API recovery qualified.'
+              cat "$ready_file"
+              rm -f "$ready_file" "$sink"
+              exit 0
+            fi
+            rm -f "$ready_file" "$sink"
+            sleep 10
+          done
+          echo 'Production APIs did not qualify after successful Cloudflare build.' >&2
+          exit 1
