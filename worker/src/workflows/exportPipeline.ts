@@ -7,6 +7,7 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import type { RenderExportOptions } from '../services/media/types';
+import type { SeparationMode, StemSeparationProvider } from '../services/separation/types';
 import { serializeSrt } from '../services/subtitles/srt';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
@@ -17,6 +18,7 @@ export type ExportWorkflowParams = {
   exportId: string;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  separationMode?: SeparationMode;
   requestId?: string;
 };
 
@@ -129,6 +131,7 @@ export type ExportPipelineDeps = {
   };
   bucket: {
     put?(key: string, value: ArrayBuffer): Promise<unknown>;
+    head?(key: string): Promise<unknown | null>;
   };
   voice: {
     generate(input: VoiceGenerateInput): Promise<unknown>;
@@ -142,6 +145,7 @@ export type ExportPipelineDeps = {
       options?: RenderExportOptions,
     ): Promise<{ exportObjectKey: string }>;
   };
+  separation?: StemSeparationProvider;
   usage: ExportUsage;
   telemetry: TelemetrySink;
 };
@@ -155,6 +159,13 @@ type NormalizedExportParams = {
   exportId: string | null;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  separationMode: SeparationMode;
+};
+
+type CanonicalStemPair = {
+  sourceRevision: string;
+  dialogueObjectKey: string;
+  backgroundObjectKey: string;
 };
 
 function errorMessage(error: unknown): string {
@@ -165,12 +176,22 @@ function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParam
   const candidate = params as Partial<ExportWorkflowParams> & LegacyExportWorkflowParams;
   const modernFieldPresent = candidate.exportId !== undefined || candidate.targetLanguage !== undefined || candidate.output !== undefined;
   if (!modernFieldPresent) {
-    return { ...params, modern: false, exportId: null, targetLanguage: 'vi', output: 'dubbed' };
+    return {
+      ...params,
+      modern: false,
+      exportId: null,
+      targetLanguage: 'vi',
+      output: 'dubbed',
+      separationMode: 'source_mix',
+    };
   }
+  const separationMode = candidate.separationMode ?? 'source_mix';
   if (
     typeof candidate.exportId !== 'string' || !candidate.exportId.trim() ||
     !isTargetLanguage(candidate.targetLanguage) ||
-    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles')
+    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles') ||
+    (separationMode !== 'source_mix' && separationMode !== 'preserve_background') ||
+    (candidate.output === 'subtitles' && separationMode !== 'source_mix')
   ) {
     throw new Error('Export workflow parameters are invalid.');
   }
@@ -183,6 +204,7 @@ function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParam
     exportId: candidate.exportId,
     targetLanguage: candidate.targetLanguage,
     output: candidate.output,
+    separationMode,
   };
 }
 
@@ -213,13 +235,161 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
-async function probeTtsSeconds(deps: ExportPipelineDeps, objectKey: string): Promise<number> {
+async function probePositiveSeconds(deps: ExportPipelineDeps, objectKey: string, label: string): Promise<number> {
   const metadata = await deps.media.probe(objectKey);
   const seconds = metadata.durationMs / 1000;
   if (!Number.isFinite(seconds) || seconds <= 0) {
-    throw new Error('Generated voice duration is invalid.');
+    throw new Error(`${label} duration is invalid.`);
   }
   return seconds;
+}
+
+async function probeTtsSeconds(deps: ExportPipelineDeps, objectKey: string): Promise<number> {
+  return probePositiveSeconds(deps, objectKey, 'Generated voice');
+}
+
+function canonicalStemPair(projectId: string, sourceObjectKey: string): CanonicalStemPair {
+  const prefix = `projects/${projectId}/source/`;
+  if (!sourceObjectKey.startsWith(prefix)) {
+    throw new Error('Project source media key is not a canonical immutable source object.');
+  }
+  const filename = sourceObjectKey.slice(prefix.length);
+  if (!filename || filename.includes('/')) {
+    throw new Error('Project source media key is not a canonical immutable source object.');
+  }
+  const extensionAt = filename.lastIndexOf('.');
+  if (extensionAt <= 0 || extensionAt === filename.length - 1) {
+    throw new Error('Project source media key has no immutable source revision.');
+  }
+  const sourceRevision = filename.slice(0, extensionAt);
+  if (!/^[A-Za-z0-9_-]{1,100}$/.test(sourceRevision)) {
+    throw new Error('Project source media revision is invalid.');
+  }
+  const stemPrefix = `projects/${projectId}/stems/${sourceRevision}`;
+  return {
+    sourceRevision,
+    dialogueObjectKey: `${stemPrefix}/dialogue.wav`,
+    backgroundObjectKey: `${stemPrefix}/background.wav`,
+  };
+}
+
+async function hasCanonicalStemPair(deps: ExportPipelineDeps, pair: CanonicalStemPair): Promise<boolean> {
+  if (!deps.bucket.head) throw new Error('R2 head is unavailable for stem separation.');
+  const [dialogue, background] = await Promise.all([
+    deps.bucket.head(pair.dialogueObjectKey),
+    deps.bucket.head(pair.backgroundObjectKey),
+  ]);
+  return Boolean(dialogue && background);
+}
+
+async function prepareBackgroundStem(
+  deps: ExportPipelineDeps,
+  step: ExportWorkflowStepLike,
+  params: NormalizedExportParams,
+  sourceObjectKey: string,
+  retryCount: number,
+  ensureActive: () => Promise<void>,
+): Promise<string | undefined> {
+  if (params.separationMode === 'source_mix') return undefined;
+  const separation = deps.separation;
+  if (!separation?.available) {
+    throw new Error('Dialogue/background stem separation is unavailable.');
+  }
+
+  const pair = canonicalStemPair(params.projectId, sourceObjectKey);
+  const separationKey = operationKey(
+    params.jobId,
+    retryCount,
+    'stem-separation',
+    pair.sourceRevision,
+    separation.id,
+  );
+  const started = await step.do('load stem separation started usage', async () =>
+    deps.usage.getByOperation(separationKey, 'started'),
+  );
+  const completed = await step.do('load stem separation completed usage', async () =>
+    deps.usage.getByOperation(separationKey, 'completed'),
+  );
+  const durable = await step.do('check canonical stem pair', async () => hasCanonicalStemPair(deps, pair));
+
+  if (completed && !durable) {
+    throw new Error('Completed stem separation usage exists without a durable stem pair.');
+  }
+
+  if (durable) {
+    if (started && !completed) {
+      await step.do('recover stem separation usage', async () => {
+        const units = await probePositiveSeconds(deps, sourceObjectKey, 'Source media');
+        await deps.usage.record({
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'stem_separation_audio_second',
+          units,
+          provider: separation.id,
+          phase: 'completed',
+          operationKey: separationKey,
+        });
+      });
+    }
+    return pair.backgroundObjectKey;
+  }
+
+  await step.do('check cancellation before stem separation', ensureActive);
+  if (!started) {
+    await step.do('record stem separation start', async () => {
+      await deps.usage.record({
+        userId: params.userId,
+        projectId: params.projectId,
+        jobId: params.jobId,
+        kind: 'stem_separation_audio_second',
+        units: 0,
+        provider: separation.id,
+        phase: 'started',
+        operationKey: separationKey,
+      });
+    });
+  }
+
+  await step.do('separate dialogue and background stems', async () => {
+    const result = await withProviderTelemetry(deps.telemetry, {
+      requestId: params.requestId,
+      actorId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      operation: 'stem_separation',
+      provider: separation.id,
+      errorCode: 'STEM_SEPARATION_FAILED',
+    }, () => separation.separate({
+      projectId: params.projectId,
+      sourceObjectKey,
+      sourceRevision: pair.sourceRevision,
+    }));
+    if (
+      result.dialogueObjectKey !== pair.dialogueObjectKey ||
+      result.backgroundObjectKey !== pair.backgroundObjectKey
+    ) {
+      throw new Error('Stem separation returned a non-canonical stem pair.');
+    }
+  });
+
+  const persisted = await step.do('verify canonical stem pair', async () => hasCanonicalStemPair(deps, pair));
+  if (!persisted) throw new Error('Stem separation completed without a durable stem pair.');
+
+  await step.do('complete stem separation usage', async () => {
+    const units = await probePositiveSeconds(deps, sourceObjectKey, 'Source media');
+    await deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'stem_separation_audio_second',
+      units,
+      provider: separation.id,
+      phase: 'completed',
+      operationKey: separationKey,
+    });
+  });
+  return pair.backgroundObjectKey;
 }
 
 function targetWorkItems(sourceSegments: ExportSegment[], variants: ExportVariant[], targetLanguage: TargetLanguage): ExportWorkItem[] {
@@ -434,6 +604,15 @@ export async function runExportPipeline(
       );
     }
 
+    const backgroundObjectKey = await prepareBackgroundStem(
+      deps,
+      step,
+      params,
+      project.sourceObjectKey!,
+      retryCount,
+      ensureActive,
+    );
+
     await step.do('check cancellation before export render', ensureActive);
     await step.do('mark render stage', async () => deps.jobs.setProgress(params!.jobId, 0.72, 'rendering_export'));
 
@@ -453,8 +632,12 @@ export async function runExportPipeline(
         operationKey: renderKey,
       };
       await deps.usage.record({ ...common, phase: 'started' });
-      const options = params!.modern
-        ? { targetLanguage: params!.targetLanguage, exportId: params!.exportId! }
+      const options: RenderExportOptions | undefined = params!.modern
+        ? {
+            targetLanguage: params!.targetLanguage,
+            exportId: params!.exportId!,
+            ...(backgroundObjectKey ? { backgroundObjectKey } : {}),
+          }
         : undefined;
       const result = await withProviderTelemetry(deps.telemetry, {
         requestId: params!.requestId,
@@ -505,6 +688,7 @@ export async function runExportPipeline(
       exportId: null,
       targetLanguage: 'vi' as const,
       output: 'dubbed' as const,
+      separationMode: 'source_mix' as const,
     };
     if (isJobCancelledError(error)) {
       if (!effective.modern) {
