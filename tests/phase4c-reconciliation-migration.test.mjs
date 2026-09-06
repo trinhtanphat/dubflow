@@ -84,6 +84,10 @@ function columns(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
 }
 
+function plainRow(row) {
+  return row ? { ...row } : row;
+}
+
 test('0010 upgrades the already-merged main 0009 schema without losing Phase 4C data or share identity', () => {
   const db = new DatabaseSync(':memory:');
   try {
@@ -159,12 +163,12 @@ test('0010 upgrades the already-merged main 0009 schema without losing Phase 4C 
     assert.ok(columns(db, 'export_shares').includes('export_id'));
 
     assert.deepEqual(
-      db.prepare(`
+      plainRow(db.prepare(`
         SELECT translated_text, translation_status, voice_status, dubbed_object_key,
                translation_context_revision, context_revision, source_segment_version, version
         FROM segment_translations
         WHERE segment_id = 's1' AND target_language = 'ja'
-      `).get(),
+      `).get()),
       {
         translated_text: 'Konnichiwa',
         translation_status: 'completed',
@@ -178,10 +182,10 @@ test('0010 upgrades the already-merged main 0009 schema without losing Phase 4C 
     );
 
     assert.deepEqual(
-      db.prepare(`
+      plainRow(db.prepare(`
         SELECT target_language, output, batch_id, status, export_object_key, job_id, generation, object_key
         FROM project_exports WHERE id = 'exp-ja'
-      `).get(),
+      `).get()),
       {
         target_language: 'ja',
         output: 'dubbed',
