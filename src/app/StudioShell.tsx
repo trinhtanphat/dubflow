@@ -14,6 +14,7 @@ import {
 } from '../features/timeline/segmentMutationService';
 import type { Segment } from '../features/timeline/types';
 import { startExport, type CloudJob } from '../features/projects/jobApi';
+import { TranslationSettingsPanel } from '../features/translation/TranslationSettingsPanel';
 import type { TranslationMode } from '../features/translation/translationApi';
 import { retranslateEditorSegment } from '../features/transcript/editorPersistence';
 import { SegmentVersionConflictError, type CloudSegment } from '../features/transcript/segmentApi';
@@ -242,7 +243,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [activeJob, setActiveJob] = useState<{ projectId: string; jobId: string } | null>(null);
   const [cloudJob, setCloudJob] = useState<CloudJob | null>(null);
   const [cloudError, setCloudError] = useState('');
-  const [translationMode, setTranslationMode] = useState<TranslationMode>('workers-ai');
+  const [translationMode, setTranslationMode] = useState<TranslationMode | undefined>(undefined);
   const [translationComparison, setTranslationComparison] = useState<{ workersAI: string; google: string } | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorError, setEditorError] = useState('');
@@ -526,6 +527,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
       <main className="studio-grid" aria-label="DubFlow dubbing workspace">
         <aside className="left-rail" aria-label="Nguồn media và nhân vật">
           <UploadPanel onProcessStarted={onProcessStarted} speakerSection={<SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />} />
+          {cloudEditable && (
+            <section className="panel translation-settings-host">
+              <TranslationSettingsPanel projectId={state.project.id} />
+            </section>
+          )}
         </aside>
 
         <section className="center-stage" aria-label="Không gian chỉnh sửa">

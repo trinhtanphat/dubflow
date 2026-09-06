@@ -1,0 +1,100 @@
+.translation-settings {
+  display: grid;
+  gap: 13px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.translation-settings__header,
+.translation-settings__glossary-head,
+.translation-settings__entry,
+.translation-settings__draft-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.translation-settings__header h3 {
+  margin: 3px 0 0;
+  font-size: 13px;
+}
+.translation-settings__capability {
+  max-width: 130px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.25;
+  text-align: center;
+}
+.translation-settings__capability.is-ready { color: var(--green); border-color: rgba(41, 200, 121, .35); }
+.translation-settings__capability.is-guarded { color: #d8b46a; }
+.translation-settings__styles { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.translation-settings__styles legend { margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+.translation-settings__styles label {
+  display: grid;
+  grid-template-columns: 15px 1fr;
+  gap: 7px;
+  align-items: start;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.translation-settings__styles label.is-selected { border-color: rgba(139, 54, 244, .62); background: rgba(139, 54, 244, .08); }
+.translation-settings__styles input { margin-top: 2px; accent-color: var(--purple); }
+.translation-settings__styles strong { display: block; font-size: 10px; }
+.translation-settings__styles small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; line-height: 1.35; }
+.translation-settings__glossary-head > div { display: flex; align-items: baseline; gap: 7px; }
+.translation-settings__glossary-head strong { font-size: 11px; }
+.translation-settings__glossary-head span { color: var(--muted); font-size: 9px; }
+.translation-settings__search,
+.translation-settings__draft input,
+.translation-settings__draft textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  outline: none;
+}
+.translation-settings__search,
+.translation-settings__draft input { height: 34px; padding: 0 9px; }
+.translation-settings__draft textarea { padding: 8px 9px; resize: vertical; }
+.translation-settings__search:focus,
+.translation-settings__draft input:focus,
+.translation-settings__draft textarea:focus { border-color: #7540b6; box-shadow: 0 0 0 2px rgba(139,54,244,.12); }
+.translation-settings__draft { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.translation-settings__draft label > span { display: block; margin-bottom: 4px; color: var(--muted); font-size: 9px; }
+.translation-settings__case-toggle { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; }
+.translation-settings__case-toggle input { width: auto; height: auto; accent-color: var(--purple); }
+.translation-settings__draft-actions { justify-content: flex-end; }
+.translation-settings__list { display: grid; gap: 7px; max-height: 230px; overflow: auto; }
+.translation-settings__entry { align-items: flex-start; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #111218; }
+.translation-settings__entry > div:first-child { min-width: 0; }
+.translation-settings__entry strong,
+.translation-settings__entry span,
+.translation-settings__entry small,
+.translation-settings__entry em { display: block; overflow-wrap: anywhere; }
+.translation-settings__entry strong { font-size: 10px; }
+.translation-settings__entry span { margin-top: 2px; color: #c9c4d4; font-size: 9px; }
+.translation-settings__entry small { margin-top: 4px; color: var(--muted); font-size: 8px; }
+.translation-settings__entry em { margin-top: 4px; color: #b9a1dd; font-size: 8px; font-style: normal; }
+.translation-settings__entry-actions { display: flex; gap: 4px; flex: 0 0 auto; }
+.translation-settings__entry-actions .ghost-button,
+.translation-settings__draft-actions .ghost-button,
+.translation-settings__glossary-head .ghost-button { padding: 5px 7px; font-size: 9px; }
+.translation-settings__draft-actions .secondary-button { padding: 6px 8px; font-size: 9px; }
+.translation-settings__status,
+.translation-settings__error,
+.translation-settings__conflict,
+.translation-settings__changed,
+.translation-settings__hint,
+.translation-settings__empty { margin: 0; font-size: 9px; line-height: 1.45; }
+.translation-settings__status,
+.translation-settings__empty,
+.translation-settings__hint { color: var(--muted); }
+.translation-settings__error { color: var(--red); }
+.translation-settings__conflict { color: #e5bd70; }
+.translation-settings__changed { color: var(--green); }
