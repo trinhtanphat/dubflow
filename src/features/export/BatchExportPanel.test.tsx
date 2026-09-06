@@ -163,7 +163,8 @@ describe('Phase 4D dialogue/background export controls', () => {
 
     expect(html).toContain('Source mix');
     expect(html).toContain('Preserve background/music');
-    expect(html).toContain('value="source_mix" checked=""');
+    const sourceMixInput = html.match(/<input[^>]*value="source_mix"[^>]*>/)?.[0] ?? '';
+    expect(sourceMixInput).toContain('checked=""');
     expect(html).toContain('value="preserve_background"');
   });
 
@@ -195,7 +196,8 @@ describe('Phase 4D dialogue/background export controls', () => {
       />,
     );
 
-    expect(html).toMatch(/value="preserve_background"[^>]*disabled=""/);
+    const preserveInput = html.match(/<input[^>]*value="preserve_background"[^>]*>/)?.[0] ?? '';
+    expect(preserveInput).toContain('disabled=""');
     expect(html).toMatch(/tách thoại|background|không khả dụng/i);
   });
 });
