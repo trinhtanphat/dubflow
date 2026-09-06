@@ -1,4 +1,5 @@
 import type { SourceLanguage } from '../../domain/project';
+import type { TargetLanguage } from '../../domain/target-language';
 import type { TranslationContext } from './context';
 
 export type TranslationItem = { id: string; text: string };
@@ -14,7 +15,7 @@ export interface TranslationProvider {
   translateBatch(
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]>;
 }
