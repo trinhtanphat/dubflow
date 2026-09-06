@@ -109,15 +109,23 @@ describe('UsageRepository', () => {
     await repo.record(base);
     await repo.record({ ...base, kind: 'translation_character', units: 17, provider: 'workers-ai', operationKey: 'job:j1:retry:0:translation:batch-0:workers-ai' });
     await repo.record({ ...base, kind: 'tts_audio_second', units: 3.125, provider: 'elevenlabs', operationKey: 'job:j1:retry:0:tts:s1:elevenlabs' });
+    await repo.record({ ...base, kind: 'stem_separation_audio_second', units: 142.375, provider: 'elevenlabs-stems-v1', operationKey: 'job:j1:retry:0:stem-separation:source-rev:elevenlabs-stems-v1' });
     await repo.record({ ...base, kind: 'render_second', units: 142.375, provider: 'ffmpeg-container', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
 
     await expect(repo.summarizeForUser('u1')).resolves.toEqual({
-      totals: { asrAudioSeconds: 75.125, translationCharacters: 17, ttsAudioSeconds: 3.125, renderSeconds: 142.375 },
+      totals: {
+        asrAudioSeconds: 75.125,
+        translationCharacters: 17,
+        ttsAudioSeconds: 3.125,
+        stemSeparationAudioSeconds: 142.375,
+        renderSeconds: 142.375,
+      },
       providers: {
-        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0 },
-        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, renderSeconds: 0 },
-        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, renderSeconds: 0 },
-        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 142.375 },
+        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, stemSeparationAudioSeconds: 0, renderSeconds: 0 },
+        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, stemSeparationAudioSeconds: 0, renderSeconds: 0 },
+        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, stemSeparationAudioSeconds: 0, renderSeconds: 0 },
+        'elevenlabs-stems-v1': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, stemSeparationAudioSeconds: 142.375, renderSeconds: 0 },
+        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, stemSeparationAudioSeconds: 0, renderSeconds: 142.375 },
       },
     });
   });
