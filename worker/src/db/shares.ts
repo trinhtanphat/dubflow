@@ -5,6 +5,7 @@ export type ExportShareStatus = 'active' | 'expired' | 'revoked';
 export type ExportShare = {
   id: string;
   projectId: string;
+  exportId?: string | null;
   tokenHint: string;
   exportObjectKey: string;
   expiresAt: string;
@@ -16,6 +17,7 @@ export type ExportShare = {
 export type CreateExportShareInput = {
   projectId: string;
   userId: string;
+  exportId?: string | null;
   tokenHash: string;
   tokenHint: string;
   exportObjectKey: string;
@@ -32,6 +34,7 @@ export interface ShareStore {
 type ShareRow = {
   id: string;
   project_id: string;
+  export_id: string | null;
   created_by_user_id: string;
   token_hash: string;
   token_hint: string;
@@ -41,12 +44,17 @@ type ShareRow = {
   created_at: string;
 };
 
-const SHARE_COLUMNS = `id, project_id, created_by_user_id, token_hash, token_hint, export_object_key, expires_at, revoked_at, created_at`;
+const SHARE_COLUMNS = `id, project_id, export_id, created_by_user_id, token_hash, token_hint, export_object_key, expires_at, revoked_at, created_at`;
 
 function nonEmpty(value: string, label: string): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error(`${label} must not be empty.`);
   return trimmed;
+}
+
+function optionalNonEmpty(value: string | null | undefined, label: string): string | null {
+  if (value === undefined || value === null) return null;
+  return nonEmpty(value, label);
 }
 
 function isoDate(value: string, label: string): string {
@@ -66,6 +74,7 @@ function fromRow(row: ShareRow, now: Date): ExportShare {
   return {
     id: row.id,
     projectId: row.project_id,
+    exportId: row.export_id,
     tokenHint: row.token_hint,
     exportObjectKey: row.export_object_key,
     expiresAt: row.expires_at,
@@ -85,6 +94,7 @@ export class ShareRepository implements ShareStore {
     const id = nonEmpty(this.createId(), 'Share id');
     const projectId = nonEmpty(input.projectId, 'Project id');
     const userId = nonEmpty(input.userId, 'User id');
+    const exportId = optionalNonEmpty(input.exportId, 'Export id');
     const tokenHash = nonEmpty(input.tokenHash, 'Token hash');
     const tokenHint = nonEmpty(input.tokenHint, 'Token hint');
     const exportObjectKey = nonEmpty(input.exportObjectKey, 'Export object key');
@@ -92,9 +102,9 @@ export class ShareRepository implements ShareStore {
 
     await this.db.prepare(
       `INSERT INTO export_shares
-       (id, project_id, created_by_user_id, token_hash, token_hint, export_object_key, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(id, projectId, userId, tokenHash, tokenHint, exportObjectKey, expiresAt).run();
+       (id, project_id, export_id, created_by_user_id, token_hash, token_hint, export_object_key, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, projectId, exportId, userId, tokenHash, tokenHint, exportObjectKey, expiresAt).run();
 
     const row = await this.db.prepare(
       `SELECT ${SHARE_COLUMNS}
