@@ -43,7 +43,7 @@ Google Translation remains an optional configured provider. Compare mode does no
 
 The deploy workflow supports optional `GOOGLE_CLOUD_TRANSLATE_API_KEY`, `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY`, and `ELEVENLABS_DEFAULT_VOICE_ID` GitHub secrets and syncs configured values into Worker secrets without committing them.
 
-Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow, including source-level per-speaker voice routing. This is still distinct from production-runtime qualification: the repository must not claim a deployed export PASS until a real fixture produces and returns the final artifact. Voice cloning and visual lip-sync rendering remain capability-gated and unqualified.
+Source support for final dubbed export now exists through the ElevenLabs + FFmpeg export workflow, including source-level per-speaker voice routing. Managed explicit-consent ElevenLabs Instant Voice Clone enrollment is source-supported by Phase 4B but remains production-unqualified. Visual lip-sync rendering remains capability-gated and unqualified.
 
 ## Phase 3B usage qualification
 
@@ -87,6 +87,20 @@ Phase 3B usage semantics are unchanged: ASR usage records the actual `chunk.dura
 
 These Phase 4A contracts are **source/CI qualification only**. They do not prove that production Deepgram diarization produces correct real-world project-stable identities. Production deployment remains **manual-only** and is not performed by Phase 4A. Production runtime remains **UNQUALIFIED** until the Cloudflare Container credential and real provider/media fixtures pass, including a valid `DEEPGRAM_API_KEY` fixture that demonstrates persisted speaker-linked segments across a real 15-second chunk boundary and a rerun that safely reuses an existing speaker identity.
 
+## Phase 4B safe voice clone enrollment qualification
+
+Phase 4B source/CI qualification adds managed ElevenLabs Instant Voice Clone (IVC) enrollment behind an explicit rights/consent gate. The user must intentionally provide a bounded audio sample; YupVox does not infer consent from project ownership, diarization, speaker names, or presence in uploaded source video, and it does not auto-extract source-video speech into the clone workflow.
+
+Managed clone state is owner/project scoped in D1 with `creating`, `verification_required`, `ready`, `failed`, `deleting`, and `deleted` lifecycle states. Temporary sample objects are stored under server-generated R2 keys only until the provider attempt finishes. Cleanup runs after both provider success and provider failure, and a cleanup failure is surfaced as `VOICE_CLONE_SAMPLE_CLEANUP_FAILED` instead of reporting a successful enrollment while retaining the sample.
+
+A dedicated `RATE_LIMIT_VOICE_CLONE` Cloudflare rate-limit lane protects provider enrollment independently from ordinary voice preview/TTS. Authorization, ownership, consent, lifecycle and sample validation occur before that limiter is consumed. The lane is an abuse/admission control only and does not create Phase 3B usage events, decrement credits or establish pricing.
+
+ElevenLabs `requires_verification=true` maps to `verification_required`; that clone is persisted for lifecycle/deletion purposes but is not assignable. Only `ready` managed clones may be assigned to speakers, and assignment reuses the existing speaker voice update/invalidation path so previously generated dubbed audio and stale project exports are invalidated before a re-render. Provider deletion is fail-closed and is never reported as deleted when the provider operation fails.
+
+The capability API distinguishes normal TTS preview from managed clone enrollment through `cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available }`. Studio surfaces consent, sample selection, creating, verification-required, ready, failed and deleting states truthfully; assignment remains an explicit user action and is never automatic after enrollment.
+
+Professional Voice Clone creation/training/verification orchestration is outside Phase 4B scope. Phase 4B is **source/CI qualification only** and does not prove a production voice-cloning fixture. Production deployment remains **manual-only**, no Phase 4B production deploy is performed by this qualification work, and production runtime remains **UNQUALIFIED** until the existing Cloudflare Container credential and a real authorized ElevenLabs/media fixture pass.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
@@ -97,6 +111,6 @@ Studio Pro V2 source acceptance covers the real media player, direct timeline ma
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments across a real 15-second cross-window boundary; a rerun must also demonstrate safe historical speaker-ID reuse without overwriting user metadata. For contextual translation qualification, a configured `CONTEXT_TRANSLATION_MODEL` must successfully process a real project glossary/style fixture without silent raw-provider fallback. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
+A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments across a real 15-second cross-window boundary; a rerun must also demonstrate safe historical speaker-ID reuse without overwriting user metadata. For contextual translation qualification, a configured `CONTEXT_TRANSLATION_MODEL` must successfully process a real project glossary/style fixture without silent raw-provider fallback. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments. Managed IVC likewise remains production-unqualified until an authorized real provider fixture creates a clone, satisfies any provider verification requirement, assigns only a `ready` clone, and proves provider/sample cleanup boundaries.
 
 If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, ElevenLabs, and contextual-model secret values are never committed to the repository.
