@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
+import { TARGET_LANGUAGES } from '../src/domain/language';
 import { MAX_CONTEXT_PAYLOAD_BYTES, type TranslationContext } from '../src/services/translation/context';
 
 class FakeAI implements AiBinding {
@@ -39,14 +40,14 @@ describe('ContextualWorkersAITranslationProvider', () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
     const unavailable = new ContextualWorkersAITranslationProvider(ai, '   ');
-    expect(unavailable.capabilities).toEqual({ contextual: true, available: false });
+    expect(unavailable.capabilities).toEqual({ contextual: true, available: false, targets: TARGET_LANGUAGES });
 
     await expect(unavailable.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi', context))
       .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_UNAVAILABLE' });
     expect(ai.calls).toHaveLength(0);
 
     expect(new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model').capabilities)
-      .toEqual({ contextual: true, available: true });
+      .toEqual({ contextual: true, available: true, targets: TARGET_LANGUAGES });
   });
 
   it('rejects unsupported targets before an AI call', async () => {
@@ -54,7 +55,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
     const ai = new FakeAI({ response: '{"translations":[]}' });
     const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
 
-    await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'ja', context))
+    await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'fr', context))
       .rejects.toMatchObject({ code: 'TRANSLATION_TARGET_UNSUPPORTED' });
     expect(ai.calls).toHaveLength(0);
   });
