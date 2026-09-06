@@ -54,6 +54,7 @@ describe('dubbing workflow pipeline', () => {
     };
     let persistedAsrInput: Array<{ id: string; speakerId?: string | null; startMs: number; endMs: number; sourceText: string }> = [];
     const segments = {
+      async list() { return []; },
       async replaceFromAsr(_projectId: string, _userId: string, input: typeof persistedAsrInput) {
         calls.push('segments:replace');
         persistedAsrInput = input;
@@ -121,7 +122,7 @@ describe('dubbing workflow pipeline', () => {
         },
         bucket: { async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; } },
         asr: { async transcribe() { return { text: '', segments: [] }; } },
-        segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+        segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
         translation: { async translateBatch() { return []; } },
         usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
         telemetry: noTelemetry,
@@ -159,7 +160,7 @@ describe('dubbing workflow pipeline', () => {
         async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; },
       },
       asr: { async transcribe() { throw new Error('provider down'); } },
-      segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+      segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
       usage: noUsage,
       telemetry: noTelemetry,
@@ -198,7 +199,7 @@ describe('dubbing workflow pipeline', () => {
       },
       bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
-      segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+      segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       translation: { async translateBatch() { return []; } },
       usage: noUsage,
       telemetry: noTelemetry,
