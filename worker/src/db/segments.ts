@@ -1,3 +1,4 @@
+import type { MultilangStore } from './multilang';
 import type { D1DatabaseLike, D1RunResultLike } from './projects';
 import {
   MIN_SEGMENT_MS,
@@ -84,6 +85,11 @@ const SELECT = `SELECT s.id, s.project_id, s.speaker_id, s.start_ms, s.end_ms, s
 
 type AuthorizedProject = { id: string; duration_ms: number | null; status: string };
 
+type SegmentMultilangStore = Pick<
+  MultilangStore,
+  'listTargets' | 'invalidateSegmentAllTargets' | 'invalidateSegmentTarget' | 'invalidateExportsForTarget'
+>;
+
 function affectedRows(result: D1RunResultLike): number {
   const changes = result.meta?.changes ?? result.changes ?? 0;
   return Number.isFinite(changes) ? Math.max(0, Number(changes)) : 0;
@@ -107,7 +113,10 @@ function normalizeContextRevision(contextRevision: number | null | undefined): n
 }
 
 export class SegmentRepository implements SegmentStore {
-  constructor(private readonly db: D1DatabaseLike) {}
+  constructor(
+    private readonly db: D1DatabaseLike,
+    private readonly multilang?: SegmentMultilangStore,
+  ) {}
 
   async list(projectId: string, userId: string): Promise<Segment[]> {
     const result = await this.db.prepare(`${SELECT} WHERE s.project_id = ? AND p.user_id = ? ORDER BY s.start_ms, s.id`)
@@ -151,6 +160,14 @@ export class SegmentRepository implements SegmentStore {
 
   private async invalidatePublishedExport(projectId: string, userId: string): Promise<void> {
     await this.invalidationStatement(projectId, userId).run();
+  }
+
+  private async invalidateAllTargetDubs(projectId: string, segmentId: string, userId: string): Promise<void> {
+    if (!this.multilang) return;
+    const targets = await this.multilang.listTargets(projectId, userId);
+    for (const target of targets) {
+      await this.multilang.invalidateSegmentTarget(projectId, segmentId, userId, target);
+    }
   }
 
   private async assertLegalTiming(
@@ -203,16 +220,19 @@ export class SegmentRepository implements SegmentStore {
       startMs: patch.startMs ?? current.startMs,
       endMs: patch.endMs ?? current.endMs,
     };
+    const sourceChanged = next.sourceText !== current.sourceText;
+    const translationChanged = next.translatedText !== current.translatedText;
+    const speakerChanged = next.speakerId !== current.speakerId;
     const timingChanged = next.startMs !== current.startMs || next.endMs !== current.endMs;
-    const textOrSpeakerChanged = next.translatedText !== current.translatedText || next.speakerId !== current.speakerId;
     if (timingChanged) {
       await this.assertLegalTiming(projectId, userId, next.startMs, next.endMs, [segmentId]);
     }
-    const invalidatesVoice = timingChanged || textOrSpeakerChanged;
+    const invalidatesVoice = sourceChanged || timingChanged || translationChanged || speakerChanged;
     const voiceStatus = invalidatesVoice ? 'pending' : current.voiceStatus;
     const dubbedObjectKey = invalidatesVoice ? null : current.dubbedObjectKey;
+    const translationStatus = sourceChanged ? 'pending' : current.translationStatus;
     const result = await this.db.prepare(`UPDATE segments
-      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
+      SET source_text = ?, translated_text = ?, speaker_id = ?, start_ms = ?, end_ms = ?, translation_status = ?, voice_status = ?, dubbed_object_key = ?, version = version + 1
       WHERE id = ? AND project_id = ?
       AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)
       AND version = ?`)
@@ -222,6 +242,7 @@ export class SegmentRepository implements SegmentStore {
         next.speakerId,
         next.startMs,
         next.endMs,
+        translationStatus,
         voiceStatus,
         dubbedObjectKey,
         segmentId,
@@ -235,6 +256,12 @@ export class SegmentRepository implements SegmentStore {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
     if (invalidatesVoice) await this.invalidatePublishedExport(projectId, userId);
+    if (sourceChanged || timingChanged) {
+      await this.multilang?.invalidateSegmentAllTargets(projectId, segmentId, userId);
+    } else {
+      if (translationChanged) await this.multilang?.invalidateSegmentTarget(projectId, segmentId, userId, 'vi');
+      if (speakerChanged) await this.invalidateAllTargetDubs(projectId, segmentId, userId);
+    }
     const canonical = await this.get(projectId, segmentId, userId);
     if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after update.');
     return canonical;
@@ -335,6 +362,7 @@ export class SegmentRepository implements SegmentStore {
     if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+    await this.multilang?.invalidateSegmentAllTargets(projectId, segmentId, userId);
     return { left, right };
   }
 
@@ -418,6 +446,7 @@ export class SegmentRepository implements SegmentStore {
     if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+    await this.multilang?.invalidateSegmentAllTargets(projectId, segmentId, userId);
     return restored;
   }
 
@@ -449,6 +478,7 @@ export class SegmentRepository implements SegmentStore {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
     await this.invalidatePublishedExport(projectId, userId);
+    await this.multilang?.invalidateSegmentTarget(projectId, segmentId, userId, 'vi');
     const canonical = await this.get(projectId, segmentId, userId);
     if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after translation update.');
     return canonical;
@@ -496,6 +526,10 @@ export class SegmentRepository implements SegmentStore {
       this.clearExportStatement(projectId, userId),
     ];
     await this.db.batch(statements);
+    if (this.multilang) {
+      const targets = await this.multilang.listTargets(projectId, userId);
+      for (const target of targets) await this.multilang.invalidateExportsForTarget(projectId, userId, target);
+    }
     return segments.map((segment) => ({
       id: segment.id,
       projectId,
