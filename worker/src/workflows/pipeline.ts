@@ -8,7 +8,7 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
-import { normalizeAsrChunks } from '../services/asr/normalize';
+import { stitchAsrChunks } from '../services/asr/stitch';
 import type { TranslationProvider } from '../services/translation/types';
 import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
@@ -158,7 +158,7 @@ export async function runDubbingPipeline(
     }
 
     failureCode = 'PIPELINE_FAILED';
-    const normalized = normalizeAsrChunks(normalizedInputs).map((segment) => ({
+    const normalized = stitchAsrChunks(normalizedInputs).map((segment) => ({
       id: segment.id,
       speakerId: segment.speakerId ?? null,
       startMs: segment.startMs,
