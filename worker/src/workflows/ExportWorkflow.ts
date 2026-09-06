@@ -6,6 +6,7 @@ import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
+import { createTelemetry } from '../observability/telemetry';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
@@ -27,6 +28,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         ),
         media,
         usage: new UsageRepository(this.env.DB),
+        telemetry: createTelemetry(this.env),
       },
       step,
     );
