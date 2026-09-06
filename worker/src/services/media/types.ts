@@ -19,6 +19,7 @@ export type ExportClip = {
 export type RenderExportOptions = {
   targetLanguage: TargetLanguage;
   exportId: string;
+  backgroundObjectKey?: string;
 };
 
 export interface MediaProcessor {
