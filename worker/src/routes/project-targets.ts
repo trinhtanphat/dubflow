@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { MultilangRepository, type MultilangStore } from '../db/multilang';
-import { parseBatchTargetLanguages } from '../domain/target-language';
+import { parseProjectTargetLanguages } from '../domain/target-language';
 import { errorBody } from '../http/json';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
@@ -32,7 +32,7 @@ export function createProjectTargetRoutes(deps: ProjectTargetRouteDeps = {}) {
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
     const body = await c.req.json().catch(() => null) as { targetLanguages?: unknown } | null;
     try {
-      const requested = parseBatchTargetLanguages(body?.targetLanguages);
+      const requested = parseProjectTargetLanguages(body?.targetLanguages);
       const targets = await makeMultilang(c.env).replaceTargets(projectId, userId, requested);
       return c.json({ targets });
     } catch (error) {
