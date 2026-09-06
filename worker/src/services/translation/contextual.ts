@@ -1,6 +1,6 @@
 import type { AiBinding } from '../../cloudflare/ai';
 import type { SourceLanguage } from '../../domain/project';
-import type { TargetLanguage } from '../../domain/target-language';
+import { isTargetLanguage, type TargetLanguage } from '../../domain/target-language';
 import { MAX_CONTEXT_PAYLOAD_BYTES, type TranslationContext } from './context';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
@@ -87,6 +87,12 @@ export class ContextualWorkersAITranslationProvider implements TranslationProvid
     target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
+    if (!isTargetLanguage(target)) {
+      throw new TranslationProviderError(
+        'TRANSLATION_TARGET_UNSUPPORTED',
+        'Unsupported target language.',
+      );
+    }
     const model = this.model.trim();
     if (!model) {
       throw new TranslationProviderError(
