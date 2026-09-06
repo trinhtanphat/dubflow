@@ -4,7 +4,7 @@ import { MultilangRepository, type MultilangStore } from '../db/multilang';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
-import { parseTargetLanguage } from '../domain/target-language';
+import { parseTargetLanguage, type TargetLanguage } from '../domain/target-language';
 import { errorBody } from '../http/json';
 import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
@@ -76,10 +76,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       const body = await readOptionalJson(c.req.raw);
       if (!body) return c.json(errorBody('INVALID_JSON', 'Request body must be a JSON object.'), 400);
       const explicitTarget = Object.prototype.hasOwnProperty.call(body, 'targetLanguage');
-      let targetLanguage = 'vi' as const;
+      let targetLanguage: TargetLanguage = 'vi';
       if (explicitTarget) {
         try {
-          targetLanguage = parseTargetLanguage(body.targetLanguage) as 'vi';
+          targetLanguage = parseTargetLanguage(body.targetLanguage);
         } catch (error) {
           return c.json(errorBody('TARGET_LANGUAGE_INVALID', error instanceof Error ? error.message : 'Invalid target language.'), 400);
         }
