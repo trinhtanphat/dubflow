@@ -11,12 +11,40 @@ describe('FFmpeg final dubbing export', () => {
     ],
   };
 
+  const modernInput = {
+    ...input,
+    targetLanguage: 'vi',
+    exportId: 'export-1',
+    clips: [
+      { ...input.clips[0], objectKey: 'projects/project-1/voices/vi/s1/1.mp3' },
+      { ...input.clips[1], objectKey: 'projects/project-1/voices/vi/s2/1.mp3' },
+    ],
+  };
+
   it('accepts a bounded project-scoped render manifest and rejects cross-project clips', () => {
     expect(validateRenderExportInput(input)).toEqual(input);
     expect(() => validateRenderExportInput({
       ...input,
       clips: [{ ...input.clips[0], objectKey: 'projects/other/dubbed/s1.mp3' }],
     })).toThrow(/project/i);
+  });
+
+  it('accepts only the canonical project-scoped background stem for a modern export', () => {
+    const backgroundObjectKey = 'projects/project-1/stems/source_rev/background.wav';
+    expect(validateRenderExportInput({ ...modernInput, backgroundObjectKey })).toEqual({ ...modernInput, backgroundObjectKey });
+
+    expect(() => validateRenderExportInput({
+      ...modernInput,
+      backgroundObjectKey: 'projects/other/stems/source_rev/background.wav',
+    })).toThrow(/background|project/i);
+    expect(() => validateRenderExportInput({
+      ...modernInput,
+      backgroundObjectKey: 'projects/project-1/stems/source_rev/dialogue.wav',
+    })).toThrow(/background/i);
+    expect(() => validateRenderExportInput({
+      ...modernInput,
+      backgroundObjectKey: 'projects/project-1/stems/source_rev/background.mp3',
+    })).toThrow(/background/i);
   });
 
   it('builds deterministic atempo chains beyond the native 0.5x..2x range', () => {
@@ -47,5 +75,27 @@ describe('FFmpeg final dubbing export', () => {
     expect(args).toContain('libx264');
     expect(args).toContain('aac');
     expect(args.at(-1)).toBe('/tmp/dubbed.mp4');
+  });
+
+  it('uses a downloaded background stem as the audio bed while preserving source video', () => {
+    const args = buildRenderExportArgs({
+      sourcePath: '/tmp/source',
+      backgroundPath: '/tmp/background.wav',
+      outputPath: '/tmp/dubbed.mp4',
+      durationMs: 6000,
+      clips: modernInput.clips,
+      clipPaths: ['/tmp/s1.mp3', '/tmp/s2.mp3'],
+      clipDurationsMs: [1500, 2000],
+    });
+
+    expect(args).toContain('/tmp/background.wav');
+    expect(args).not.toContain('anullsrc=r=48000:cl=stereo');
+    const graph = args[args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain('[1:a]aresample=48000');
+    expect(graph).toContain('[2:a]aresample=48000');
+    expect(graph).toContain('[3:a]aresample=48000');
+    expect(graph).toContain('amix=inputs=3');
+    const videoMapAt = args.indexOf('-map');
+    expect(args[videoMapAt + 1]).toBe('0:v:0?');
   });
 });
