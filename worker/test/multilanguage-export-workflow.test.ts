@@ -63,7 +63,16 @@ function harness() {
     },
     media: {
       probe: vi.fn(async (key: string) => ({ durationMs: key.includes('/voices/') || key.includes('/dubbed/') ? 1_500 : 10_000 })),
-      renderExport: vi.fn(async () => ({ exportObjectKey: 'projects/p1/export/dubbed.mp4' })),
+      renderExport: vi.fn(async (
+        _projectId: string,
+        _sourceObjectKey: string,
+        _clips: unknown[],
+        options?: { targetLanguage: string; exportId: string },
+      ) => ({
+        exportObjectKey: options
+          ? `projects/p1/exports/${options.targetLanguage}/${options.exportId}.mp4`
+          : 'projects/p1/export/dubbed.mp4',
+      })),
     },
     usage,
     telemetry: { write: vi.fn(async () => {}) },

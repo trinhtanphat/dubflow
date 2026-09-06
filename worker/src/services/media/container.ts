@@ -1,4 +1,4 @@
-import type { AudioChunk, ExportClip, MediaProcessor } from './types';
+import type { AudioChunk, ExportClip, MediaProcessor, RenderExportOptions } from './types';
 
 export interface ContainerStubLike {
   fetch(request: Request): Promise<Response>;
@@ -41,7 +41,16 @@ function assertProjectObject(projectId: string, objectKey: string, folder?: stri
   }
 }
 
-function assertExportClip(projectId: string, raw: ExportClip): ExportClip {
+function assertRenderOptions(options: RenderExportOptions): void {
+  if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(options.targetLanguage)) {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export target language is invalid.');
+  }
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(options.exportId)) {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export id is invalid.');
+  }
+}
+
+function assertExportClip(projectId: string, raw: ExportClip, options?: RenderExportOptions): ExportClip {
   if (
     !raw ||
     typeof raw.segmentId !== 'string' || raw.segmentId.length === 0 ||
@@ -51,7 +60,11 @@ function assertExportClip(projectId: string, raw: ExportClip): ExportClip {
   ) {
     throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'Export clip is malformed.');
   }
-  assertProjectObject(projectId, raw.objectKey, 'dubbed');
+  if (options) {
+    assertProjectObject(projectId, raw.objectKey, `voices/${options.targetLanguage}`);
+  } else {
+    assertProjectObject(projectId, raw.objectKey, 'dubbed');
+  }
   return raw;
 }
 
@@ -113,21 +126,28 @@ export class ContainerMediaProcessor implements MediaProcessor {
     });
   }
 
-  async renderExport(projectId: string, objectKey: string, clips: ExportClip[]): Promise<{ exportObjectKey: string }> {
+  async renderExport(
+    projectId: string,
+    objectKey: string,
+    clips: ExportClip[],
+    options?: RenderExportOptions,
+  ): Promise<{ exportObjectKey: string }> {
     assertProjectObject(projectId, objectKey);
     if (!Array.isArray(clips) || clips.length === 0) {
       throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'At least one dubbed clip is required for export.');
     }
-    const validated = clips.map((clip) => assertExportClip(projectId, clip));
+    if (options) assertRenderOptions(options);
+    const validated = clips.map((clip) => assertExportClip(projectId, clip, options));
     const result = await this.call(projectId, '/render-export', {
       projectId,
       objectKey,
       clips: validated,
+      ...(options ? options : {}),
     }) as { exportObjectKey?: unknown };
-    if (
-      typeof result.exportObjectKey !== 'string' ||
-      !result.exportObjectKey.startsWith(`${projectPrefix(projectId)}export/`)
-    ) {
+    const expectedKey = options
+      ? `${projectPrefix(projectId)}exports/${options.targetLanguage}/${options.exportId}.mp4`
+      : `${projectPrefix(projectId)}export/dubbed.mp4`;
+    if (typeof result.exportObjectKey !== 'string' || result.exportObjectKey !== expectedKey) {
       throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned an invalid export object key.');
     }
     return { exportObjectKey: result.exportObjectKey };
