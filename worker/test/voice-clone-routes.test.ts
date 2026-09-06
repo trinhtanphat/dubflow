@@ -89,7 +89,7 @@ describe('voice clone route contracts', () => {
           return { key, size: 3 };
         },
       },
-    } as Env;
+    } as unknown as Env;
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/voice-clones/clone-1/sample', {
       method: 'POST',
       headers: { 'content-type': 'audio/mpeg' },
@@ -115,7 +115,7 @@ describe('voice clone route contracts', () => {
       MEDIA: {
         async delete() { throw new Error('R2 unavailable'); },
       },
-    } as Env;
+    } as unknown as Env;
     const response = await routes.fetch(new Request('https://yupvox.test/project-1/voice-clones/clone-1', {
       method: 'DELETE',
     }), env);
