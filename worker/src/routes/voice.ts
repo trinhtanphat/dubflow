@@ -10,15 +10,19 @@ import { WorkersAIVoiceProvider } from '../services/voice/workers-ai';
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-function hasElevenLabs(env: Env) {
+function hasElevenLabsPreview(env: Env) {
   return Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_DEFAULT_VOICE_ID?.trim());
+}
+
+function hasElevenLabsKey(env: Env) {
+  return Boolean(env.ELEVENLABS_API_KEY?.trim());
 }
 
 export function createVoiceRoutes(fetcher: FetchLike = fetch) {
   const routes = new Hono<WorkerHonoEnv>();
 
   routes.get('/capabilities', (c) => {
-    if (hasElevenLabs(c.env)) {
+    if (hasElevenLabsKey(c.env)) {
       const provider = new ElevenLabsVoiceProvider(
         c.env.ELEVENLABS_API_KEY ?? '',
         { defaultVoiceId: c.env.ELEVENLABS_DEFAULT_VOICE_ID },
@@ -50,7 +54,7 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
     if (language !== 'vi') {
       return c.json({ code: 'VOICE_LANGUAGE_UNVERIFIED', message: 'Vietnamese is the currently qualified preview language.' }, 400);
     }
-    if (!hasElevenLabs(c.env)) {
+    if (!hasElevenLabsPreview(c.env)) {
       return c.json({ code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'ElevenLabs voice preview is not configured.' }, 503);
     }
 

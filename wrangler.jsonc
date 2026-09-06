@@ -36,7 +36,8 @@
     { "name": "RATE_LIMIT_EXPORT", "namespace_id": "31002", "simple": { "limit": 4, "period": 60 } },
     { "name": "RATE_LIMIT_TRANSLATE", "namespace_id": "31003", "simple": { "limit": 30, "period": 60 } },
     { "name": "RATE_LIMIT_VOICE", "namespace_id": "31004", "simple": { "limit": 30, "period": 60 } },
-    { "name": "RATE_LIMIT_UPLOAD", "namespace_id": "31005", "simple": { "limit": 20, "period": 60 } }
+    { "name": "RATE_LIMIT_UPLOAD", "namespace_id": "31005", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RATE_LIMIT_VOICE_CLONE", "namespace_id": "31006", "simple": { "limit": 6, "period": 60 } }
   ],
   "ai": {
     "binding": "AI"

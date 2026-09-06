@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ElevenLabsVoiceProvider } from '../src/services/voice/elevenlabs';
 
 describe('ElevenLabs voice provider', () => {
-  it('reports Vietnamese preview and cloning capabilities when configured', () => {
+  it('reports preview and managed IVC enrollment as separate capabilities', () => {
     const provider = new ElevenLabsVoiceProvider('secret', { defaultVoiceId: 'voice-123' }, async () => new Response('audio'));
     expect(provider.capabilities()).toEqual({
       provider: 'elevenlabs',
@@ -10,6 +10,17 @@ describe('ElevenLabs voice provider', () => {
       languages: ['vi'],
       cloning: true,
       preview: true,
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
+    });
+  });
+
+  it('can expose managed enrollment without falsely claiming preview is configured', () => {
+    const provider = new ElevenLabsVoiceProvider('secret', {}, async () => new Response('audio'));
+    expect(provider.capabilities()).toMatchObject({
+      configured: false,
+      preview: false,
+      cloning: true,
+      cloneEnrollment: { mode: 'ivc', available: true },
     });
   });
 
@@ -36,7 +47,13 @@ describe('ElevenLabs voice provider', () => {
 
   it('fails closed when ElevenLabs is not configured', async () => {
     const provider = new ElevenLabsVoiceProvider('', {}, async () => new Response('audio'));
-    expect(provider.capabilities()).toMatchObject({ provider: 'elevenlabs', configured: false, preview: false });
+    expect(provider.capabilities()).toMatchObject({
+      provider: 'elevenlabs',
+      configured: false,
+      preview: false,
+      cloning: false,
+      cloneEnrollment: { available: false },
+    });
     await expect(provider.generate({ text: 'Xin chào', language: 'vi' })).rejects.toMatchObject({ code: 'VOICE_PROVIDER_UNCONFIGURED' });
   });
 });

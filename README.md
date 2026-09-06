@@ -19,7 +19,8 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - Server-backed transcript source/translation/speaker edits. Compare mode is non-destructive until the user explicitly applies one result.
 - Persisted speaker display names and per-speaker ElevenLabs voice IDs. Changing a speaker voice invalidates only that speaker's generated dubbed clips plus the stale final export; renaming alone does not discard valid audio.
 - ElevenLabs-backed segment TTS and export workflow. Export uses a speaker's assigned ElevenLabs voice when present, otherwise the configured default voice; generated audio is stored in R2, assembled on the timeline by the FFmpeg media processor, and written as a final downloadable artifact.
-- Voice cloning and visual lip-sync remain capability-gated and are not claimed as implemented or production-qualified.
+- Phase 4B source support adds explicit-consent ElevenLabs Instant Voice Clone (IVC) enrollment with owner-scoped lifecycle records, temporary R2 sample cleanup, provider deletion, `ready`-only speaker assignment, and a dedicated clone rate-limit lane. Professional Voice Clone training/verification orchestration remains out of scope.
+- Visual lip-sync remains capability-gated and is not claimed as implemented or production-qualified.
 - `GET /api/ready` checks that the production D1 `projects` schema exists and reports the configured ASR/diarization capability without exposing secret values.
 - GitHub Actions verification CI runs a real dependency install, tests, TypeScript/Vite build, Wrangler dry-run, and reference screenshot capture.
 
@@ -64,7 +65,7 @@ ELEVENLABS_API_KEY
 ELEVENLABS_DEFAULT_VOICE_ID
 ```
 
-When present, the deploy workflow syncs the corresponding values into Worker secrets. If `DEEPGRAM_API_KEY` is absent, YupVox falls back to Workers AI Whisper and reports speaker diarization as unavailable. If the ElevenLabs credentials are absent, source support exists but export must fail closed rather than fabricate dubbed audio.
+When present, the deploy workflow syncs the corresponding values into Worker secrets. If `DEEPGRAM_API_KEY` is absent, YupVox falls back to Workers AI Whisper and reports speaker diarization as unavailable. If the ElevenLabs credentials are absent, source support exists but export and managed IVC enrollment must fail closed rather than fabricate dubbed audio or clone capability.
 
 ## Local deployment
 
@@ -113,9 +114,14 @@ R2 multipart upload
 
 Until that real deployed fixture succeeds, production runtime remains **UNQUALIFIED** even when source CI is GREEN. Phase 4A source tests can qualify the stitching algorithm and bounded-overlap contracts, but production cross-chunk diarization remains unqualified until a real deployed Deepgram/media fixture demonstrates the intended identity behavior. Source-level per-speaker voice routing is likewise not a production PASS until verified on a real deployed export.
 
+Phase 4B is also source/CI qualification only. Managed ElevenLabs IVC enrollment requires an explicit current rights/consent acknowledgement and a user-supplied audio sample; YupVox does not auto-extract source-video speech for cloning. Temporary enrollment samples are deleted after the provider attempt, and provider verification-required clones are not assignable. A real authorized provider fixture is still required before production voice cloning can be called qualified. Production deployment remains **manual-only** and Phase 4B does not trigger it.
+
 ## Safety / truthfulness boundaries
 
-- Do not enable or label voice cloning unless a configured provider explicitly supports cloning and the operator has rights/consent for the source voice.
+- Managed Voice Clone enrollment requires explicit current rights/consent acknowledgement; do not infer consent from project ownership, diarization identity, speaker names, or source-video presence.
+- Do not auto-extract source-video audio into the voice-clone workflow; the user must intentionally provide the enrollment sample.
+- Do not label a clone usable until the server lifecycle is `ready`; `verification_required`, `creating`, `failed`, `deleting`, and `deleted` are non-assignable.
+- Do not claim Professional Voice Clone creation/training/verification from Phase 4B IVC support.
 - Do not mark a production dubbed export PASS until a deployed fixture has actually written and returned the final artifact.
 - Do not claim visual lip-sync rendering from duration fitting or audio timeline assembly alone.
 - Do not merge cross-chunk speakers from matching numeric speaker indexes, text alone, names, or guesses; only the conservative overlap-evidence contract may stitch identities, and ambiguous evidence must remain split.

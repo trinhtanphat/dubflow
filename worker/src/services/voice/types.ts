@@ -1,4 +1,18 @@
-export type VoiceCapabilities = { languages: string[] | 'unknown'; cloning: boolean };
+export type VoiceCloneEnrollmentCapability = {
+  provider: 'elevenlabs';
+  mode: 'ivc';
+  available: boolean;
+};
+
+export type VoiceCapabilities = {
+  provider?: string;
+  configured?: boolean;
+  languages: string[] | 'unknown';
+  cloning: boolean;
+  preview?: boolean;
+  cloneEnrollment: VoiceCloneEnrollmentCapability;
+};
+
 export type VoiceGenerateInput = { text: string; language: string; voice?: string };
 
 export interface VoiceProvider {
