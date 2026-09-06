@@ -19,8 +19,19 @@ class ExportStatement implements D1StatementLike {
   async run(): Promise<D1RunResultLike> {
     this.db.calls.push({ sql: this.sql, values: this.values });
     if (/INSERT INTO project_exports/i.test(this.sql)) {
-      const [id, projectId, targetLanguage, output, batchId] = this.values as [string, string, ProjectExport['targetLanguage'], ProjectExport['output'], string | null];
-      this.db.rows.push({ id, projectId, targetLanguage, output, batchId, status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null });
+      const [id, projectId, targetLanguage, output, batchId, audioMode] = this.values as [
+        string,
+        string,
+        ProjectExport['targetLanguage'],
+        ProjectExport['output'],
+        string | null,
+        ProjectExport['audioMode'],
+      ];
+      this.db.rows.push({
+        id, projectId, targetLanguage, output, batchId, audioMode,
+        status: 'pending', exportObjectKey: null, subtitleObjectKey: null,
+        errorCode: null, errorMessage: null,
+      });
       return { meta: { changes: 1 } };
     }
     if (/UPDATE project_exports[\s\S]*status = 'invalidated'/i.test(this.sql)) {
@@ -45,8 +56,9 @@ class ExportStatement implements D1StatementLike {
       if (!row) return null;
       return {
         id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output,
-        batch_id: row.batchId, status: row.status, export_object_key: row.exportObjectKey,
-        subtitle_object_key: row.subtitleObjectKey, error_code: row.errorCode, error_message: row.errorMessage,
+        batch_id: row.batchId, audio_mode: row.audioMode, status: row.status,
+        export_object_key: row.exportObjectKey, subtitle_object_key: row.subtitleObjectKey,
+        error_code: row.errorCode, error_message: row.errorMessage,
       } as T;
     }
     return null;
@@ -55,7 +67,12 @@ class ExportStatement implements D1StatementLike {
     if (/FROM project_exports e[\s\S]*batch_id = \?/i.test(this.sql)) {
       const [projectId, batchId, userId] = this.values as [string, string, string];
       const rows = this.db.rows.filter((row) => row.projectId === projectId && row.batchId === batchId && userId === this.db.project.user_id)
-        .map((row) => ({ id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output, batch_id: row.batchId, status: row.status, export_object_key: row.exportObjectKey, subtitle_object_key: row.subtitleObjectKey, error_code: row.errorCode, error_message: row.errorMessage }));
+        .map((row) => ({
+          id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output,
+          batch_id: row.batchId, audio_mode: row.audioMode, status: row.status,
+          export_object_key: row.exportObjectKey, subtitle_object_key: row.subtitleObjectKey,
+          error_code: row.errorCode, error_message: row.errorMessage,
+        }));
       return { results: rows as T[] };
     }
     return { results: [] };
@@ -63,12 +80,24 @@ class ExportStatement implements D1StatementLike {
 }
 
 describe('project export repository', () => {
-  it('creates immutable target/output attempts and finds latest target variant', async () => {
+  it('creates immutable target/output attempts with an explicit audio treatment', async () => {
     const db = new ExportDb();
     const repo = new ProjectExportRepository(db, () => 'export-1');
-    const created = await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-7');
-    expect(created).toMatchObject({ id: 'export-1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed', batchId: 'batch-7', status: 'pending' });
-    expect(await repo.latest('p1', 'u1', 'ja', 'dubbed')).toMatchObject({ id: 'export-1', targetLanguage: 'ja', output: 'dubbed' });
+    const created = await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-7', 'duck_original');
+    expect(created).toMatchObject({
+      id: 'export-1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed',
+      batchId: 'batch-7', audioMode: 'duck_original', status: 'pending',
+    });
+    expect(await repo.latest('p1', 'u1', 'ja', 'dubbed')).toMatchObject({
+      id: 'export-1', targetLanguage: 'ja', output: 'dubbed', audioMode: 'duck_original',
+    });
+  });
+
+  it('defaults omitted audio treatment to dubbed_only', async () => {
+    const db = new ExportDb();
+    const repo = new ProjectExportRepository(db, () => 'export-default');
+    const created = await repo.create('p1', 'u1', 'vi', 'dubbed');
+    expect(created.audioMode).toBe('dubbed_only');
   });
 
   it('finds the latest completed target attempt even when a newer attempt is not complete', async () => {
@@ -76,20 +105,20 @@ describe('project export repository', () => {
     db.rows.push(
       {
         id: 'export-completed', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
-        status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4', subtitleObjectKey: null,
-        errorCode: null, errorMessage: null,
+        audioMode: 'dubbed_only', status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4',
+        subtitleObjectKey: null, errorCode: null, errorMessage: null,
       },
       {
         id: 'export-pending', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
-        status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
+        audioMode: 'duck_original', status: 'pending', exportObjectKey: null, subtitleObjectKey: null,
+        errorCode: null, errorMessage: null,
       },
     );
     const repo = new ProjectExportRepository(db);
 
-    expect(await repo.latest('p1', 'u1', 'vi', 'dubbed')).toMatchObject({ id: 'export-pending', status: 'pending' });
+    expect(await repo.latest('p1', 'u1', 'vi', 'dubbed')).toMatchObject({ id: 'export-pending', status: 'pending', audioMode: 'duck_original' });
     expect(await repo.latestCompleted('p1', 'u1', 'vi', 'dubbed')).toMatchObject({
-      id: 'export-completed',
-      status: 'completed',
+      id: 'export-completed', status: 'completed', audioMode: 'dubbed_only',
       exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4',
     });
   });
@@ -98,8 +127,10 @@ describe('project export repository', () => {
     const db = new ExportDb();
     let id = 0;
     const repo = new ProjectExportRepository(db, () => `export-${++id}`);
-    await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-1');
-    await repo.create('p1', 'u1', 'ko', 'dubbed', 'batch-1');
-    expect((await repo.listBatch('p1', 'u1', 'batch-1')).map((entry) => entry.targetLanguage)).toEqual(['ja', 'ko']);
+    await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-1', 'duck_original');
+    await repo.create('p1', 'u1', 'ko', 'dubbed', 'batch-1', 'duck_original');
+    const entries = await repo.listBatch('p1', 'u1', 'batch-1');
+    expect(entries.map((entry) => entry.targetLanguage)).toEqual(['ja', 'ko']);
+    expect(entries.every((entry) => entry.audioMode === 'duck_original')).toBe(true);
   });
 });
