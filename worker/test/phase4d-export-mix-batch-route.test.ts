@@ -83,6 +83,7 @@ describe('Phase 4D batch export mix contract', () => {
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
+      RATE_LIMIT_BATCH_EXPORT: allowExport,
       EXPORT_WORKFLOW: {
         async create(input: any) { workflowInputs.push(input); return { id: `workflow-${workflowInputs.length}` }; },
       },
