@@ -1,493 +1,641 @@
-# Phase 4D — Background / Dialogue Separation Design
+# DubFlow Phase 4D — Background / Dialogue Separation Design
 
 Date: 2026-09-06
-Status: Approved in chat; written spec pending user review
+Status: User-approved architecture; written spec pending review
 Base: `main` at `baa02d2ff62e064ba00abcfe280d098b54074031`
-Branch: `feat/phase4d-background-dialogue-separation`
+Carrier: `feat/phase4d-background-dialogue-separation`
 
 ## 1. Goal
 
-Complete the remaining Phase 4 roadmap item for advanced background/dialogue handling without falsely claiming AI source separation when no qualified separation provider is configured.
+Phase 4D adds durable source-audio separation so dubbed exports can preserve music and ambience while replacing source dialogue.
 
-Phase 4D must improve final dubbed media in two layers:
+The current canonical export path renders dubbed voices over a silent base. That behavior remains the default until Phase 4D is qualified on real media. Phase 4D adds an opt-in `preserve_background` mix mode that uses a previously separated background stem as the render base.
 
-1. provide a production-safe source-audio preservation mode that keeps music/ambience and attenuates original dialogue under dubbed speech;
-2. add a real provider boundary for background/dialogue separation so a qualified provider can later supply reusable stems without changing the export workflow contract again.
+This phase must preserve Phase 4C multi-language isolation, immutable export identity, concrete sharing, usage idempotency, cancellation/retry semantics, and the current Cloudflare Workers Builds deployment policy.
 
-The design must preserve all Phase 4C multi-language guarantees, especially immutable export attempts, target-language isolation, retry safety, concrete export sharing, and CI-only GitHub Actions.
+## 2. Decision
 
-## 2. Current state and problem
+The canonical implementation is a **dedicated source-separation container** behind an `AudioSeparationProvider` boundary.
 
-The current FFmpeg render path builds the final audio from `anullsrc` plus dubbed segment clips. It therefore preserves video but does not preserve the source soundtrack in the canonical dubbed mix.
+Separation is not embedded in the existing `FfmpegContainer` because the two workloads have different characteristics:
 
-The current `MediaProcessor.renderExport(...)` boundary already accepts `RenderExportOptions`, and `exportPipeline.ts` already centralizes final render orchestration. Phase 4D extends these existing seams instead of introducing a second render pipeline.
+- FFmpeg rendering is deterministic media transformation.
+- Source separation is model inference with different CPU, memory, model-provenance, retry, and qualification requirements.
+- The existing FFmpeg container is `standard-1`; separation can be sized independently without forcing every render to use a larger instance.
+- One valid separation result should be reused by every target-language export for the same source revision.
 
-The original product design explicitly called for mixing dubbed dialogue with source ambience according to export settings, and listed advanced background/dialogue separation as a Phase 4 item. That roadmap item is not satisfied by simple volume ducking alone, so this phase distinguishes the two capabilities in names, data, UI, and telemetry.
+A provider boundary also allows a future external provider or replacement model without changing the export workflow contract.
 
-## 3. Scope
+## 3. Initial model target
 
-### In scope
+The first qualification target is a pinned two-stem Demucs `htdemucs`-compatible model producing vocals/dialogue and accompaniment/background stems.
 
-- Three explicit dubbed-audio modes:
-  - `dubbed_only`
-  - `duck_original`
-  - `separated_background`
-- Source-audio preservation and deterministic dialogue-window ducking in the FFmpeg container.
-- A `DialogueSeparationProvider` interface and capability model.
-- Durable, immutable, project-scoped background stem metadata and R2 object keys.
-- Reuse of one valid background stem across `vi`, `en`, `zh`, `ja`, and `ko` export attempts for the same source generation.
-- Fail-closed behavior when `separated_background` is requested without a configured and qualified provider/stem.
-- Export API support for selecting the audio mode.
-- Cloud Studio export controls that accurately distinguish preservation/ducking from true separation.
-- Usage-ledger and telemetry hooks for billable external separation work.
-- Cancellation, retry, idempotency, authorization, and source-version invalidation.
-- Unit/integration/source acceptance tests and Wrangler dry-run qualification.
+The provider/model identity must be explicit and persisted. The container image must pin:
 
-### Out of scope
+- separation runtime/package version;
+- model id;
+- model weights digest;
+- any model-specific preprocessing configuration that changes output semantics.
 
-- Visual mouth synthesis or visual lip-sync. That is Phase 4E and gets its own design/spec/plan.
-- Training or bundling a large separation model such as Demucs/UVR into the existing FFmpeg container in this phase.
-- Browser-side stem separation or rendering.
-- Manual production deployment from GitHub Actions.
-- Claiming `duck_original` is AI source separation.
+No production request may download a floating `latest` model on first use.
 
-## 4. Chosen architecture
+The original Meta Demucs repository is archived, so the implementation must treat upstream as immutable reference material rather than a moving dependency. A maintained fork or equivalent compatible model may be used only if the exact package/model identity is pinned and the same provider contract is preserved.
 
-Use a hybrid, fail-closed architecture.
+## 4. Product behavior
 
-### Layer A — deterministic preservation/ducking
-
-`duck_original` is always available when the source contains an audio stream. The FFmpeg container maps the source audio, normalizes it to the render format, applies deterministic attenuation during dubbed speech windows, then mixes the dubbed clips over that attenuated source bed.
-
-This is not called separation. It is source-audio preservation with dialogue-window ducking.
-
-### Layer B — optional true separation
-
-`separated_background` is available only when `DialogueSeparationProvider.capabilities()` reports the provider configured and qualified for the source media and the workflow can obtain a valid background stem artifact.
-
-The provider is responsible only for producing background/dialogue stem artifacts. FFmpeg remains responsible for final timing, mixing, video muxing, and output encoding.
-
-### Why this approach
-
-It improves output quality immediately with a low-risk deterministic path, while creating the correct provider boundary for true separation. It avoids embedding an unqualified heavyweight ML model into the existing FFmpeg container and avoids pretending volume ducking is equivalent to source separation.
-
-## 5. Audio-mode contract
-
-Add a domain type:
+Dubbed exports expose two modes:
 
 ```ts
-type DubbedAudioMode = 'dubbed_only' | 'duck_original' | 'separated_background';
+type DubbedMixMode = 'dubbed_only' | 'preserve_background';
 ```
-
-Semantics:
 
 ### `dubbed_only`
 
-- Backward-compatible behavior.
-- Final audio contains the generated dubbed clips over silence.
-- Does not require source audio.
-- Existing legacy calls that omit the audio mode resolve to `dubbed_only` so Phase 4D does not silently alter already-qualified output behavior.
+- Exact existing Phase 4C behavior.
+- Dubbed clips are mixed over silence.
+- No separation state is required.
+- This remains the default when the field is omitted.
 
-### `duck_original`
+### `preserve_background`
 
-- Requires a readable source audio stream.
-- Preserves source soundtrack.
-- Applies attenuation only during intervals containing dubbed dialogue.
-- Mixes dubbed clips over the attenuated source bed.
-- Does not create or persist a background stem.
-- Does not use or meter a separation provider.
+- Uses a completed background stem for the current source revision and canonical provider/model identity.
+- Dubbed clips are mixed over that stem.
+- Original source audio is not mixed into the result, because doing so would reintroduce source dialogue.
+- If separation is unavailable, unqualified, stale, running, failed, or structurally invalid, export fails closed.
+- It never silently falls back to `dubbed_only` or raw source audio.
 
-### `separated_background`
+## 5. Qualification boundary
 
-- Requires a qualified separation capability.
-- Uses a durable background stem created for the current source generation.
-- Final mix uses the background stem plus dubbed dialogue, not the original mixed soundtrack.
-- If the provider is unavailable, unqualified, returns an invalid artifact, or cannot process the source, the export fails with a stable capability/provider error. It must not silently downgrade to `duck_original`.
+Source/CI qualification is not perceptual audio-quality qualification.
 
-## 6. Dialogue-window ducking behavior
+Before real-media qualification:
 
-Ducking windows are derived from the same canonical export clips used for dubbed timing.
+- `dubbed_only` remains the production default;
+- `preserve_background` is opt-in and visibly marked preview/unqualified;
+- no source/CI test may claim that dialogue removal quality is production-grade.
+
+## 6. Source identity
+
+Separation artifacts must not be keyed only by project id. A project can receive a replacement source upload while retaining its identity.
+
+Migration `0011_audio_separation.sql` adds:
+
+```sql
+ALTER TABLE projects ADD COLUMN source_revision INTEGER NOT NULL DEFAULT 0;
+```
+
+Migration/backfill rules:
+
+- existing projects with non-null `source_object_key` are backfilled to source revision `1`;
+- projects without source media remain revision `0`;
+- `ProjectRepository.setSourceObject()` increments `source_revision` atomically whenever a completed upload becomes the canonical source;
+- replacing source media therefore invalidates prior separation identity without requiring destructive cleanup.
+
+The project domain/DTO exposes `sourceRevision` as read-only state.
+
+## 7. Separation persistence
+
+Migration `0011_audio_separation.sql` creates `project_audio_separations`.
+
+Required schema:
+
+```sql
+CREATE TABLE project_audio_separations (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  source_revision INTEGER NOT NULL,
+  source_object_key TEXT NOT NULL,
+  source_size_bytes INTEGER,
+  provider TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  model_digest TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued','running','completed','failed','invalidated')),
+  dialogue_object_key TEXT,
+  background_object_key TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  UNIQUE(project_id, source_revision, provider, model_digest)
+);
+```
+
+Repository invariants:
+
+- owner-scoped project authorization is required for all reads/writes;
+- a completed row is valid only if both durable stem keys are present;
+- returned keys must be exact project/source/provider/model scoped;
+- rows for older source revisions are never returned as current;
+- retry mutates the same canonical identity rather than creating competing completed rows.
+
+## 8. R2 layout
+
+Canonical immutable stem keys:
+
+```text
+projects/{projectId}/separation/{sourceRevision}/{provider}/{modelDigest}/dialogue.wav
+projects/{projectId}/separation/{sourceRevision}/{provider}/{modelDigest}/background.wav
+```
 
 Rules:
 
-- Each clip contributes `[startMs, endMs)`.
-- Overlapping or adjacent windows are merged before building the FFmpeg filter graph.
-- Each merged speech window uses an 80 ms attack lead and a 120 ms release tail, clipped to `[0, projectDurationMs]`.
-- The gain ramps linearly from 1.0 to the duck gain over the 80 ms attack, remains at duck gain for the canonical speech interval, then ramps linearly back to 1.0 over the 120 ms release.
-- The duck gain is exactly `10^(-18/20)` (approximately `0.1258925412`), equivalent to -18 dB.
-- Gain values are code constants, not user-provided FFmpeg expressions.
-- The source bed is normalized/resampled to 48 kHz stereo before ducking and mixing.
-- No clip or source path from another project may be accepted.
-- Output duration remains bounded to canonical project duration.
+- WAV is the canonical intermediate to avoid repeated lossy recompression.
+- Temporary model chunks may exist only in container-local storage or a clearly temporary project prefix.
+- Final stitched stems are the only reusable canonical artifacts.
+- Historical source/model generations are never overwritten by newer ones.
+- Any response containing a cross-project or unexpected key is rejected.
 
-These constants are part of the initial Phase 4D contract and must be locked by tests so later tuning is deliberate and reviewable.
+## 9. Provider contract
 
-## 7. Separation provider boundary
-
-Add a service interface independent from the media renderer:
+Add `worker/src/services/separation/types.ts`:
 
 ```ts
-type DialogueSeparationCapabilities = {
-  configured: boolean;
-  provider: string | null;
-  backgroundStem: boolean;
-  dialogueStem: boolean;
-  maxDurationMs?: number;
-  supportedContentTypes?: string[];
-  qualification: 'qualified' | 'unqualified' | 'unavailable';
-};
-
-type SeparateDialogueInput = {
+export type SeparationRequest = {
   projectId: string;
   sourceObjectKey: string;
-  sourceGeneration: number;
+  sourceRevision: number;
+  provider: string;
+  modelId: string;
+  modelDigest: string;
+};
+
+export type SeparationResult = {
+  dialogueObjectKey: string;
+  backgroundObjectKey: string;
   durationMs: number;
 };
 
-type SeparationResult = {
+export type SeparationCapabilities = {
+  configured: boolean;
+  qualified: boolean;
   provider: string;
-  providerVersion?: string;
-  backgroundObjectKey: string;
-  dialogueObjectKey?: string | null;
+  modelId: string;
+  modelDigest: string;
+  maxDurationMs?: number;
 };
 
-interface DialogueSeparationProvider {
-  capabilities(): Promise<DialogueSeparationCapabilities>;
-  separate(input: SeparateDialogueInput): Promise<SeparationResult>;
+export interface AudioSeparationProvider {
+  capabilities(): Promise<SeparationCapabilities>;
+  separate(input: SeparationRequest): Promise<SeparationResult>;
 }
 ```
 
-The provider may be implemented later using a dedicated API/service. Phase 4D must ship a clean unavailable provider implementation so the application can safely expose the capability state before a production provider is configured.
+The Worker owns project scoping and expected key derivation. The provider/container is not trusted to choose arbitrary R2 paths.
 
-Provider qualification is explicit. `configured=true` is not sufficient for `separated_background`; capability must also be `qualification='qualified'` and `backgroundStem=true`.
+## 10. Dedicated separator container
 
-## 8. Persistence and source generation
+Add `containers/separator/` with its own Dockerfile, model runtime, tests, and narrow HTTP server.
 
-Create a forward D1 migration with one canonical table named `project_audio_stems`.
-
-Required fields:
-
-- `id`
-- `project_id`
-- `source_generation`
-- `kind` (`background` or `dialogue`)
-- `provider`
-- `provider_version`
-- `status` (`pending`, `completed`, `failed`, `invalidated`)
-- `object_key`
-- `error_code`
-- `error_message`
-- `created_at`
-- `updated_at`
-
-Use a partial unique index for completed canonical stems on `(project_id, source_generation, kind, provider)` where `status='completed'`. This prevents competing completed sources of truth while still allowing immutable failed/pending attempt history.
-
-The project source generation must change whenever the uploaded source media is replaced/recompleted. If the repo already has an equivalent source-version field after latest-main reconciliation, use that instead of introducing a duplicate counter.
-
-Changing the source generation invalidates old stem rows for future reuse. Existing immutable R2 artifacts may remain for retention/cleanup policy, but must never be selected for a newer source generation.
-
-## 9. R2 object layout
-
-Canonical stem keys:
+Initial route:
 
 ```text
-projects/{projectId}/stems/{sourceGeneration}/{provider}/background.wav
-projects/{projectId}/stems/{sourceGeneration}/{provider}/dialogue.wav
+POST /separate
 ```
 
-Requirements:
+The request contains validated project/source/model metadata only. No arbitrary shell arguments or filenames from user input are accepted.
 
-- immutable for a source generation/provider identity;
-- project-scoped;
-- never derived directly from untrusted filenames;
-- validated before persistence and before media rendering;
-- background stem is required for a completed separation result;
-- dialogue stem is optional because Phase 4D final rendering only requires the background stem.
+Container stages:
 
-## 10. Workflow and reuse
+1. load/copy the source media through the controlled project media boundary;
+2. normalize audio to the model's required sample rate/channel format;
+3. run two-stem separation;
+4. stitch/normalize stems if the model internally chunks input;
+5. verify both durations are positive and within a bounded tolerance of source duration;
+6. publish canonical dialogue/background stem objects;
+7. return exact keys plus measured duration.
 
-True separation is a project/source-generation operation, not a target-language operation.
+The model runtime and weights are included or fetched at image-build time with a pinned digest. Production first request must not perform an unverified model download.
 
-For a `separated_background` dubbed export:
+## 11. Container sizing
 
-1. Authorize project/export/job.
-2. Load target-language variants and generate/reuse TTS exactly as Phase 4C does today.
-3. Resolve current source generation.
-4. Load a completed valid background stem for that source generation/provider.
-5. If none exists, check provider capabilities before any provider side effect.
-6. Record usage `started` with an idempotent operation key.
-7. Run provider separation once.
-8. Validate provider object keys/project scope and required background artifact.
-9. Persist completed stem metadata.
-10. Record usage `completed`.
-11. Pass the background stem key to `MediaProcessor.renderExport(...)`.
-12. FFmpeg mixes the background stem plus target-language dubbed clips.
-13. Publish the normal immutable target export attempt.
+The existing renderer stays `standard-1`.
 
-A second export for another target language reuses the same completed background stem and must not run the provider again.
+The separator is configured independently. Initial source/config qualification target:
 
-Retries use the existing job retry-generation/idempotency pattern. A durable completed stem wins over an incomplete usage record; the workflow recovers the missing usage completion rather than rerunning the provider.
+```json
+{
+  "class_name": "SeparatorContainer",
+  "image": "./containers/separator/Dockerfile",
+  "instance_type": "standard-4"
+}
+```
 
-## 11. MediaProcessor / container contract
+Cloudflare currently documents `standard-4` as 4 vCPU / 12 GiB memory / 20 GB disk. This is a starting capacity assumption for CPU inference, not a throughput guarantee.
 
-Extend `RenderExportOptions` without creating a new renderer:
+Real-media benchmarks may justify a smaller type later, but only after measured evidence.
+
+## 12. Worker container adapter
+
+Add `worker/src/services/separation/container.ts` with a `ContainerAudioSeparationProvider`.
+
+It mirrors the existing defensive media-container pattern:
+
+- one named container instance per project identity;
+- request body is validated before call;
+- non-2xx becomes a stable provider error;
+- response shape is validated;
+- both keys must equal the canonical expected project/source/model prefixes;
+- duration must be positive finite metadata;
+- capability returns `qualified=false` until runtime qualification/config explicitly enables it.
+
+## 13. Workflow orchestration
+
+Add:
+
+- `worker/src/workflows/SeparationWorkflow.ts`
+- `worker/src/workflows/separationPipeline.ts`
+
+A normal durable job is created with `type='separation'`.
+
+Canonical sequence:
+
+1. authorize project;
+2. snapshot `sourceRevision`, source key, source size, and project duration;
+3. resolve canonical provider/model capabilities;
+4. reject unavailable/unqualified provider before billable work;
+5. load or create canonical separation identity;
+6. if a completed durable identity already exists, reuse it;
+7. check cancellation;
+8. mark job/separation running;
+9. record idempotent usage `started`;
+10. invoke provider under provider telemetry;
+11. validate keys and duration;
+12. check cancellation before publish completion;
+13. persist both durable stem keys and completed status;
+14. record usage `completed`;
+15. complete the job.
+
+Workflow step results contain metadata only. Audio bytes never live in Workflow state.
+
+## 14. Separation API
+
+Add:
+
+```text
+POST /api/projects/:id/separation
+GET  /api/projects/:id/separation
+```
+
+### POST semantics
+
+Idempotently ensure the canonical separation for the current source revision/provider/model.
+
+- completed identity -> return it; do not start new provider work;
+- active identity -> return existing job/state;
+- failed identity -> explicit retry flow increments the job retry generation and reuses the same canonical separation identity;
+- no identity -> create separation row + job + Workflow instance.
+
+The route uses a dedicated expensive-operation rate limit before creating new provider work.
+
+### GET semantics
+
+Return only the current source revision's canonical separation status and safe provenance:
+
+- status;
+- provider;
+- model id;
+- source revision;
+- created/completed timestamps;
+- job id when active/retryable.
+
+Do not expose signed media credentials or internal container details.
+
+## 15. Rate limiting
+
+Add a dedicated binding:
+
+```text
+RATE_LIMIT_SEPARATION
+```
+
+Initial limit: 2 separation starts per user per minute.
+
+Reusing an already active/completed canonical identity does not create another provider operation.
+
+The binding gets a new namespace id and is independently test-locked so separation does not accidentally consume the generic export limiter.
+
+## 16. Usage ledger
+
+Add usage kind:
+
+```text
+audio_separation_minute
+```
+
+Canonical operation key:
+
+```text
+project:{projectId}:source:{sourceRevision}:separation:{provider}:{modelDigest}
+```
+
+This deliberately excludes target language and export id.
+
+Consequences:
+
+- `vi`, `en`, `zh`, `ja`, and `ko` reuse the same separation artifact;
+- multi-language batch export does not charge or rerun separation per language;
+- retry can recover a missing completed usage event from durable stems;
+- a completed usage event with missing durable stems is an invariant violation and fails closed.
+
+Units are source audio minutes derived from validated duration metadata.
+
+## 17. Export API
+
+Extend dubbed export request input:
 
 ```ts
-type RenderExportOptions = {
+mixMode?: 'dubbed_only' | 'preserve_background';
+```
+
+Rules:
+
+- omitted -> `dubbed_only`;
+- subtitles reject/ignore no audio-only hidden fields; request validation remains explicit;
+- batch dubbed export applies one requested mix mode to all target-language attempts;
+- export DTO stores/returns the resolved mix mode so an artifact's provenance is visible.
+
+`preserve_background` does not secretly start separation inside `ExportWorkflow`. The Studio/API explicitly prepares separation first, and export requires a completed current identity.
+
+## 18. Export persistence
+
+Migration `0011_audio_separation.sql` also adds a non-null/default-safe mix provenance field to canonical `project_exports`:
+
+```sql
+ALTER TABLE project_exports ADD COLUMN mix_mode TEXT NOT NULL DEFAULT 'dubbed_only'
+  CHECK (mix_mode IN ('dubbed_only','preserve_background'));
+```
+
+If SQLite/D1 cannot apply the desired CHECK via direct ALTER in the target version, use the repository's forward table-rebuild pattern and preserve every existing export/share identity.
+
+Historical rows remain `dubbed_only`.
+
+## 19. Export workflow integration
+
+Extend `RenderExportOptions`:
+
+```ts
+export type RenderExportOptions = {
   targetLanguage: TargetLanguage;
   exportId: string;
-  audioMode?: DubbedAudioMode;
+  mixMode?: DubbedMixMode;
   backgroundObjectKey?: string;
 };
 ```
 
-Rules:
+### `dubbed_only`
 
-- omitted `audioMode` -> `dubbed_only`;
-- `duck_original` forbids `backgroundObjectKey`;
-- `separated_background` requires a validated project-scoped background stem key;
-- `dubbed_only` forbids background stem input;
-- modern output key naming remains unchanged;
-- legacy render path remains backward-compatible.
+Exact current behavior. No separation lookup required.
 
-Container input validation must reject cross-project source, voice, and stem objects before fetching or invoking FFmpeg.
+### `preserve_background`
 
-## 12. FFmpeg render design
+Before render:
+
+1. load current project source revision;
+2. load completed canonical separation identity;
+3. require matching source revision/provider/model digest;
+4. require a valid durable background key;
+5. pass only the validated background key into media rendering.
+
+Stable errors include:
+
+- `SEPARATION_UNAVAILABLE`
+- `SEPARATION_NOT_READY`
+- `SEPARATION_SOURCE_STALE`
+- `SEPARATION_ARTIFACT_MISSING`
+- `SEPARATION_RESPONSE_INVALID`
+
+Failure affects only the requested preserve mode; `dubbed_only` remains available.
+
+## 20. MediaProcessor validation
+
+`ContainerMediaProcessor.renderExport()` validates:
+
+- source object belongs to project;
+- target-language voice clips belong to exact target prefix;
+- `dubbed_only` forbids a background key;
+- `preserve_background` requires a background key under exact canonical separation prefix;
+- modern target output key remains `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`.
+
+No user-provided arbitrary storage prefix reaches FFmpeg.
+
+## 21. FFmpeg render graph
 
 ### `dubbed_only`
 
-Keep the existing filter graph behavior.
+Preserve the current graph:
 
-### `duck_original`
+- `anullsrc` base;
+- target dubbed clips resampled/tempo-fitted/timeline-delayed;
+- amix;
+- existing video/audio output settings.
 
-Inputs:
-
-- source media including original audio;
-- dubbed clips.
-
-Filter graph:
-
-- map original audio to normalized source bed;
-- apply the exact ducking envelope from section 6;
-- place/tempo-fit dubbed clips exactly as current implementation;
-- mix attenuated source bed and dubbed clips;
-- encode AAC 48 kHz stereo.
-
-If source media contains no audio stream, return a stable `SOURCE_AUDIO_MISSING` media error rather than silently falling back.
-
-### `separated_background`
+### `preserve_background`
 
 Inputs:
 
 - source video;
-- background stem;
-- dubbed clips.
+- background WAV stem;
+- target dubbed clips.
 
-Filter graph:
+Graph:
 
-- normalize background stem;
-- place/tempo-fit dubbed clips;
-- mix background stem and dubbed clips;
-- do not also mix original source audio;
-- preserve video timing and normal export encoding.
+- background stem -> 48 kHz stereo normalized base;
+- target dubbed clips -> existing tempo fitting and timeline delays;
+- background + clips -> amix;
+- source video's original audio is **not** mapped into the final mix;
+- video mapping and output duration remain unchanged.
 
-The container does not run the external separation provider.
+This behavior is locked by container tests so a later refactor cannot accidentally reintroduce source dialogue.
 
-## 13. API behavior
+## 22. Frontend
 
-Extend dubbed export requests with optional:
+Add a compact audio treatment section near export/batch-export controls.
 
-```json
-{
-  "audioMode": "dubbed_only | duck_original | separated_background"
-}
-```
+Options:
 
-For batch exports, one requested audio mode applies to all target-language dubbed attempts in that batch. Subtitle-only attempts ignore audio mode and must reject nonsensical separation-only fields if supplied.
+- `Dubbed voices only`
+- `Preserve music & ambience`
 
-Responses include the resolved audio mode in export attempt DTOs so UI and diagnostics can distinguish how an artifact was produced.
+Required states for preserve mode:
 
-Stable errors include:
+- `Not prepared` -> show `Prepare background` action;
+- `Processing` -> durable job progress;
+- `Ready` -> selectable only if provider capability is qualified;
+- `Failed` -> safe retry action and error summary;
+- `Stale` -> source has changed, old artifact not selectable;
+- `Unqualified` -> preview label; no production-quality claim.
 
-- `AUDIO_MODE_INVALID`
-- `SOURCE_AUDIO_MISSING`
-- `DIALOGUE_SEPARATION_UNAVAILABLE`
-- `DIALOGUE_SEPARATION_UNQUALIFIED`
-- `DIALOGUE_SEPARATION_FAILED`
-- `DIALOGUE_SEPARATION_ARTIFACT_INVALID`
+Opening Studio must not auto-start expensive separation.
 
-Ownership hiding remains unchanged: unauthorized project/export IDs must not leak existence.
+## 23. Telemetry
 
-## 14. UI design
+Add operations:
 
-Add an audio treatment control in the export/batch-export area rather than the segment inspector.
+- `separation_start`
+- `separation_reuse`
+- `separation_success`
+- `separation_failure`
+- `export_preserve_background`
 
-Labels must be explicit:
+Allowed fields include:
 
-- `Dubbed voice only`
-- `Keep original ambience (duck dialogue)`
-- `Separated background stem`
+- request id;
+- opaque user id;
+- project id;
+- source revision;
+- job id;
+- provider/model id;
+- status/duration/error code.
 
-The UI shows provider capability state for true separation:
+Never log transcript text, source filenames, raw media URLs, tokens, or credentials.
 
-- unavailable — disabled with explanation;
-- configured but unqualified — disabled with qualification warning;
-- qualified — selectable;
-- processing — export/job progress indicates separation stage;
-- failed — actionable provider error without silently changing mode.
+## 24. Cancellation and retry
 
-The UI must never label `duck_original` as AI separation.
+- check cancellation before provider inference;
+- check again before publishing completed separation state;
+- cancelled jobs never transition back to completed;
+- retry generation is part of job state but not separation artifact identity;
+- if durable completed stems exist after an uncertain provider response, recover state/usage instead of rerunning inference;
+- provider failure does not invalidate a previously valid completed identity for the same exact source/model;
+- new source revision never reuses old stems.
 
-## 15. Usage ledger and telemetry
+## 25. Security
 
-Add a separation usage kind only when external/provider work is actually performed. The exact unit should follow provider billing semantics; if no provider is configured, do not invent cost units.
+- authorize project ownership before separation lookup or start;
+- validate duration/provider capacity before expensive work;
+- no arbitrary shell commands or paths from request data;
+- provider/model names come from server configuration, not user-controlled command arguments;
+- secrets remain Cloudflare secrets;
+- canonical stem keys are derived server-side;
+- cross-project provider/container output fails closed;
+- no public R2 bucket is required.
 
-Required operation-key dimensions:
+## 26. Testing strategy
 
-- project ID
-- source generation
-- provider
-- provider version where relevant
-- stage `dialogue-separation`
+TDD is mandatory.
 
-Telemetry events should include provider/status/duration/error code but no transcript text, source media bytes, credentials, or private filenames.
+### Migration/repository
 
-FFmpeg ducking stays part of normal render metering and does not create a fake AI separation usage event.
+- `0010 -> 0011` executes with `foreign_key_check` clean;
+- source revision backfill;
+- `setSourceObject` atomic increment;
+- separation uniqueness;
+- owner scoping;
+- completed row requires both keys;
+- stale source revision is not returned current;
+- export mix-mode migration preserves existing ids/shares.
 
-## 16. Cancellation and failure handling
+### Provider/container adapter
 
-- Check cancellation before provider call, before final render, and before publish.
-- Provider timeout/failure marks the stem attempt failed and the export job failed with a stable code.
-- A failed provider attempt does not invalidate already-completed stems from the same valid source generation/provider.
-- A completed stem must be validated again before reuse.
-- No automatic downgrade from `separated_background` to another audio mode.
-- `duck_original` failures are media/render failures, not separation-provider failures.
-- Existing completed target exports remain immutable even if future separation capability changes.
+- capabilities unavailable/unqualified/qualified matrix;
+- exact request model identity;
+- malformed/cross-project response rejection;
+- duration validation;
+- exact canonical keys;
+- no floating model id accepted.
 
-## 17. Security and abuse controls
+### Separator container
 
-- Per-user project authorization before any stem lookup/provider call.
-- Strict project-prefix validation for source/voice/stem R2 keys.
-- Provider secrets remain Cloudflare secrets, never D1/Git/docs/tests.
-- Provider calls have bounded timeout/retry policy.
-- Source duration/provider limits are checked before billable work.
-- Rate limiting reuses the expensive export admission boundary unless a provider-specific rate-limit binding becomes necessary during implementation; no new binding should be added without evidence.
-- Never send transcript text to a separation provider unless its API specifically requires it; the expected input is source media/audio only.
+- request validation;
+- deterministic output-path derivation;
+- two stem outputs required;
+- duration tolerance;
+- model command receives only server-owned arguments;
+- temporary artifacts cannot escape project scope.
 
-## 18. Compatibility guarantees
-
-Phase 4D must not regress:
-
-- Phase 4C target languages `vi/en/zh/ja/ko`;
-- target-specific voice artifact keys;
-- batch partial retry isolation;
-- concrete export sharing through `export_id`;
-- Vietnamese project-level export compatibility;
-- subtitle export behavior;
-- dedicated batch-export rate limit;
-- source/CI migration checks;
-- Cloudflare Workers Builds as the only production deployment lane.
-
-Existing clients that omit `audioMode` retain `dubbed_only` behavior.
-
-## 19. Testing strategy
-
-### Domain/unit
-
-- audio-mode parsing/defaulting;
-- capability qualification matrix;
-- source-generation stem selection/invalidation;
-- operation-key determinism;
-- provider result validation;
-- reuse of one stem across multiple target languages.
-
-### Container
-
-- `dubbed_only` retains current argument/filter graph contract;
-- `duck_original` maps source audio and applies the exact section-6 envelope;
-- overlapping dialogue windows merge deterministically;
-- source audio absent -> stable failure;
-- `separated_background` consumes background stem and does not mix source audio;
-- cross-project stem key rejected;
-- output duration/video mapping remains correct.
+CI may use a tiny deterministic fake/model fixture for contract tests; it must not claim perceptual separation quality.
 
 ### Workflow
 
-- provider capability checked before side effect;
-- unavailable/unqualified is fail-closed;
-- provider called once for first target export and reused for later languages;
-- retry recovers completed durable stem without double provider call/usage charge;
-- cancellation boundaries;
-- provider failure does not publish export;
-- `duck_original` never touches separation provider/usage;
-- legacy export omission remains `dubbed_only`.
+- first run -> one started + one completed usage event;
+- second target export -> zero new separation provider calls;
+- retry recovers durable artifact without duplicate charge;
+- cancellation before inference;
+- cancellation before completion publish;
+- provider failure durable error state;
+- completed usage without artifacts fails closed.
 
-### API/UI
+### Export
 
-- audio mode accepted for dubbed single/batch export;
-- invalid mode rejected;
-- subtitle requests do not start separation;
-- UI labels distinguish ducking vs true separation;
-- separation option disabled unless qualified;
-- job/error state rendered accurately.
+- omitted mix mode -> byte/graph-compatible `dubbed_only` behavior;
+- preserve mode requires current completed separation;
+- stale/missing separation fails only preserve mode;
+- background key sent to media renderer exactly;
+- no source audio remixed in preserve graph;
+- target-language output keys remain exact.
 
-### Acceptance
+### Frontend
 
-Add a Phase 4D acceptance test wired into the normal verification script. It must assert source/API/runtime wiring, no production deploy workflow, migration ordering, provider fail-closed behavior, and compatibility with Phase 4C.
+- no auto-start on Studio load;
+- prepare/progress/ready/failed/stale/unqualified states;
+- exact mix mode included in dubbed export request;
+- subtitle flow unaffected;
+- batch export uses one mix selection across target attempts.
 
-CI gate remains:
+### Acceptance/CI
 
-- all source/acceptance tests;
-- all unit/integration tests;
+Fresh CI must include:
+
+- source acceptance tests;
+- Vitest;
 - TypeScript/Vite production build;
-- Wrangler deploy dry-run;
-- existing reference screenshot gate where affected.
+- Wrangler dry-run;
+- both FFmpeg and separator container bindings/classes;
+- SeparationWorkflow binding;
+- separator contract tests;
+- existing CJK screenshot/reference artifact lane.
 
-## 20. Delivery sequence
+## 27. Runtime qualification
 
-Implementation will be split into small TDD slices after this spec is approved:
+Phase 4D remains runtime **UNQUALIFIED** after source merge until a real fixture proves all of the following:
 
-1. Domain audio-mode contract + RED tests.
-2. D1 stem persistence/source-generation compatibility.
-3. Separation provider capability interface + unavailable implementation.
-4. Stem orchestration/reuse/idempotency in export workflow.
-5. MediaProcessor contract extension.
-6. FFmpeg `duck_original` render path.
-7. FFmpeg `separated_background` render path.
-8. Single/batch export API wiring.
-9. Export UI capability/mode controls.
-10. Usage/telemetry/error contracts.
-11. Phase 4D acceptance/docs and exact-head CI.
-12. Review, PR, expected-head merge to `main`, post-merge CI.
+1. source contains dialogue plus music/ambience;
+2. separation completes with exact durable project-scoped dialogue/background stems;
+3. source dialogue is materially reduced/removed from the background stem without catastrophic ambience loss;
+4. `preserve_background` produces a playable dubbed MP4 with correct duration;
+5. at least two target-language exports reuse the same separation identity;
+6. retry does not duplicate separation usage;
+7. `dubbed_only` remains unchanged and operational.
 
-No manual production deployment is part of this sequence.
+Perceptual quality evidence must come from real media, not a mocked CI fixture.
 
-## 21. Phase 4E boundary
+## 28. Deployment boundary
 
-Visual lip-sync remains a separate subsystem. Phase 4D may not add a fake lip-sync provider or reinterpret audio duration fitting as visual lip-sync.
+GitHub Actions remains CI-only.
 
-After Phase 4D is merged and post-merge CI is green, Phase 4E will get a separate architectural spec covering:
+`main` remains the sole production source of truth. Cloudflare Workers Builds remains the only production deployment lane.
 
-- visual lip-sync provider capabilities;
-- immutable visual-render attempts;
-- per-export opt-in;
-- provider qualification and safety boundary;
-- queued/completed/unavailable UI state;
-- no-op/fail-closed behavior when provider is absent.
+The D1 deployment preparation added on current `main` must be preserved. Phase 4D's migration `0011` must flow through the repository's existing Workers Builds migration/deploy preparation path.
 
-## 22. Acceptance criteria
+No manual production deploy is part of this phase.
 
-Phase 4D is complete when all of the following are true:
+## 29. Current Cloudflare constraints
 
-1. Existing clients still produce `dubbed_only` exports unchanged when `audioMode` is omitted.
-2. `duck_original` preserves source audio and attenuates it using the exact section-6 envelope only around dubbed speech windows.
-3. `separated_background` is impossible to request successfully unless a qualified provider/stem path exists.
-4. A valid background stem is reusable across all enabled target languages for the same source generation.
-5. Replacing source media prevents reuse of old stems.
-6. Provider retries do not create duplicate canonical stems or duplicate completed usage charges.
-7. Cross-project source/voice/stem paths are rejected.
-8. Batch export preserves partial retry isolation and its dedicated rate limit.
-9. Concrete export sharing and Vietnamese compatibility remain intact.
-10. Full exact-head CI and post-merge CI complete successfully.
-11. GitHub Actions performs no production deployment.
-12. Production capability is not called qualified until real provider/media fixtures prove it outside the source-only CI boundary.
+Current Cloudflare documentation states:
+
+- `standard-4`: 4 vCPU, 12 GiB memory, 20 GB disk;
+- custom Container types are capped at 4 vCPU and 12 GiB memory;
+- Workflows permit unlimited wall-clock step duration while waiting on network/database I/O, while active CPU remains bounded;
+- R2 remains the durable object store for large separation artifacts.
+
+Therefore model inference belongs in the dedicated container, while Workflow state carries only metadata/checkpoints.
+
+These are capacity assumptions, not promises about throughput or model quality.
+
+## 30. Non-goals
+
+Phase 4D does not include:
+
+- visual lip-sync;
+- speaker-specific source separation;
+- custom model training/fine-tuning;
+- browser-side separation;
+- silent automatic fallback between mix modes;
+- making preserve-background the default before runtime qualification;
+- deleting all historical stems immediately on source/model changes;
+- claiming CI proves perceptual audio quality.
+
+## 31. Follow-on
+
+After Phase 4D is source/CI complete and real-media qualified, the remaining advanced-dubbing roadmap item is the optional visual lip-sync provider. It must be designed as its own subsystem rather than being coupled into separation or FFmpeg rendering.
