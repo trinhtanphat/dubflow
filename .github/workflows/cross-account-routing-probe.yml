@@ -12,28 +12,28 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      EXPECTED_WORKER_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      EXPECTED_BUILD_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
     steps:
-      - name: Resolve qs3d.site routing across authorized accounts
+      - name: Resolve and inspect actual yupvox production service account
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           const token = process.env.CLOUDFLARE_API_TOKEN;
-          const expectedWorkerAccount = process.env.EXPECTED_WORKER_ACCOUNT_ID;
-          if (!token || !expectedWorkerAccount) throw new Error('Cloudflare probe credentials are unavailable.');
+          const expectedBuildAccount = process.env.EXPECTED_BUILD_ACCOUNT_ID;
+          if (!token || !expectedBuildAccount) throw new Error('Cloudflare probe credentials are unavailable.');
           const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
-          async function cf(url, strict = true) {
-            const response = await fetch(url, { headers });
+          async function cf(url, init = {}, strict = true) {
+            const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers ?? {}) } });
             const text = await response.text();
             let body;
             try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 500) }; }
             if (strict && (!response.ok || body?.success === false)) {
-              throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 800)}`);
+              throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 1000)}`);
             }
             return { response, body };
           }
@@ -48,55 +48,115 @@ jobs:
             const accountId = account?.id;
             if (!accountId) continue;
             const zonesUrl = `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent('qs3d.site')}&account.id=${encodeURIComponent(accountId)}`;
-            const { response: zoneResponse, body: zoneBody } = await cf(zonesUrl, false);
+            const { body: zoneBody } = await cf(zonesUrl, {}, false);
             const zones = Array.isArray(zoneBody?.result) ? zoneBody.result : [];
             for (const zone of zones) {
               const zoneId = zone?.id;
               if (!zoneId) continue;
-              const entry = {
-                accountId,
-                accountMatchesWorker: accountId === expectedWorkerAccount,
-                zoneId,
-                zoneName: zone?.name ?? '',
-                zoneStatus: zone?.status ?? '',
-                routes: [],
-                dns: [],
-                domains: [],
-              };
-
-              const { body: routeBody } = await cf(`https://api.cloudflare.com/client/v4/zones/${zoneId}/workers/routes`, false);
-              const routes = Array.isArray(routeBody?.result) ? routeBody.result : [];
-              entry.routes = routes
-                .filter((r) => String(r?.pattern ?? '').includes('yupvox.qs3d.site'))
-                .map((r) => ({ pattern: r?.pattern ?? '', script: r?.script ?? '' }));
-
-              const { body: dnsBody } = await cf(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records?name=${encodeURIComponent('yupvox.qs3d.site')}&per_page=100`, false);
-              const dns = Array.isArray(dnsBody?.result) ? dnsBody.result : [];
-              entry.dns = dns.map((r) => ({
-                type: r?.type ?? '', name: r?.name ?? '', proxied: r?.proxied ?? null,
-                content: ['CNAME','A','AAAA'].includes(r?.type) ? String(r?.content ?? '').slice(0, 250) : '[redacted-non-routing-record]'
-              }));
-
-              const { body: domainBody } = await cf(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`, false);
+              const { body: domainBody } = await cf(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/domains`, {}, false);
               const domains = Array.isArray(domainBody?.result) ? domainBody.result : [];
-              entry.domains = domains
-                .filter((d) => d?.hostname === 'yupvox.qs3d.site')
-                .map((d) => ({ hostname: d?.hostname ?? '', service: d?.service ?? '', environment: d?.environment ?? '' }));
-
-              matches.push(entry);
+              const yupvoxDomains = domains.filter((d) => d?.hostname === 'yupvox.qs3d.site');
+              if (yupvoxDomains.length === 0) continue;
+              matches.push({ accountId, zoneId, zone, domains: yupvoxDomains });
             }
           }
 
-          console.log(`qs3d.site zone matches=${matches.length}`);
-          for (const match of matches) {
+          console.log(`yupvox production account matches=${matches.length}`);
+          if (matches.length !== 1) throw new Error(`Expected exactly one account hosting yupvox.qs3d.site, found ${matches.length}.`);
+
+          const match = matches[0];
+          const productionAccountId = match.accountId;
+          const service = match.domains[0]?.service;
+          console.log(JSON.stringify({
+            productionAccountMatchesWorkersBuildAccount: productionAccountId === expectedBuildAccount,
+            zoneName: match.zone?.name ?? '',
+            zoneStatus: match.zone?.status ?? '',
+            hostname: match.domains[0]?.hostname ?? '',
+            service: service ?? '',
+            environment: match.domains[0]?.environment ?? '',
+          }));
+          if (!service) throw new Error('Production custom domain does not identify a Worker service.');
+
+          const accountBase = `https://api.cloudflare.com/client/v4/accounts/${productionAccountId}`;
+          const { response: settingsResponse, body: settings } = await cf(`${accountBase}/workers/scripts/${encodeURIComponent(service)}/settings`, {}, false);
+          console.log(`actual production service settings status=${settingsResponse.status} success=${settings?.success ?? 'unknown'}`);
+          if (!settingsResponse.ok || settings?.success === false) throw new Error('Unable to read actual production service settings.');
+          const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
+          const safeFields = ['name','type','database_id','bucket_name','dataset','class_name','script_name','service','environment','namespace','workflow_name','id','namespace_id'];
+          const safeBindings = bindings.map((binding) => {
+            const out = {};
+            for (const key of safeFields) {
+              const value = binding?.[key];
+              if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') out[key] = value;
+            }
+            return out;
+          });
+          console.log(`actual production safe bindings=${JSON.stringify(safeBindings)}`);
+
+          const { response: deploymentsResponse, body: deploymentsBody } = await cf(`${accountBase}/workers/scripts/${encodeURIComponent(service)}/deployments`, {}, false);
+          console.log(`actual production deployments status=${deploymentsResponse.status} success=${deploymentsBody?.success ?? 'unknown'}`);
+          const deploymentResult = deploymentsBody?.result;
+          const deployments = Array.isArray(deploymentResult?.deployments) ? deploymentResult.deployments : Array.isArray(deploymentResult) ? deploymentResult : [];
+          deployments.sort((a, b) => Date.parse(b?.created_on ?? 0) - Date.parse(a?.created_on ?? 0));
+          const latest = deployments[0];
+          const active = Array.isArray(latest?.versions)
+            ? latest.versions.slice().sort((a, b) => Number(b?.percentage ?? 0) - Number(a?.percentage ?? 0))[0]
+            : null;
+          console.log(JSON.stringify({
+            latestDeploymentCreatedOn: latest?.created_on ?? '',
+            latestDeploymentSource: latest?.source ?? '',
+            activeVersionId: active?.version_id ?? '',
+            activePercentage: active?.percentage ?? null,
+          }));
+          if (active?.version_id) {
+            const { body: versionBody } = await cf(`${accountBase}/workers/scripts/${encodeURIComponent(service)}/versions/${encodeURIComponent(active.version_id)}`, {}, false);
+            const version = versionBody?.result ?? {};
             console.log(JSON.stringify({
-              accountMatchesWorker: match.accountMatchesWorker,
-              zoneName: match.zoneName,
-              zoneStatus: match.zoneStatus,
-              routes: match.routes,
-              dns: match.dns,
-              customDomains: match.domains,
+              activeVersionNumber: version?.number ?? null,
+              activeVersionCreatedOn: version?.metadata?.created_on ?? '',
+              activeVersionSource: version?.metadata?.source ?? '',
             }));
           }
-          if (matches.length === 0) process.exit(2);
+
+          const dbBinding = bindings.find((binding) => binding?.type === 'd1' && binding?.name === 'DB');
+          if (!dbBinding?.database_id) throw new Error('Actual production service is missing DB binding.');
+          const dbId = dbBinding.database_id;
+          const { body: dbInfoBody } = await cf(`${accountBase}/d1/database/${dbId}`, {}, false);
+          console.log(`actual production DB name=${dbInfoBody?.result?.name ?? 'unknown'} idMatchesBuildAccountDB=${dbId === '4ce2cfa0-1876-48dc-8cc8-ec4f9b1523c3'}`);
+
+          async function query(sql, params = []) {
+            const { response, body } = await cf(`${accountBase}/d1/database/${dbId}/query`, {
+              method: 'POST', body: JSON.stringify({ sql, params }),
+            }, false);
+            if (!response.ok || body?.success === false) {
+              return { ok: false, status: response.status, error: JSON.stringify(body?.errors ?? body).slice(0, 900), rows: [] };
+            }
+            const page = Array.isArray(body?.result) ? body.result[0] : body?.result;
+            if (page?.success === false) return { ok: false, status: response.status, error: String(page?.error ?? 'query failed').slice(0, 900), rows: [] };
+            return { ok: true, status: response.status, error: '', rows: page?.results ?? [] };
+          }
+
+          for (const [label, sql] of [
+            ['projects schema', 'PRAGMA table_info(projects);'],
+            ['usage schema', 'PRAGMA table_info(usage_events);'],
+            ['migration ledger', 'SELECT name FROM d1_migrations ORDER BY id;'],
+          ]) {
+            const result = await query(sql);
+            if (!result.ok) {
+              console.log(`${label} FAIL status=${result.status} error=${result.error}`);
+              continue;
+            }
+            if (label === 'migration ledger') {
+              console.log(`actual production migration ledger=${result.rows.map((r) => r.name).join(',')}`);
+            } else {
+              console.log(`actual production ${label} columns=${result.rows.map((r) => r.name).join(',')}`);
+            }
+          }
+
+          const projectRead = await query(`SELECT id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC`, ['dev-user']);
+          const usageRead = await query(`SELECT kind, units, provider FROM usage_events WHERE user_id = ? AND phase = 'completed' ORDER BY created_at ASC, id ASC`, ['dev-user']);
+          const balanceRead = await query(`SELECT credit_balance FROM users WHERE id = ? LIMIT 1`, ['dev-user']);
+          console.log(`actual production ProjectRepository SQL ok=${projectRead.ok} rows=${projectRead.rows.length} error=${projectRead.error}`);
+          console.log(`actual production UsageRepository SQL ok=${usageRead.ok} rows=${usageRead.rows.length} error=${usageRead.error}`);
+          console.log(`actual production balance SQL ok=${balanceRead.ok} rows=${balanceRead.rows.length} error=${balanceRead.error}`);
           NODE
