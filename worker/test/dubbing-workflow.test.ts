@@ -51,8 +51,8 @@ describe('dubbing workflow pipeline', () => {
       async extractAudioChunks() {
         calls.push('media:chunks');
         return [
-          { objectKey: 'projects/project-1/audio/000.wav', offsetMs: 0, durationMs: 300000 },
-          { objectKey: 'projects/project-1/audio/001.wav', offsetMs: 300000, durationMs: 60000 },
+          { objectKey: 'projects/project-1/audio/000.wav', offsetMs: 0, durationMs: 300000, overlapBeforeMs: 0, overlapAfterMs: 0 },
+          { objectKey: 'projects/project-1/audio/001.wav', offsetMs: 300000, durationMs: 60000, overlapBeforeMs: 0, overlapAfterMs: 0 },
         ];
       },
     };
@@ -73,6 +73,7 @@ describe('dubbing workflow pipeline', () => {
     };
     let persistedAsrInput: Array<{ id: string; speakerId?: string | null; startMs: number; endMs: number; sourceText: string }> = [];
     const segments = {
+      async list() { return []; },
       async replaceFromAsr(_projectId: string, _userId: string, input: typeof persistedAsrInput) {
         calls.push('segments:replace');
         persistedAsrInput = input;
@@ -130,11 +131,11 @@ describe('dubbing workflow pipeline', () => {
         },
         media: {
           async probe() { return { durationMs: 60000 }; },
-          async extractAudioChunks() { return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 60000 }]; },
+          async extractAudioChunks() { return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 60000, overlapBeforeMs: 0, overlapAfterMs: 0 }]; },
         },
         bucket: { async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; } },
         asr: { async transcribe() { return { text: '', segments: [] }; } },
-        segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+        segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
         usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
         telemetry: noTelemetry,
         asrProviderId: 'workers-ai-whisper-large-v3-turbo',
@@ -165,13 +166,13 @@ describe('dubbing workflow pipeline', () => {
       },
       media: {
         async probe() { return { durationMs: 1000 }; },
-        async extractAudioChunks() { return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 1000 }]; },
+        async extractAudioChunks() { return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 1000, overlapBeforeMs: 0, overlapAfterMs: 0 }]; },
       },
       bucket: {
         async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; },
       },
       asr: { async transcribe() { throw new Error('provider down'); } },
-      segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+      segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       usage: noUsage,
       telemetry: noTelemetry,
       asrProviderId: 'deepgram-nova-3',
@@ -204,12 +205,12 @@ describe('dubbing workflow pipeline', () => {
         async probe() { calls.push('media:probe'); return { durationMs: 1000 }; },
         async extractAudioChunks() {
           calls.push('media:chunks');
-          return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 1000 }];
+          return [{ objectKey: 'projects/p/audio/000.wav', offsetMs: 0, durationMs: 1000, overlapBeforeMs: 0, overlapAfterMs: 0 }];
         },
       },
       bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
-      segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
+      segments: { async list() { return []; }, async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
       usage: noUsage,
       telemetry: noTelemetry,
       asrProviderId: 'workers-ai-whisper-large-v3-turbo',

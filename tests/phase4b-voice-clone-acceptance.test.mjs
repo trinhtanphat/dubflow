@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('Phase 4B defines durable managed voice clone lifecycle', () => {
-  const migration = read('migrations/0007_voice_clones.sql');
+  const migration = read('migrations/0008_voice_clones.sql');
   assert.match(migration, /CREATE TABLE IF NOT EXISTS voice_clones/);
   for (const status of ['creating', 'verification_required', 'ready', 'failed', 'deleting', 'deleted']) {
     assert.match(migration, new RegExp(`'${status}'`));

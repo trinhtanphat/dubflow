@@ -57,8 +57,8 @@ test('Phase 3C safety gate pins observability and five isolated Cloudflare limit
   }
 
   const namespaceIds = [...wrangler.matchAll(/"namespace_id"\s*:\s*"(\d+)"/g)].map((match) => match[1]);
-  assert.equal(namespaceIds.length, 5);
-  assert.equal(new Set(namespaceIds).size, 5);
+  assert.ok(namespaceIds.length >= 5, 'Phase 3C five limiter namespaces must remain present');
+  assert.equal(new Set(namespaceIds).size, namespaceIds.length, 'every configured limiter namespace must remain isolated');
 });
 
 test('Phase 3C safety gate keeps share secrets one-way and owner listings non-secret', () => {
@@ -137,7 +137,7 @@ test('Phase 3C safety gate locks validation-before-limit and limiter-before-expe
     'if (!text)',
     'text.length > 2000',
     "language !== 'vi'",
-    '!hasElevenLabs(c.env)',
+    '!hasElevenLabsPreview(c.env)',
     "enforceRateLimit(c, 'voice'",
     'provider.generate(',
   ]);

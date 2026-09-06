@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ContainerMediaProcessor } from '../src/services/media/container';
 
 describe('ContainerMediaProcessor audio extraction', () => {
-  it('requests bounded 300-second windows with the canonical 8-second overlap', async () => {
+  it('uses the fixed server-side 300-second / 15-second window contract without request knobs', async () => {
     let requestBody: unknown;
     const media = new ContainerMediaProcessor({
       getByName(name: string) {
@@ -15,6 +15,8 @@ describe('ContainerMediaProcessor audio extraction', () => {
                 objectKey: 'projects/p1/audio/00000.wav',
                 offsetMs: 0,
                 durationMs: 300_000,
+                overlapBeforeMs: 0,
+                overlapAfterMs: 0,
               }],
             });
           },
@@ -27,13 +29,13 @@ describe('ContainerMediaProcessor audio extraction', () => {
     expect(requestBody).toEqual({
       projectId: 'p1',
       objectKey: 'projects/p1/source/original.mp4',
-      chunkSeconds: 300,
-      overlapSeconds: 8,
     });
     expect(chunks).toEqual([{
       objectKey: 'projects/p1/audio/00000.wav',
       offsetMs: 0,
       durationMs: 300_000,
+      overlapBeforeMs: 0,
+      overlapAfterMs: 0,
     }]);
   });
 });
