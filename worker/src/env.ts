@@ -40,6 +40,7 @@ export interface Env {
   FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
+  LANGUAGE_TRANSLATION_WORKFLOW: WorkflowBindingLike;
   CONTEXT_TRANSLATION_MODEL?: string;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
   DEEPGRAM_API_KEY?: string;
