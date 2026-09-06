@@ -2,11 +2,6 @@ name: Deploy Cloudflare
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - ops/deploy-phase4c-1b2f3b0a
-    paths:
-      - .github/workflows/deploy-cloudflare.yml
 
 permissions:
   contents: read
