@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import { AudioSeparationRepository, separationObjectPrefix } from '../db/audio-separation';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import { ProjectLanguageRepository, type ProjectLanguageStore } from '../db/project-languages';
-import { ProjectExportRepository, type ProjectExport } from '../db/project-exports';
+import { ProjectExportRepository, type DubbedMixMode, type ProjectExport } from '../db/project-exports';
 import { SegmentRepository, type SegmentStore } from '../db/segments';
 import { SegmentTranslationRepository, type SegmentTranslation } from '../db/segment-translations';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
@@ -14,6 +15,8 @@ import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
+import { separationCapabilities } from '../services/separation/config';
+import type { SeparationCapabilities } from '../services/separation/types';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import type { VoiceCapabilities } from '../services/voice/types';
 
@@ -26,8 +29,10 @@ export type ExportRouteDeps = {
   makeSegments?: (env: Env) => Pick<SegmentStore, 'list'>;
   makeVariants?: (env: Env) => Pick<SegmentTranslationRepository, 'list'>;
   makeExports?: (env: Env) => ExportStore;
+  makeSeparations?: (env: Env) => Pick<AudioSeparationRepository, 'getCurrent'>;
   makeBucket?: (env: Env) => R2ReadableBucketLike;
   getVoiceCapabilities?: (env: Env) => VoiceCapabilities;
+  getSeparationCapabilities?: (env: Env) => SeparationCapabilities;
   makeBatchId?: () => string;
 };
 
@@ -65,6 +70,11 @@ function readableBucket(env: Env): R2ReadableBucketLike {
 
 function parseOutput(value: unknown): ExportOutput | null {
   return value === 'dubbed' || value === 'subtitles' ? value : null;
+}
+
+function parseMixMode(value: unknown): DubbedMixMode | null {
+  if (value === undefined) return 'dubbed_only';
+  return value === 'dubbed_only' || value === 'preserve_background' ? value : null;
 }
 
 function voiceTargetError(capabilities: VoiceCapabilities, targetLanguage: TargetLanguage): ExportValidationError | null {
@@ -128,8 +138,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   const makeSegments = deps.makeSegments ?? ((env: Env) => new SegmentRepository(env.DB));
   const makeVariants = deps.makeVariants ?? ((env: Env) => new SegmentTranslationRepository(env.DB));
   const makeExports = deps.makeExports ?? ((env: Env) => new ProjectExportRepository(env.DB));
+  const makeSeparations = deps.makeSeparations ?? ((env: Env) => new AudioSeparationRepository(env.DB));
   const makeBucket = deps.makeBucket ?? readableBucket;
   const getVoiceCapabilities = deps.getVoiceCapabilities ?? voiceCapabilities;
+  const getSeparationCapabilities = deps.getSeparationCapabilities ?? separationCapabilities;
   const makeBatchId = deps.makeBatchId ?? (() => crypto.randomUUID());
   const voiceConfigured = (env: Env) => getVoiceCapabilities(env).configured !== false;
 
@@ -182,6 +194,86 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     return { project, targetLanguage, output };
   }
 
+  async function validatePreserveBackground(
+    env: Env,
+    projectId: string,
+    userId: string,
+    project: ValidatedTarget['project'],
+  ): Promise<ExportValidationError | null> {
+    const capabilities = getSeparationCapabilities(env);
+    if (!capabilities.configured || !capabilities.qualified) {
+      return {
+        status: 409,
+        code: 'SEPARATION_UNAVAILABLE',
+        message: 'Background preservation is not available until audio separation is runtime-qualified.',
+      };
+    }
+    if (!Number.isInteger(project.sourceRevision) || project.sourceRevision < 1) {
+      return {
+        status: 409,
+        code: 'SEPARATION_SOURCE_STALE',
+        message: 'The current source revision has no reusable background separation.',
+      };
+    }
+
+    const separation = await makeSeparations(env).getCurrent(
+      projectId,
+      userId,
+      project.sourceRevision,
+      capabilities.provider,
+      capabilities.modelDigest,
+    );
+    if (!separation) {
+      return {
+        status: 409,
+        code: 'SEPARATION_UNAVAILABLE',
+        message: 'Prepare background audio before exporting with preserved music and ambience.',
+      };
+    }
+    if (separation.sourceRevision !== project.sourceRevision) {
+      return {
+        status: 409,
+        code: 'SEPARATION_SOURCE_STALE',
+        message: 'The prepared background belongs to an older source revision.',
+      };
+    }
+    if (separation.status !== 'completed') {
+      return {
+        status: 409,
+        code: 'SEPARATION_NOT_READY',
+        message: 'Background audio separation is not completed yet.',
+      };
+    }
+    if (!separation.backgroundObjectKey) {
+      return {
+        status: 409,
+        code: 'SEPARATION_ARTIFACT_MISSING',
+        message: 'The completed separation has no durable background artifact.',
+      };
+    }
+    if (separation.provider !== capabilities.provider || separation.modelDigest !== capabilities.modelDigest) {
+      return {
+        status: 409,
+        code: 'SEPARATION_RESPONSE_INVALID',
+        message: 'The completed separation does not match the canonical provider/model identity.',
+      };
+    }
+    const expectedBackground = `${separationObjectPrefix(
+      projectId,
+      project.sourceRevision,
+      capabilities.provider,
+      capabilities.modelDigest,
+    )}background.wav`;
+    if (separation.backgroundObjectKey !== expectedBackground) {
+      return {
+        status: 409,
+        code: 'SEPARATION_RESPONSE_INVALID',
+        message: 'The completed separation background artifact is outside the canonical project identity.',
+      };
+    }
+    return null;
+  }
+
   async function launchValidated(
     env: Env,
     projectId: string,
@@ -191,10 +283,11 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     batchId: string | null,
     requestId: string | undefined,
     legacy: boolean,
+    mixMode: DubbedMixMode = 'dubbed_only',
   ) {
     const exportsStore = makeExports(env);
     const jobs = makeJobs(env);
-    const attempt = await exportsStore.create(projectId, userId, targetLanguage, output, batchId);
+    const attempt = await exportsStore.create(projectId, userId, targetLanguage, output, batchId, mixMode);
     const job = await jobs.create(projectId, legacy ? 'export' : `export:${targetLanguage}:${output}`);
     if (legacy) await makeProjects(env).setStatus(projectId, userId, 'processing');
     try {
@@ -206,6 +299,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
           exportId: attempt.id,
           targetLanguage,
           output,
+          mixMode,
           requestId,
         },
       });
@@ -234,12 +328,25 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
   }
 
-  async function startSingle(c: any, targetLanguage: string, output: ExportOutput, legacy: boolean) {
+  async function startSingle(
+    c: any,
+    targetLanguage: string,
+    output: ExportOutput,
+    legacy: boolean,
+    mixMode: DubbedMixMode = 'dubbed_only',
+  ) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     try {
       const validated = await validateTarget(c.env, projectId, userId, targetLanguage, output);
       if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+
+      if (output === 'dubbed' && mixMode === 'preserve_background') {
+        const separationError = await validatePreserveBackground(c.env, projectId, userId, validated.project);
+        if (separationError) {
+          return c.json(errorBody(separationError.code, separationError.message), separationError.status);
+        }
+      }
 
       const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
       if (rateLimited) return rateLimited;
@@ -253,6 +360,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         null,
         c.get('requestId'),
         legacy,
+        mixMode,
       );
       if (launched.status === 'failed') {
         return c.json(errorBody(launched.code, launched.message), 503);
@@ -363,7 +471,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   });
 
   routes.post('/:id/exports/:language', async (c) => {
-    let payload: { output?: unknown };
+    let payload: { output?: unknown; mixMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -371,7 +479,11 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
-    return startSingle(c, c.req.param('language'), output, false);
+    const mixMode = parseMixMode(payload.mixMode);
+    if (!mixMode) {
+      return c.json(errorBody('EXPORT_MIX_MODE_INVALID', 'Mix mode must be dubbed_only or preserve_background.'), 400);
+    }
+    return startSingle(c, c.req.param('language'), output, false, mixMode);
   });
 
   routes.get('/:id/exports/:language', async (c) => {
