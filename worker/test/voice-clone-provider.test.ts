@@ -27,6 +27,25 @@ describe('ElevenLabs managed voice clone provider', () => {
     expect((file as Blob).size).toBe(3);
   });
 
+  it('fails closed to verification-required unless the provider explicitly returns false', async () => {
+    const missingFlag = new ElevenLabsVoiceCloneProvider('secret-key', async () => Response.json({ voice_id: 'voice-missing' }));
+    const malformedFlag = new ElevenLabsVoiceCloneProvider('secret-key', async () => Response.json({ voice_id: 'voice-malformed', requires_verification: 'false' }));
+    const explicitFalse = new ElevenLabsVoiceCloneProvider('secret-key', async () => Response.json({ voice_id: 'voice-ready', requires_verification: false }));
+
+    await expect(missingFlag.createInstantClone({
+      name: 'Missing',
+      sample: new Blob(['audio'], { type: 'audio/mpeg' }),
+    })).resolves.toEqual({ providerVoiceId: 'voice-missing', requiresVerification: true });
+    await expect(malformedFlag.createInstantClone({
+      name: 'Malformed',
+      sample: new Blob(['audio'], { type: 'audio/mpeg' }),
+    })).resolves.toEqual({ providerVoiceId: 'voice-malformed', requiresVerification: true });
+    await expect(explicitFalse.createInstantClone({
+      name: 'Ready',
+      sample: new Blob(['audio'], { type: 'audio/mpeg' }),
+    })).resolves.toEqual({ providerVoiceId: 'voice-ready', requiresVerification: false });
+  });
+
   it('does not surface raw provider failure bodies', async () => {
     const provider = new ElevenLabsVoiceCloneProvider('secret-key', async () => new Response(
       'sensitive provider body secret-token',
