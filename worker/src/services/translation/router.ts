@@ -1,3 +1,4 @@
+import type { TargetLanguage } from '../../domain/language';
 import type { SourceLanguage } from '../../domain/project';
 import { isTranslationContextActive, type TranslationContext } from './context';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
@@ -32,6 +33,15 @@ function resolveMode(requested: TranslationMode | undefined, context?: Translati
   return requested;
 }
 
+function assertTarget(provider: TranslationProvider, target: TargetLanguage): void {
+  if (!provider.capabilities.targets.includes(target)) {
+    throw new TranslationProviderError(
+      'TRANSLATION_TARGET_UNSUPPORTED',
+      `Provider does not support target ${String(target)}.`,
+    );
+  }
+}
+
 export class TranslationRouter {
   constructor(
     private readonly workersAI: TranslationProvider,
@@ -43,7 +53,7 @@ export class TranslationRouter {
     requestedMode: TranslationMode | undefined,
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationRouteResult> {
     const mode = resolveMode(requestedMode, context);
@@ -54,6 +64,7 @@ export class TranslationRouter {
           'Contextual translation provider is unavailable.',
         );
       }
+      assertTarget(this.contextual, target);
       return {
         mode,
         primary: await this.contextual.translateBatch(items, source, target, context),
@@ -61,6 +72,7 @@ export class TranslationRouter {
       };
     }
     if (mode === 'workers-ai') {
+      assertTarget(this.workersAI, target);
       return {
         mode,
         primary: await this.workersAI.translateBatch(items, source, target, context),
@@ -68,6 +80,7 @@ export class TranslationRouter {
       };
     }
     if (mode === 'google') {
+      assertTarget(this.google, target);
       return {
         mode,
         primary: await this.google.translateBatch(items, source, target, context),
@@ -75,6 +88,8 @@ export class TranslationRouter {
       };
     }
     if (mode === 'compare') {
+      assertTarget(this.workersAI, target);
+      assertTarget(this.google, target);
       const [workersAI, google] = await Promise.all([
         this.workersAI.translateBatch(items, source, target, context),
         this.google.translateBatch(items, source, target, context),
