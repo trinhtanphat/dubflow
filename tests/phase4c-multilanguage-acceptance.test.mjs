@@ -25,15 +25,18 @@ test('Phase 4C stores translation variants separately and backfills Vietnamese c
   assert.match(migration, /translated_text/);
   assert.match(migration, /translation_engine/);
   assert.match(migration, /translation_status/);
+  assert.match(migration, /voice_status TEXT NOT NULL DEFAULT 'pending'/);
+  assert.match(migration, /dubbed_object_key TEXT/);
 });
 
-test('Phase 4C stores immutable target/output export attempts and backfills legacy Vietnamese dubbed export', () => {
+test('Phase 4C stores immutable target/output export attempts with batch and invalidation state', () => {
   assert.match(migration, /CREATE TABLE(?: IF NOT EXISTS)? project_exports/);
   assert.match(migration, /id TEXT PRIMARY KEY/);
   assert.match(migration, /target_language TEXT NOT NULL/);
-  assert.match(migration, /output_mode TEXT NOT NULL/);
-  assert.match(migration, /'dubbed'/);
-  assert.match(migration, /'subtitles'/);
+  assert.match(migration, /output TEXT NOT NULL CHECK \(output IN \('dubbed','subtitles'\)\)/);
+  assert.doesNotMatch(migration, /output_mode TEXT NOT NULL/);
+  assert.match(migration, /batch_id TEXT/);
+  assert.match(migration, /CHECK \(status IN \([^)]*'invalidated'[^)]*\)\)/);
   assert.match(migration, /export_object_key/);
   assert.match(migration, /subtitle_object_key/);
   assert.match(migration, /INSERT(?: OR IGNORE)? INTO project_exports[\s\S]*export_object_key IS NOT NULL/);
