@@ -8,7 +8,7 @@
     "test": "vitest run",
     "typecheck": "tsc -b",
     "build": "tsc -b && vite build",
-    "verify:deploy-config": "node --test tests/deploy-config.test.mjs tests/deploy-plan.test.mjs tests/deploy-workflow.test.mjs tests/verify-deployment.test.mjs tests/deployment-status.test.mjs tests/reference-fidelity.test.mjs tests/render-export-duration.test.mjs tests/reduced-motion.test.mjs tests/studio-v2-acceptance.test.mjs tests/phase3b-usage-acceptance.test.mjs",
+    "verify:deploy-config": "node --test tests/deploy-config.test.mjs tests/deploy-plan.test.mjs tests/deploy-workflow.test.mjs tests/verify-deployment.test.mjs tests/deployment-status.test.mjs tests/reference-fidelity.test.mjs tests/render-export-duration.test.mjs tests/reduced-motion.test.mjs tests/studio-v2-acceptance.test.mjs tests/phase3b-usage-acceptance.test.mjs tests/phase4a-translation-context-acceptance.test.mjs",
     "verify": "npm run verify:deploy-config && npm run test && npm run build",
     "deploy": "node scripts/cloudflare-deploy.mjs",
     "deploy:raw": "wrangler deploy"
