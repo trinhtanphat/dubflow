@@ -126,7 +126,7 @@ export function createVoiceCloneRoutes(
       validateVoiceCloneSample(bytes.byteLength, contentType);
       if (!c.env.MEDIA.put) throw new VoiceCloneRouteError('VOICE_CLONE_SAMPLE_INVALID', 'Voice clone sample storage is unavailable.', 503);
       const key = voiceCloneSampleKey(projectId, cloneId);
-      await c.env.MEDIA.put(key, new Blob([bytes], { type: contentType }));
+      await c.env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
       return c.json({ cloneId, uploaded: true, size: bytes.byteLength });
     } catch (error) {
       const safe = routeError(error);
