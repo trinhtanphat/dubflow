@@ -40,3 +40,4 @@ jobs:
           echo "repo_connection_http=$status"
           jq -c '{success,errors,messages,result:{repo_connection_uuid:.result.repo_connection_uuid,repo_id:.result.repo_id,repo_name:.result.repo_name,provider_type:.result.provider_type,provider_account_id:.result.provider_account_id,provider_account_name:.result.provider_account_name}}' "$body" || cat "$body"
           jq -e '.success == true and (.result.repo_connection_uuid | type == "string")' "$body" >/dev/null
+          echo 'Repository connection bootstrap completed.'
