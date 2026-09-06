@@ -17,9 +17,10 @@ The current source implements:
 ```text
 R2 multipart media upload
 -> durable Cloudflare Workflow job
--> FFmpeg Cloudflare Container probe + bounded 5-minute audio chunks
+-> FFmpeg Cloudflare Container probe + bounded 300-second ASR windows with 8-second overlap
 -> Deepgram Nova-3 diarized ASR when DEEPGRAM_API_KEY is configured
    OR Workers AI Whisper fallback when it is absent
+-> conservative overlap duplicate suppression + evidence-based cross-chunk speaker stitching
 -> deterministic/atomic D1 speaker + transcript persistence
 -> Workers AI translation by default
 -> project/job terminal state
@@ -30,7 +31,7 @@ R2 multipart media upload
 -> final R2 export artifact
 ```
 
-Deepgram speaker identities are currently **chunk-scoped**. A speaker index returned in one 5-minute request is not assumed to be the same person as the same index in another chunk. Cross-chunk identity stitching therefore remains unqualified and is not represented as implemented.
+Phase 4A replaces the deliberately chunk-only source behavior with **conservative cross-chunk stitching**. Adjacent ASR windows overlap by eight seconds. Duplicate utterances are candidates only when normalized text agrees, global timing agrees within the bounded tolerance, and the utterances actually overlap in time. A cross-chunk speaker union is accepted only when both segment matching and speaker mapping are unambiguous one-to-one relationships. Matching numeric speaker indexes, text alone, names, or other guesses are not evidence. Ambiguous or missing evidence remains split into deterministic chunk-scoped identities. Workers AI Whisper can use the same overlap duplicate suppression but never receives an invented speaker identity.
 
 Per-speaker voice assignment is persisted on the existing D1 `speakers` records. Changing a speaker voice invalidates that speaker's previously generated dubbed segment audio plus any published project export before the next render; renaming a speaker does not discard valid audio. Missing per-speaker voice IDs continue to use the configured ElevenLabs default voice rather than fabricating an assignment.
 
@@ -60,6 +61,14 @@ Final exported media can be shared through owner-managed, revocable links. Owner
 
 The Phase 3C acceptance gates verify the Cloudflare bindings, distinct limiter namespaces, admission ordering, no-expensive-side-effect rejection boundaries, token-hash persistence, 256-bit secret generation, non-secret owner list contract, public token route, owner/share Range parity, telemetry/billing isolation, one-time-link semantics, and compact responsive Studio sharing surface. This is repository source/configuration qualification only. Production deployment remains **manual-only**, no Phase 3C production deploy is performed by this qualification work, and production runtime remains **UNQUALIFIED** until the documented Container credential and real provider/media fixture gates pass.
 
+## Phase 4A cross-chunk speaker stitching qualification
+
+Phase 4A source/CI qualification adds bounded overlapping ASR analysis windows and a pure conservative stitching layer. The FFmpeg Container requests at most 300 seconds per ASR window with an eight-second overlap; the next normal window starts 292 seconds after the previous one. Returned offsets are the real analysis-window starts. Phase 3B metering remains authoritative and records the actual duration of every WAV sent to the ASR provider, including overlap seconds.
+
+The stitching layer normalizes overlap text with Unicode NFKC, whitespace collapse and case normalization, requires start/end agreement within 1,500 ms plus at least 50% temporal intersection of the shorter utterance, and first resolves duplicate segments one-to-one. Only then may diarized speaker evidence be considered. A local speaker is joined across the boundary only when its candidate mapping is unique in both directions. Accepted local identities receive one deterministic project speaker ID; singleton/ambiguous identities preserve the same deterministic chunk-scoped hash behavior. The later copy of a confidently matched overlap utterance is removed before D1 persistence, while unrelated overlap speech remains intact.
+
+These Phase 4A contracts are **source/CI qualification only**. They do not prove that production Deepgram diarization produces correct real-world cross-chunk identities. Production deployment remains **manual-only** and is not performed by Phase 4A. Production runtime remains **UNQUALIFIED** until the Cloudflare Container credential and real provider/media fixtures pass, including a valid `DEEPGRAM_API_KEY` fixture that demonstrates persisted speaker-linked segments across a real chunk boundary.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
@@ -70,6 +79,6 @@ Studio Pro V2 source acceptance covers the real media player, direct timeline ma
 
 ## Qualification status
 
-A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
+A GREEN source CI and Wrangler dry-run qualify the repository source/configuration only. Production runtime PASS requires a real supported media fixture to traverse the deployed flow. For diarization qualification, the production fixture must be run with a valid `DEEPGRAM_API_KEY` and must return persisted speaker-linked segments, including a real cross-window boundary before Phase 4A stitching can be called production-qualified. For final export qualification, a real ElevenLabs/FFmpeg run must write the final R2 artifact and make it retrievable through the export path; per-speaker voice routing is not production-qualified until that fixture verifies distinct configured voice IDs on real segments.
 
 If those live fixtures have not been executed successfully, runtime status remains **UNQUALIFIED** rather than PASS. Cloudflare, Google, Deepgram, and ElevenLabs secret values are never committed to the repository.
