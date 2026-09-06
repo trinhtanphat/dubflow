@@ -14,7 +14,7 @@ export function parseTargetLanguage(value: unknown, fallback: TargetLanguage = '
   return value;
 }
 
-export function parseBatchTargetLanguages(value: unknown): TargetLanguage[] {
+function parseTargetLanguageList(value: unknown): TargetLanguage[] {
   if (!Array.isArray(value)) throw new Error('targetLanguages must be an array.');
   const result: TargetLanguage[] = [];
   for (const raw of value) {
@@ -22,6 +22,15 @@ export function parseBatchTargetLanguages(value: unknown): TargetLanguage[] {
     if (!result.includes(target)) result.push(target);
   }
   if (result.length === 0) throw new Error('At least one target language is required.');
+  return result;
+}
+
+export function parseProjectTargetLanguages(value: unknown): TargetLanguage[] {
+  return parseTargetLanguageList(value);
+}
+
+export function parseBatchTargetLanguages(value: unknown): TargetLanguage[] {
+  const result = parseTargetLanguageList(value);
   if (result.length > MAX_BATCH_TARGET_LANGUAGES) throw new Error(`Select at most ${MAX_BATCH_TARGET_LANGUAGES} target languages.`);
   return result;
 }
