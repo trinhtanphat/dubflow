@@ -1,0 +1,75 @@
+name: Attach YupVox domain to current Worker account
+
+on:
+  push:
+    branches:
+      - repair/yupvox-current-account-domain
+
+permissions:
+  contents: read
+
+jobs:
+  attach-and-probe:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CURRENT_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      ZONE_ID: d80d8f388d64d7daf445f0a02e36ebae
+      HOSTNAME: yupvox.qs3d.site
+      SERVICE: dubflow
+    steps:
+      - name: Attempt current-account custom-domain attachment without detaching legacy
+        id: attach
+        shell: bash
+        run: |
+          set -u
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          payload="$(jq -nc \
+            --arg hostname "$HOSTNAME" \
+            --arg service "$SERVICE" \
+            --arg zone_id "$ZONE_ID" \
+            --arg zone_name 'qs3d.site' \
+            '{hostname:$hostname,service:$service,zone_id:$zone_id,zone_name:$zone_name}')"
+
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --location \
+            --output "$body" --write-out '%{http_code}' \
+            "$api/accounts/$CURRENT_ACCOUNT_ID/workers/domains" \
+            -X PUT -H "$auth" -H 'Content-Type: application/json' --data "$payload" || printf '000')"
+
+          echo "attach_http=$status"
+          jq -c '{success,errors,messages,result}' "$body" || cat "$body"
+          success="$(jq -r '.success // false' "$body" 2>/dev/null || echo false)"
+          echo "success=$success" >> "$GITHUB_OUTPUT"
+          rm -f "$body"
+
+      - name: Read both account bindings after attachment attempt
+        shell: bash
+        run: |
+          set -u
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
+          echo '=== current account ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/domains?hostname=$HOSTNAME" | jq -c '{success,errors,result}'
+          echo '=== legacy account ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/domains?hostname=$HOSTNAME" | jq -c '{success,errors,result}'
+
+      - name: Probe live hostname and current Worker endpoint
+        shell: bash
+        run: |
+          set -u
+          probe_base() {
+            local base="$1"
+            echo "=== $base ==="
+            for path in /api/ready /api/projects /api/usage; do
+              body="$(mktemp)"
+              code="$(curl --silent --show-error --location --output "$body" --write-out '%{http_code}' --max-time 20 "$base$path" || printf '000')"
+              echo "$path status=$code body=$(cat "$body")"
+              rm -f "$body"
+            done
+          }
+          probe_base 'https://dubflow.hikvision.workers.dev'
+          probe_base 'https://yupvox.qs3d.site'
