@@ -2,6 +2,8 @@ export type AudioChunk = {
   objectKey: string;
   offsetMs: number;
   durationMs: number;
+  overlapBeforeMs: number;
+  overlapAfterMs: number;
 };
 
 export type ExportClip = {

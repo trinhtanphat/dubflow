@@ -57,6 +57,8 @@ function baseInfra(persisted: ReturnType<typeof persistedSegment>[], usageEvents
           objectKey: 'projects/project-1/audio/000.wav',
           offsetMs: 0,
           durationMs: Math.max(1000, persisted.length * 1000),
+          overlapBeforeMs: 0,
+          overlapAfterMs: 0,
         }];
       },
     },
@@ -110,6 +112,7 @@ describe('dubbing workflow translation context snapshot', () => {
     const deps = {
       ...infra,
       segments: {
+        async list() { return []; },
         async replaceFromAsr() { return persisted; },
         async setTranslationResult(
           _projectId: string,
@@ -209,6 +212,7 @@ describe('dubbing workflow translation context snapshot', () => {
     const deps = {
       ...infra,
       segments: {
+        async list() { return []; },
         async replaceFromAsr() { return persisted; },
         async setTranslationResult(
           _projectId: string,

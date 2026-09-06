@@ -1,13 +1,13 @@
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
-import { buildAudioWindows } from './audio-windows.mjs';
+import { buildAudioChunkWindows } from './audio-chunks.mjs';
 import { buildRenderExportArgs, validateRenderExportInput } from './render-export.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -85,34 +85,37 @@ async function probe(input) {
 }
 
 async function extractAudioChunks(input) {
-  const chunkSeconds = Number(input.chunkSeconds ?? 300);
-  const overlapSeconds = Number(input.overlapSeconds ?? 0);
   return withSource(input, async ({ root, source }) => {
     const sourceDurationMs = await durationMs(source);
-    const windows = buildAudioWindows(sourceDurationMs, chunkSeconds, overlapSeconds);
-    if (windows.length === 0) throw new Error('FFmpeg produced no audio chunks.');
-
+    const windows = buildAudioChunkWindows(sourceDurationMs);
     const chunks = [];
+
     for (let index = 0; index < windows.length; index += 1) {
       const window = windows[index];
       const filePath = join(root, `chunk-${String(index).padStart(5, '0')}.wav`);
       await execFileAsync('ffmpeg', [
         '-nostdin', '-y', '-v', 'error',
-        '-ss', String(window.offsetMs / 1000),
+        '-ss', (window.offsetMs / 1000).toFixed(3),
         '-i', source,
-        '-t', String(window.durationMs / 1000),
+        '-t', (window.durationMs / 1000).toFixed(3),
         '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le',
         filePath,
       ], { maxBuffer: 1024 * 1024 });
 
       const objectKey = `projects/${input.projectId}/audio/${String(index).padStart(5, '0')}.wav`;
-      await uploadFile(objectKey, filePath, 'audio/wav');
+      const body = await readFile(filePath);
+      const uploaded = await fetch(r2Url(objectKey), { method: 'PUT', body });
+      if (!uploaded.ok) throw new Error(`Unable to write audio chunk ${index} to R2 (${uploaded.status}).`);
       chunks.push({
         objectKey,
         offsetMs: window.offsetMs,
         durationMs: await durationMs(filePath),
+        overlapBeforeMs: window.overlapBeforeMs,
+        overlapAfterMs: window.overlapAfterMs,
       });
     }
+
+    if (chunks.length === 0) throw new Error('FFmpeg produced no audio chunks.');
     return { chunks };
   });
 }

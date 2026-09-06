@@ -86,26 +86,29 @@ export class ContainerMediaProcessor implements MediaProcessor {
     const result = await this.call(projectId, '/extract-audio-chunks', {
       projectId,
       objectKey,
-      chunkSeconds: 300,
-      overlapSeconds: 8,
     }) as { chunks?: unknown };
     if (!Array.isArray(result.chunks) || result.chunks.length === 0) {
       throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned no audio chunks.');
     }
     return result.chunks.map((raw) => {
       const chunk = raw as Partial<AudioChunk>;
+      const durationMs = assertDuration(chunk.durationMs);
       if (
         typeof chunk.objectKey !== 'string' ||
         !chunk.objectKey.startsWith(`${projectPrefix(projectId)}audio/`) ||
         typeof chunk.offsetMs !== 'number' || !Number.isInteger(chunk.offsetMs) || chunk.offsetMs < 0 ||
-        typeof chunk.durationMs !== 'number' || !Number.isFinite(chunk.durationMs) || chunk.durationMs <= 0
+        typeof chunk.overlapBeforeMs !== 'number' || !Number.isInteger(chunk.overlapBeforeMs) || chunk.overlapBeforeMs < 0 ||
+        typeof chunk.overlapAfterMs !== 'number' || !Number.isInteger(chunk.overlapAfterMs) || chunk.overlapAfterMs < 0 ||
+        chunk.overlapBeforeMs > durationMs || chunk.overlapAfterMs > durationMs
       ) {
         throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned a malformed audio chunk.');
       }
       return {
         objectKey: chunk.objectKey,
         offsetMs: chunk.offsetMs,
-        durationMs: Math.round(chunk.durationMs),
+        durationMs,
+        overlapBeforeMs: chunk.overlapBeforeMs,
+        overlapAfterMs: chunk.overlapAfterMs,
       };
     });
   }
