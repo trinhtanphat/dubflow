@@ -33,7 +33,7 @@ If a Cloudflare build or deploy fails, fix the relevant source/configuration in 
 
 This project deploys an FFmpeg Cloudflare Container, so the **API token selected by Cloudflare Workers Builds** must be authorized for Containers. This is the token configured in the Cloudflare dashboard under the Worker at **Settings > Builds**; it is not a GitHub Actions secret and it must not be committed to this repository.
 
-The Workers Builds token must include the normal Worker/resource permissions needed by this project and **Containers Edit** for the production account `6c5207813df3d5b83b9508125e0e9e12`.
+The Workers Builds token must include the normal Worker/resource permissions needed by this project and **Containers Edit** for the production account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`.
 
 A characteristic permission failure is:
 
