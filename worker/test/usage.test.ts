@@ -102,6 +102,24 @@ describe('UsageRepository', () => {
     await expect(repo.getByOperation('missing', 'completed')).resolves.toBeNull();
   });
 
+  it('supports project-scoped audio separation minutes as a first-class canonical usage kind', async () => {
+    const memory = usageDb();
+    const repo = new UsageRepository(memory.db);
+    const operationKey = 'project:p1:source:3:separation:demucs-container:sha256:8726e21a';
+    await repo.record({
+      userId: 'u1', projectId: 'p1', jobId: 'sep-job', kind: 'audio_separation_minute',
+      units: 1.5, provider: 'demucs-container', phase: 'started', operationKey,
+    });
+    await repo.record({
+      userId: 'u1', projectId: 'p1', jobId: 'sep-job', kind: 'audio_separation_minute',
+      units: 1.5, provider: 'demucs-container', phase: 'completed', operationKey,
+    });
+    await expect(repo.summarizeForProject('p1', 'u1')).resolves.toMatchObject({
+      totals: { audioSeparationMinutes: 1.5 },
+      providers: { 'demucs-container': { audioSeparationMinutes: 1.5 } },
+    });
+  });
+
   it('summarizes completed usage only in canonical base units with provider precision', async () => {
     const memory = usageDb();
     const repo = new UsageRepository(memory.db);
@@ -112,12 +130,12 @@ describe('UsageRepository', () => {
     await repo.record({ ...base, kind: 'render_second', units: 142.375, provider: 'ffmpeg-container', operationKey: 'job:j1:retry:0:render:final:ffmpeg-container' });
 
     await expect(repo.summarizeForUser('u1')).resolves.toEqual({
-      totals: { asrAudioSeconds: 75.125, translationCharacters: 17, ttsAudioSeconds: 3.125, renderSeconds: 142.375 },
+      totals: { asrAudioSeconds: 75.125, translationCharacters: 17, ttsAudioSeconds: 3.125, renderSeconds: 142.375, audioSeparationMinutes: 0 },
       providers: {
-        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0 },
-        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, renderSeconds: 0 },
-        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, renderSeconds: 0 },
-        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 142.375 },
+        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0, audioSeparationMinutes: 0 },
+        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, renderSeconds: 0, audioSeparationMinutes: 0 },
+        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, renderSeconds: 0, audioSeparationMinutes: 0 },
+        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 142.375, audioSeparationMinutes: 0 },
       },
     });
   });
