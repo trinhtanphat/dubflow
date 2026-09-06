@@ -7,6 +7,7 @@ import { createUploadRoutes } from './routes/uploads';
 import { createVoiceRoutes } from './routes/voice';
 import { createVoiceCloneRoutes } from './routes/voice-clones';
 import { createProcessRoutes } from './routes/process';
+import { createSeparationRoutes } from './routes/separation';
 import { createExportRoutes } from './routes/export';
 import { createSegmentRoutes } from './routes/segments';
 import { createSpeakerRoutes } from './routes/speakers';
@@ -18,6 +19,7 @@ import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
+import { separationCapabilities } from './services/separation/config';
 
 const app = new Hono<WorkerHonoEnv>();
 const exportRoutes = createExportRoutes();
@@ -27,12 +29,17 @@ const translationVariantRoutes = createTranslationVariantRoutes();
 app.use('/api/*', requestTelemetryMiddleware());
 app.get('/api/health', (c) => c.json(healthPayload()));
 app.get('/api/ready', async (c) => {
-  const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY);
+  const readiness = await checkReadiness(
+    c.env.DB,
+    c.env.DEEPGRAM_API_KEY,
+    separationCapabilities(c.env),
+  );
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });
 app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
+app.route('/api/projects', createSeparationRoutes());
 app.route('/api/projects', exportRoutes);
 app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());

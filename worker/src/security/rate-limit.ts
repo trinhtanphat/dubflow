@@ -1,19 +1,23 @@
 import type { Context } from 'hono';
-import type { Env } from '../env';
+import type { Env, RateLimitBindingLike } from '../env';
 import { errorBody } from '../http/json';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 
-export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone' | 'batch-export';
+export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone' | 'batch-export' | 'separation';
 
-const bindingName = {
-  process: 'RATE_LIMIT_PROCESS',
-  export: 'RATE_LIMIT_EXPORT',
-  translate: 'RATE_LIMIT_TRANSLATE',
-  voice: 'RATE_LIMIT_VOICE',
-  upload: 'RATE_LIMIT_UPLOAD',
-  'voice-clone': 'RATE_LIMIT_VOICE_CLONE',
-  'batch-export': 'RATE_LIMIT_BATCH_EXPORT',
-} as const satisfies Record<RateLimitOperation, keyof Env>;
+function bindingFor(env: Env, operation: RateLimitOperation): RateLimitBindingLike {
+  const bindings: Record<RateLimitOperation, RateLimitBindingLike> = {
+    process: env.RATE_LIMIT_PROCESS,
+    export: env.RATE_LIMIT_EXPORT,
+    translate: env.RATE_LIMIT_TRANSLATE,
+    voice: env.RATE_LIMIT_VOICE,
+    upload: env.RATE_LIMIT_UPLOAD,
+    'voice-clone': env.RATE_LIMIT_VOICE_CLONE,
+    'batch-export': env.RATE_LIMIT_BATCH_EXPORT,
+    separation: env.RATE_LIMIT_SEPARATION,
+  };
+  return bindings[operation];
+}
 
 export async function checkRateLimit(
   env: Env,
@@ -22,7 +26,7 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; retryAfterSeconds: 60 }> {
   const actor = userId.trim();
   if (!actor) throw new Error('Rate-limit actor is required.');
-  const result = await env[bindingName[operation]].limit({ key: `${actor}:${operation}` });
+  const result = await bindingFor(env, operation).limit({ key: `${actor}:${operation}` });
   return { allowed: result.success, retryAfterSeconds: 60 };
 }
 

@@ -8,6 +8,9 @@ const fullSchema = {
   target_languages_revision_column: 1,
   project_target_languages_table: 1,
   project_exports_output_column: 1,
+  source_revision_column: 1,
+  project_audio_separations_table: 1,
+  project_exports_mix_mode_column: 1,
 };
 
 describe('checkReadiness', () => {
@@ -69,6 +72,9 @@ describe('checkReadiness', () => {
               target_languages_revision_column: 0,
               project_target_languages_table: 0,
               project_exports_output_column: 0,
+              source_revision_column: 0,
+              project_audio_separations_table: 0,
+              project_exports_mix_mode_column: 0,
             } as T;
           },
         };
@@ -130,6 +136,31 @@ describe('checkReadiness', () => {
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
       },
+    });
+  });
+
+  it('reports separation capability explicitly without treating qualification as service readiness', async () => {
+    const db = {
+      prepare() {
+        return {
+          async first<T>() {
+            return fullSchema as T;
+          },
+        };
+      },
+    };
+    const separation = {
+      configured: true,
+      qualified: false,
+      provider: 'demucs-container',
+      modelId: 'htdemucs',
+      modelDigest: 'sha256:8726e21a',
+    };
+
+    await expect(checkReadiness(db, undefined, separation)).resolves.toMatchObject({
+      ready: true,
+      database: 'ready',
+      separation,
     });
   });
 });
