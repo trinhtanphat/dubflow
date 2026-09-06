@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const status = fs.readFileSync(new URL('../docs/deployment-status.md', import.meta.url), 'utf8');
+const policy = fs.readFileSync(new URL('../docs/DEPLOYMENT-POLICY.md', import.meta.url), 'utf8');
 
-test('deployment status pins production hostname and GitHub Actions contract', () => {
+test('deployment status pins production hostname and Workers Builds contract', () => {
   assert.match(status, /yupvox\.qs3d\.site/);
-  assert.match(status, /GitHub Actions is enabled/);
-  assert.match(status, /CLOUDFLARE_API_TOKEN/);
-  assert.match(status, /manual-only/i);
-  assert.match(status, /Containers (?:Write|Edit)/);
+  assert.match(status, /6c5207813df3d5b83b9508125e0e9e12/);
+  assert.match(policy, /Cloudflare Workers Builds/i);
+  assert.match(policy, /GitHub Actions is CI only/i);
+  assert.match(policy, /must not deploy production/i);
+  assert.match(policy, /main/);
 });

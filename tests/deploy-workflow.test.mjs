@@ -2,21 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const workflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
+const deployWorkflowUrl = new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url);
+const ciWorkflow = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const policyUrl = new URL('../docs/DEPLOYMENT-POLICY.md', import.meta.url);
 
-test('Cloudflare deployment is manual-only while container credentials are externally qualified', () => {
-  assert.doesNotMatch(workflow, /^  push:\s*$/m);
-  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+test('GitHub Actions never performs production deploys', () => {
+  assert.equal(fs.existsSync(deployWorkflowUrl), false, 'remove the GitHub production deploy workflow');
+  assert.doesNotMatch(ciWorkflow, /wrangler\s+deploy(?!\s+--dry-run)/i);
+  assert.doesNotMatch(ciWorkflow, /CLOUDFLARE_API_TOKEN/);
 });
 
-test('production deploy wires optional translation, diarization and ElevenLabs voice secrets without committing values', () => {
-  assert.match(workflow, /GOOGLE_CLOUD_TRANSLATE_API_KEY:\s*\$\{\{ secrets\.GOOGLE_CLOUD_TRANSLATE_API_KEY \}\}/);
-  assert.match(workflow, /DEEPGRAM_API_KEY:\s*\$\{\{ secrets\.DEEPGRAM_API_KEY \}\}/);
-  assert.match(workflow, /ELEVENLABS_API_KEY:\s*\$\{\{ secrets\.ELEVENLABS_API_KEY \}\}/);
-  assert.match(workflow, /ELEVENLABS_DEFAULT_VOICE_ID:\s*\$\{\{ secrets\.ELEVENLABS_DEFAULT_VOICE_ID \}\}/);
-  assert.match(workflow, /wrangler secret put DEEPGRAM_API_KEY/);
-  assert.match(workflow, /wrangler secret put ELEVENLABS_API_KEY/);
-  assert.match(workflow, /wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID/);
-  assert.doesNotMatch(workflow, /Authorization:\s*Token\s+[A-Za-z0-9]/i);
-  assert.doesNotMatch(workflow, /xi-api-key:\s*[A-Za-z0-9]/i);
+test('Cloudflare Workers Builds is the only production deployment lane', () => {
+  assert.equal(fs.existsSync(policyUrl), true, 'document the deployment policy');
+  const policy = fs.readFileSync(policyUrl, 'utf8');
+  assert.match(policy, /Cloudflare Workers Builds/i);
+  assert.match(policy, /main/i);
+  assert.match(policy, /automatic(?:ally)? build/i);
+  assert.match(policy, /automatic(?:ally)? deploy/i);
+  assert.match(policy, /GitHub Actions.*CI/i);
+  assert.match(policy, /must not deploy/i);
+});
+
+test('Workers Builds container deploy token requirement is documented', () => {
+  const policy = fs.readFileSync(policyUrl, 'utf8');
+  assert.match(policy, /Workers Builds.*API token/is);
+  assert.match(policy, /Containers Edit/i);
+  assert.match(policy, /Settings\s*>\s*Builds/i);
+  assert.match(policy, /Unauthorized/i);
+  assert.match(policy, /do not.*GitHub.*deploy/is);
 });

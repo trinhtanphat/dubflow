@@ -12,6 +12,7 @@ const exportRoute = read('worker/src/routes/export.ts');
 const studio = read('src/app/StudioShell.tsx');
 const packageJson = read('package.json');
 const deploymentStatus = read('docs/deployment-status.md');
+const deploymentPolicy = read('docs/DEPLOYMENT-POLICY.md');
 
 test('Phase 4C source keeps canonical segments and exact target-language variants', () => {
   assert.match(migration, /CREATE TABLE(?: IF NOT EXISTS)? segment_translations/);
@@ -56,12 +57,12 @@ test('Phase 4C verification keeps prior safety acceptance lanes wired', () => {
   }
 });
 
-test('Phase 4C deployment status is source-qualified only and runtime remains unqualified', () => {
-  assert.match(deploymentStatus, /## Phase 4C batch multi-language translation and export qualification/);
-  assert.match(deploymentStatus, /`vi`, `en`, `zh`, `ja`, and `ko`/);
-  assert.match(deploymentStatus, /Vietnamese compatibility bridge/);
-  assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/);
-  assert.match(deploymentStatus, /manual-only/);
-  assert.match(deploymentStatus, /real provider\/model\/voice\/media fixtures/i);
+test('Phase 4C remains source-qualified while production follows the single Workers Builds lane', () => {
+  assert.match(deploymentStatus, /## Phase 4C .*multi-language.*export qualification/i);
+  for (const target of ['vi', 'en', 'zh', 'ja', 'ko']) assert.match(deploymentStatus, new RegExp(`\\b${target}\\b`));
+  assert.match(deploymentStatus, /Vietnamese[\s\S]*(?:compatibility|backward compatibility)/i);
+  assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/i);
+  assert.match(deploymentPolicy, /Cloudflare Workers Builds is the only production deployment lane/i);
+  assert.match(deploymentStatus, /real .*provider.*media.*fixture/is);
   assert.doesNotMatch(deploymentStatus, /Phase 4C production runtime[^\n]*(?:PASS|qualified)/i);
 });
