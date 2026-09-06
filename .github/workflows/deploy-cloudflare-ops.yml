@@ -1,4 +1,4 @@
-name: Cloudflare Analytics Binding Probe
+name: Deploy Cloudflare Ops
 
 on:
   push:
@@ -10,15 +10,22 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-cloudflare-production
+  cancel-in-progress: false
+
 jobs:
-  probe:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     environment: production
     env:
       CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      PROBE_WORKER: dubflow-analytics-entitlement-probe
+      GOOGLE_CLOUD_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_CLOUD_TRANSLATE_API_KEY }}
+      DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+      ELEVENLABS_DEFAULT_VOICE_ID: ${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -39,51 +46,28 @@ jobs:
             exit 1
           fi
 
-      - name: Confirm Analytics Engine SQL API
-        shell: bash
-        run: |
-          set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/ae-sql.json --write-out '%{http_code}' \
-            --request POST \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/analytics_engine/sql" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            --header 'Content-Type: text/plain' \
-            --data 'SHOW TABLES')"
-          echo "Analytics Engine SQL HTTP status: ${code}"
-          cat /tmp/ae-sql.json
-          echo
-          test "$code" = "200"
+      - name: Verify and deploy YupVox
+        run: npm run deploy
 
-      - name: Create minimal Analytics Engine probe worker files
+      - name: Sync optional Google Translation secret
+        if: ${{ env.GOOGLE_CLOUD_TRANSLATE_API_KEY != '' }}
         shell: bash
-        run: |
-          mkdir -p /tmp/ae-probe
-          cat > /tmp/ae-probe/index.js <<'EOF'
-          export default {
-            async fetch(_request, env) {
-              env.ANALYTICS.writeDataPoint({ blobs: ['probe'], doubles: [1], indexes: ['probe'] });
-              return new Response('ok');
-            }
-          };
-          EOF
-          cat > /tmp/ae-probe/wrangler.jsonc <<EOF
-          {
-            "name": "${PROBE_WORKER}",
-            "account_id": "${CLOUDFLARE_ACCOUNT_ID}",
-            "main": "index.js",
-            "compatibility_date": "2026-09-05",
-            "workers_dev": true,
-            "analytics_engine_datasets": [
-              { "binding": "ANALYTICS", "dataset": "dubflow_entitlement_probe" }
-            ]
-          }
-          EOF
+        run: printf '%s' "$GOOGLE_CLOUD_TRANSLATE_API_KEY" | npx wrangler secret put GOOGLE_CLOUD_TRANSLATE_API_KEY
 
-      - name: Deploy minimal Analytics Engine binding probe
-        working-directory: /tmp/ae-probe
-        run: npx --prefix "$GITHUB_WORKSPACE" wrangler deploy --config wrangler.jsonc
-
-      - name: Delete minimal probe worker
-        if: ${{ always() }}
+      - name: Sync optional Deepgram diarization secret
+        if: ${{ env.DEEPGRAM_API_KEY != '' }}
         shell: bash
-        run: npx wrangler delete --name "$PROBE_WORKER" --force >/dev/null 2>&1 || true
+        run: printf '%s' "$DEEPGRAM_API_KEY" | npx wrangler secret put DEEPGRAM_API_KEY
+
+      - name: Sync optional ElevenLabs API key
+        if: ${{ env.ELEVENLABS_API_KEY != '' }}
+        shell: bash
+        run: printf '%s' "$ELEVENLABS_API_KEY" | npx wrangler secret put ELEVENLABS_API_KEY
+
+      - name: Sync optional ElevenLabs default voice
+        if: ${{ env.ELEVENLABS_DEFAULT_VOICE_ID != '' }}
+        shell: bash
+        run: printf '%s' "$ELEVENLABS_DEFAULT_VOICE_ID" | npx wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID
+
+      - name: Verify production readiness after secret sync
+        run: node scripts/verify-deployment.mjs
