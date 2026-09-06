@@ -27,7 +27,9 @@ jobs:
           node -e "const fs=require('fs'); const b=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (b.ready !== true || b.service !== 'dubflow' || b.database !== 'ready') process.exit(1)" "$ready_body"
 
           for path in projects usage; do
-            status="$(curl --retry 5 --retry-delay 2 --retry-all-errors -sS -o /dev/null -w '%{http_code}' "https://yupvox.qs3d.site/api/$path")"
+            body="$RUNNER_TEMP/$path.json"
+            status="$(curl --retry 5 --retry-delay 2 --retry-all-errors -sS -o "$body" -w '%{http_code}' "https://yupvox.qs3d.site/api/$path")"
             echo "GET /api/$path -> $status"
             test "$status" = "200"
+            test -s "$body"
           done
