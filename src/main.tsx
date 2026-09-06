@@ -11,5 +11,6 @@ import './app/app.css';
 import './styles/speaker-voice.css';
 import './styles/project-dashboard.css';
 import './styles/reference-fidelity.css';
+import './features/sharing/sharing.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);
