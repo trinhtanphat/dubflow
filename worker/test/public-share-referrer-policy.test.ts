@@ -12,21 +12,25 @@ describe('public share referrer policy', () => {
       c.set('requestId', 'req-referrer');
       await next();
     });
+    const shares: ShareStore = {
+      async create() { throw new Error('not used'); },
+      async listForProject() { return []; },
+      async revoke() { return null; },
+      async resolveActive() {
+        return {
+          id: 's1',
+          projectId: 'p1',
+          tokenHint: 'hint1234',
+          exportObjectKey: 'projects/p1/export/final.mp4',
+          expiresAt: '2026-09-13T00:00:00.000Z',
+          revokedAt: null,
+          createdAt: '2026-09-06T00:00:00.000Z',
+          status: 'active',
+        };
+      },
+    };
     app.route('/api', createPublicShareRoutes({
-      makeShares: () => ({
-        async resolveActive() {
-          return {
-            id: 's1',
-            projectId: 'p1',
-            tokenHint: 'hint1234',
-            exportObjectKey: 'projects/p1/export/final.mp4',
-            expiresAt: '2026-09-13T00:00:00.000Z',
-            revokedAt: null,
-            createdAt: '2026-09-06T00:00:00.000Z',
-            status: 'active' as const,
-          };
-        },
-      } as ShareStore),
+      makeShares: () => shares,
       makeBucket: () => ({
         async get(key) {
           return {
