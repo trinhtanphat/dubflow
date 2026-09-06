@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { checkReadiness } from '../src/routes/readiness';
 
+const fullSchema = {
+  projects_table: 1,
+  project_export_column: 1,
+  usage_operation_column: 1,
+  target_languages_revision_column: 1,
+  project_target_languages_table: 1,
+  project_exports_output_column: 1,
+};
+
 describe('checkReadiness', () => {
-  it('reports ready and configured chunk-scoped diarization after the projects schema exists', async () => {
+  it('reports ready and configured chunk-scoped diarization only after the current production schema exists', async () => {
     const db = {
       prepare() {
         return {
           async first<T>() {
-            return { name: 'projects' } as T;
+            return fullSchema as T;
           },
         };
       },
@@ -30,7 +39,7 @@ describe('checkReadiness', () => {
       prepare() {
         return {
           async first<T>() {
-            return { name: 'projects' } as T;
+            return fullSchema as T;
           },
         };
       },
@@ -44,6 +53,36 @@ describe('checkReadiness', () => {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
+      },
+    });
+  });
+
+  it('fails closed when the projects table exists but required later migrations are missing', async () => {
+    const db = {
+      prepare() {
+        return {
+          async first<T>() {
+            return {
+              projects_table: 1,
+              project_export_column: 0,
+              usage_operation_column: 0,
+              target_languages_revision_column: 0,
+              project_target_languages_table: 0,
+              project_exports_output_column: 0,
+            } as T;
+          },
+        };
+      },
+    };
+
+    await expect(checkReadiness(db, 'dg-secret')).resolves.toEqual({
+      ready: false,
+      service: 'dubflow',
+      database: 'missing-schema',
+      asr: {
+        provider: 'deepgram-nova-3',
+        speakerDiarization: 'configured',
+        speakerIdentityScope: 'chunk',
       },
     });
   });

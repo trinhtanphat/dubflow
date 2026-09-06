@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { deploymentPlan } from '../scripts/cloudflare-deploy.mjs';
 
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
 test('deployment verifies, provisions, migrates, deploys and checks readiness in order', () => {
   assert.deepEqual(deploymentPlan(), [
     ['npm', ['run', 'verify']],
@@ -26,5 +28,24 @@ test('Workers Builds production deploy applies remote D1 migrations before readi
     ['npx', ['wrangler', 'deploy', '--config', '.wrangler-production.json']],
     ['npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote', '--config', '.wrangler-production.json']],
     ['node', ['scripts/verify-deployment.mjs']],
+  ]);
+});
+
+test('Workers Builds build phase applies D1 migrations only for production main', async () => {
+  const scriptUrl = new URL('../scripts/cloudflare-workers-build-migrate.mjs', import.meta.url);
+  assert.equal(
+    fs.existsSync(scriptUrl),
+    true,
+    'npm run build must own a Workers Builds migration hook so dashboard deploy-command drift cannot skip D1 migrations',
+  );
+  assert.match(pkg.scripts.build, /node scripts\/cloudflare-workers-build-migrate\.mjs/);
+
+  const { shouldRunWorkersBuildMigrations, workersBuildMigrationPlan } = await import(scriptUrl.href);
+  assert.equal(shouldRunWorkersBuildMigrations({ WORKERS_CI: '1', WORKERS_CI_BRANCH: 'main' }), true);
+  assert.equal(shouldRunWorkersBuildMigrations({ WORKERS_CI: '1', WORKERS_CI_BRANCH: 'feature/test' }), false);
+  assert.equal(shouldRunWorkersBuildMigrations({ CI: 'true' }), false);
+  assert.equal(shouldRunWorkersBuildMigrations({}), false);
+  assert.deepEqual(workersBuildMigrationPlan(), [
+    ['npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote']],
   ]);
 });
