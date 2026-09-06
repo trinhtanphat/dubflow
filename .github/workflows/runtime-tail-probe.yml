@@ -1,0 +1,80 @@
+name: Runtime Tail Probe
+
+on:
+  push:
+    branches:
+      - 'fix/runtime-qualification-probe'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Capture exact production exceptions
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/dubflow-tail.jsonl"
+          : > "$RUNNER_TEMP/dubflow-tail.err"
+          timeout 25s npx wrangler tail dubflow --format json --ip self \
+            > "$RUNNER_TEMP/dubflow-tail.jsonl" \
+            2> "$RUNNER_TEMP/dubflow-tail.err" &
+          TAIL_PID=$!
+          sleep 6
+          for path in ready projects usage; do
+            code="$(curl --silent --show-error --output "$RUNNER_TEMP/$path.body" --write-out '%{http_code}' \
+              -H 'accept: application/json' -H 'cache-control: no-cache' \
+              "https://yupvox.qs3d.site/api/$path")"
+            echo "probe /api/$path status=$code"
+          done
+          sleep 6
+          kill "$TAIL_PID" 2>/dev/null || true
+          wait "$TAIL_PID" 2>/dev/null || true
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const file = `${process.env.RUNNER_TEMP}/dubflow-tail.jsonl`;
+          const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split(/\r?\n/) : [];
+          const wanted = new Set(['/api/ready', '/api/projects', '/api/usage']);
+          let matched = 0;
+          for (const line of lines) {
+            if (!line.trim().startsWith('{')) continue;
+            let item;
+            try { item = JSON.parse(line); } catch { continue; }
+            const rawUrl = item?.event?.request?.url;
+            let pathname = '';
+            try { pathname = rawUrl ? new URL(rawUrl).pathname : ''; } catch {}
+            if (!wanted.has(pathname)) continue;
+            matched += 1;
+            const exceptions = Array.isArray(item?.exceptions) ? item.exceptions : [];
+            const rendered = exceptions.map((exception) => ({
+              name: String(exception?.name ?? '').slice(0, 120),
+              message: String(exception?.message ?? '').slice(0, 700),
+              stack: String(exception?.stack ?? '').split('\n').slice(0, 8).join(' | ').slice(0, 1600),
+            }));
+            console.log(JSON.stringify({ path: pathname, outcome: item?.outcome ?? 'unknown', exceptions: rendered }));
+          }
+          console.log(`matched production trace events=${matched}`);
+          if (matched === 0) process.exit(3);
+          NODE
+
+          echo '--- tail stderr (sanitized first lines) ---'
+          sed -n '1,80p' "$RUNNER_TEMP/dubflow-tail.err" | sed -E 's/(Bearer|token)[^ ]*/\1 [redacted]/Ig' || true
