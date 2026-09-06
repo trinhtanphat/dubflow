@@ -66,6 +66,16 @@ A GREEN Phase 4C source/CI run and Wrangler dry-run do not prove real multi-lang
 
 Merging Phase 4C or later fixes to `main` triggers Cloudflare Workers Builds automatically. There is no separate GitHub production deploy action. Runtime qualification remains fail-closed on real Cloudflare/provider/media evidence even though deployment is automatic.
 
+## Phase 4D dialogue/background separation qualification
+
+Phase 4D is **source/CI qualified only** for opt-in dialogue/background separation during dubbed export. `source_mix` remains the default and does not invoke the separation provider. `preserve_background` is admitted only when the project-scoped export capability reports both the FFmpeg container path and the configured separation-provider path as available; otherwise Studio disables the option and the API fails closed before export job creation.
+
+For `preserve_background`, the workflow derives a deterministic source revision from the immutable source object key, reuses the canonical durable stem pair under `projects/{projectId}/stems/{sourceRevision}/`, and records `stem_separation_audio_second` usage with retry-generation, source-revision and provider identity. A started usage event may recover completion only when the canonical stem pair is already durable; a completed usage event without that pair is treated as inconsistent and fails closed. The final FFmpeg render uses the canonical `background.wav` as the audio bed while continuing to map video from the original source.
+
+Source tests, Phase 4D acceptance, the production TypeScript/Vite build, Wrangler dry-run and Studio screenshot qualification can prove source/configuration integrity, but they do not prove real provider/media behavior. Production runtime for Phase 4D remains **UNQUALIFIED** until a **real separation fixture** on the canonical production deployment demonstrates provider separation, durable dialogue/background artifacts, background-preserving render output and successful retrieval end-to-end. A successful Workers Builds deployment or HTTP readiness response alone is not that fixture.
+
+Merging Phase 4D to `main` continues to use the single Cloudflare Workers Builds production lane. Runtime qualification must remain UNQUALIFIED unless the supported live fixture above succeeds after the exact merged SHA is deployed.
+
 ## Studio reference qualification
 
 Studio CI continues to capture the canonical desktop/reference viewports from the exact tested SHA. Reference screenshots qualify presentation, not real provider/media runtime behavior. Empty-media states remain truthful rather than fabricating uploaded footage.
@@ -74,4 +84,4 @@ Studio CI continues to capture the canonical desktop/reference viewports from th
 
 The production API/schema layer is live-qualified after the 2026-09-06 recovery: readiness reports schema revision 10 and persisted project/usage reads are healthy on `yupvox.qs3d.site`. A GREEN source CI and Wrangler dry-run qualify repository source/configuration. Production deployment is intended to be automatic through Cloudflare Workers Builds whenever `main` changes; GitHub Actions remains CI only and must not deploy production.
 
-Final provider/media runtime qualification still requires real supported fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, those runtime capabilities remain **UNQUALIFIED** rather than PASS.
+Final provider/media runtime qualification still requires real supported fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, for Phase 4C at least two distinct supported target languages through translation/TTS/render/retrieval/sharing, and for Phase 4D a real separation fixture proving durable stems plus a background-preserving final render. Until those live fixtures succeed, those runtime capabilities remain **UNQUALIFIED** rather than PASS.
