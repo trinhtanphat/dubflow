@@ -87,6 +87,7 @@ export class ContainerMediaProcessor implements MediaProcessor {
       projectId,
       objectKey,
       chunkSeconds: 300,
+      overlapSeconds: 8,
     }) as { chunks?: unknown };
     if (!Array.isArray(result.chunks) || result.chunks.length === 0) {
       throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned no audio chunks.');

@@ -9,10 +9,10 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 - 5 GB source-file limit and 3-hour product duration limit.
 - Project creation plus bounded R2 multipart media upload; the Worker never buffers a complete 5 GB source body.
 - Cloudflare Workflow-backed dubbing jobs with durable D1 progress/error state.
-- FFmpeg Cloudflare Container media processor that probes the source and emits bounded standalone 5-minute audio chunks through R2.
-- Optional Deepgram Nova-3 ASR with speaker diarization when `DEEPGRAM_API_KEY` is configured. The current persisted speaker identity is deliberately **chunk-scoped**; the source does not claim cross-chunk speaker identity stitching.
-- Workers AI `@cf/openai/whisper-large-v3-turbo` remains the fallback ASR path when Deepgram is not configured; that fallback does not claim speaker diarization.
-- Normalized deterministic segment IDs/timestamps, speaker persistence, and atomic D1 transcript replacement.
+- FFmpeg Cloudflare Container media processor that probes the source and emits bounded 300-second ASR analysis windows with an 8-second overlap through R2.
+- Optional Deepgram Nova-3 ASR with speaker diarization when `DEEPGRAM_API_KEY` is configured. Phase 4A adds conservative cross-chunk speaker stitching from duplicate utterances observed in adjacent overlap windows. A mapping is accepted only when segment evidence and speaker evidence are unambiguous one-to-one matches; ambiguous or missing evidence remains chunk-scoped rather than guessed.
+- Workers AI `@cf/openai/whisper-large-v3-turbo` remains the fallback ASR path when Deepgram is not configured. It benefits from overlap duplicate suppression but does not invent speaker identities or claim diarization.
+- Normalized deterministic segment IDs/timestamps, conservative overlap de-duplication, speaker persistence, and atomic D1 transcript replacement.
 - Workers AI translation using `@cf/meta/m2m100-1.2b` as the default processing path.
 - Official Google Cloud Translation provider plus `workers-ai` / `google` / `compare` retranslation modes.
 - Studio cloud orchestration: upload -> process -> poll durable job -> hydrate the persisted D1 project/timeline/transcript plus active speaker metadata.
@@ -100,8 +100,9 @@ Production runtime qualification requires a real supported media fixture to comp
 ```text
 R2 multipart upload
 -> Cloudflare Workflow
--> FFmpeg 5-minute chunks
+-> FFmpeg overlapping 300-second ASR analysis windows
 -> Deepgram diarized ASR when configured, otherwise Workers AI Whisper
+-> conservative overlap de-duplication and evidence-based speaker stitching
 -> persisted D1 speakers/segments
 -> Workers AI or configured translation
 -> Studio transcript/timeline/speaker hydration
@@ -110,13 +111,14 @@ R2 multipart upload
 -> final R2 export artifact
 ```
 
-Until that real deployed fixture succeeds, production runtime remains unqualified even when source CI is GREEN. Cross-chunk speaker identity is also explicitly outside the current diarization qualification, and source-level per-speaker voice routing is not a production PASS until verified on a real deployed export.
+Until that real deployed fixture succeeds, production runtime remains **UNQUALIFIED** even when source CI is GREEN. Phase 4A source tests can qualify the stitching algorithm and bounded-overlap contracts, but production cross-chunk diarization remains unqualified until a real deployed Deepgram/media fixture demonstrates the intended identity behavior. Source-level per-speaker voice routing is likewise not a production PASS until verified on a real deployed export.
 
 ## Safety / truthfulness boundaries
 
 - Do not enable or label voice cloning unless a configured provider explicitly supports cloning and the operator has rights/consent for the source voice.
 - Do not mark a production dubbed export PASS until a deployed fixture has actually written and returned the final artifact.
 - Do not claim visual lip-sync rendering from duration fitting or audio timeline assembly alone.
-- Do not claim that chunk-local diarization proves the same speaker identity across multiple 5-minute chunks.
+- Do not merge cross-chunk speakers from matching numeric speaker indexes, text alone, names, or guesses; only the conservative overlap-evidence contract may stitch identities, and ambiguous evidence must remain split.
+- Do not present Phase 4A source/CI qualification as production diarization qualification.
 - Do not send the complete source file through one Worker request; use the multipart API.
 - Do not commit Cloudflare, Google, Deepgram, or ElevenLabs secrets.

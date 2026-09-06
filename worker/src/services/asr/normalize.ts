@@ -15,7 +15,7 @@ export type NormalizedAsrSegment = AsrSegment & {
   speakerId?: string;
 };
 
-function stableHash(value: string): string {
+export function stableHash(value: string): string {
   let hash = 0x811c9dc5;
   for (let i = 0; i < value.length; i += 1) {
     hash ^= value.charCodeAt(i);

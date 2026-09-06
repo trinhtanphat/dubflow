@@ -3,6 +3,7 @@ import type { AiBinding } from '../src/cloudflare/ai';
 import { WorkersAIAsrProvider } from '../src/services/asr/workers-ai';
 import { DeepgramNova3AsrProvider } from '../src/services/asr/deepgram';
 import { normalizeAsrChunks } from '../src/services/asr/normalize';
+import { stitchAsrChunks } from '../src/services/asr/stitch';
 
 class FakeAI implements AiBinding {
   calls: { model: string; input: any }[] = [];
@@ -109,5 +110,93 @@ describe('ASR chunk normalization', () => {
 
   it('rejects inverted ranges', () => {
     expect(() => normalizeAsrChunks([{ projectId: 'p1', chunkId: 'c1', offsetMs: 0, segments: [{ startMs: 5, endMs: 4, text: 'bad' }] }])).toThrow();
+  });
+});
+
+describe('ASR cross-chunk stitching', () => {
+  it('deduplicates a boundary utterance and carries one speaker identity into the next chunk', () => {
+    const stitched = stitchAsrChunks([
+      {
+        projectId: 'p1', chunkId: 'c1', offsetMs: 0,
+        segments: [{ startMs: 294_000, endMs: 296_000, text: ' Hello   World ', speakerIndex: 0 }],
+      },
+      {
+        projectId: 'p1', chunkId: 'c2', offsetMs: 292_000,
+        segments: [
+          { startMs: 2_000, endMs: 4_000, text: 'hello world', speakerIndex: 3 },
+          { startMs: 5_000, endMs: 6_000, text: 'later', speakerIndex: 3 },
+        ],
+      },
+    ]);
+
+    expect(stitched).toHaveLength(2);
+    expect(stitched.map((segment) => segment.text)).toEqual([' Hello   World ', 'later']);
+    expect(stitched[0].speakerId).toMatch(/^spk_[0-9a-f]{8}$/);
+    expect(stitched[1].speakerId).toBe(stitched[0].speakerId);
+  });
+
+  it('keeps speaker identities separate when duplicate evidence is ambiguous', () => {
+    const stitched = stitchAsrChunks([
+      {
+        projectId: 'p1', chunkId: 'c1', offsetMs: 0,
+        segments: [
+          { startMs: 294_000, endMs: 295_000, text: 'one', speakerIndex: 0 },
+          { startMs: 296_000, endMs: 297_000, text: 'two', speakerIndex: 0 },
+        ],
+      },
+      {
+        projectId: 'p1', chunkId: 'c2', offsetMs: 292_000,
+        segments: [
+          { startMs: 2_000, endMs: 3_000, text: 'one', speakerIndex: 3 },
+          { startMs: 4_000, endMs: 5_000, text: 'two', speakerIndex: 4 },
+          { startMs: 6_000, endMs: 6_600, text: 'right three', speakerIndex: 3 },
+          { startMs: 6_700, endMs: 7_300, text: 'right four', speakerIndex: 4 },
+        ],
+      },
+    ]);
+
+    expect(stitched).toHaveLength(4);
+    const leftSpeaker = stitched.find((segment) => segment.text === 'one')?.speakerId;
+    const rightThree = stitched.find((segment) => segment.text === 'right three')?.speakerId;
+    const rightFour = stitched.find((segment) => segment.text === 'right four')?.speakerId;
+    expect(leftSpeaker).toBeTruthy();
+    expect(rightThree).toBeTruthy();
+    expect(rightFour).toBeTruthy();
+    expect(rightThree).not.toBe(leftSpeaker);
+    expect(rightFour).not.toBe(leftSpeaker);
+    expect(rightThree).not.toBe(rightFour);
+  });
+
+  it('deduplicates non-diarized overlap without inventing a speaker identity', () => {
+    const stitched = stitchAsrChunks([
+      {
+        projectId: 'p1', chunkId: 'c1', offsetMs: 0,
+        segments: [{ startMs: 294_000, endMs: 296_000, text: 'Same line' }],
+      },
+      {
+        projectId: 'p1', chunkId: 'c2', offsetMs: 292_000,
+        segments: [{ startMs: 2_050, endMs: 4_050, text: 'same line' }],
+      },
+    ]);
+
+    expect(stitched).toHaveLength(1);
+    expect(stitched[0].speakerId).toBeUndefined();
+    expect(stitched[0].speakerIndex).toBeUndefined();
+  });
+
+  it('does not deduplicate equal text without temporal overlap', () => {
+    const stitched = stitchAsrChunks([
+      {
+        projectId: 'p1', chunkId: 'c1', offsetMs: 0,
+        segments: [{ startMs: 100_000, endMs: 101_000, text: 'yes', speakerIndex: 0 }],
+      },
+      {
+        projectId: 'p1', chunkId: 'c2', offsetMs: 292_000,
+        segments: [{ startMs: 2_000, endMs: 3_000, text: 'yes', speakerIndex: 0 }],
+      },
+    ]);
+
+    expect(stitched).toHaveLength(2);
+    expect(stitched[0].speakerId).not.toBe(stitched[1].speakerId);
   });
 });
