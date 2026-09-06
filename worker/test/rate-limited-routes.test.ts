@@ -19,6 +19,29 @@ function rejectedLimiter(calls: string[]) {
   } as Env['RATE_LIMIT_PROCESS'];
 }
 
+function phase4cExportValidationDeps() {
+  return {
+    makeLanguages: () => ({
+      async getConfig() {
+        return { revision: 0, languages: [{ targetLanguage: 'vi' as const }] };
+      },
+    }) as never,
+    makeSegments: () => ({
+      async list() { return [{ id: 'segment-1' }]; },
+    }) as never,
+    makeVariants: () => ({
+      async list() {
+        return [{ segmentId: 'segment-1', translationStatus: 'completed', translatedText: 'Xin chào' }];
+      },
+    }) as never,
+    makeExports: () => ({
+      async create() { throw new Error('must not create an export attempt after rate limiting'); },
+      async latest() { return null; },
+      async fail() { throw new Error('must not fail a nonexistent export attempt'); },
+    }) as never,
+  };
+}
+
 describe('Phase 3C expensive route admission', () => {
   it('rejects process before durable job or Workflow creation', async () => {
     const calls: string[] = [];
@@ -66,7 +89,7 @@ describe('Phase 3C expensive route admission', () => {
     expect(calls).toEqual(['project:get']);
   });
 
-  it('rejects export before job creation, project mutation, or Workflow creation', async () => {
+  it('rejects export after owner/variant validation but before durable export/job/project mutation/Workflow creation', async () => {
     const calls: string[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.route('/api/projects', createExportRoutes({
@@ -81,6 +104,7 @@ describe('Phase 3C expensive route admission', () => {
         async create() { calls.push('job:create'); return { id: 'j1' }; },
         async fail() { calls.push('job:fail'); },
       }) as never,
+      ...phase4cExportValidationDeps(),
     }));
     const limiter = rejectedLimiter(calls);
     const env = {
@@ -95,7 +119,7 @@ describe('Phase 3C expensive route admission', () => {
     expect(response.status).toBe(429);
     expect(response.headers.get('Retry-After')).toBe('60');
     expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
-    expect(calls).toEqual(['project:get', 'limit:dev-user:export']);
+    expect(calls).toEqual(['project:get', 'project:get', 'limit:dev-user:export']);
   });
 
   it('rejects upload session after authorization and validation but before multipart creation', async () => {
