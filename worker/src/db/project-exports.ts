@@ -2,6 +2,7 @@ import type { D1DatabaseLike } from './projects';
 import type { ExportOutput, TargetLanguage } from '../domain/language';
 
 export type ProjectExportStatus = 'pending' | 'exporting' | 'completed' | 'failed' | 'invalidated';
+export type DubbedMixMode = 'dubbed_only' | 'preserve_background';
 
 export type ProjectExport = {
   id: string;
@@ -9,6 +10,7 @@ export type ProjectExport = {
   targetLanguage: TargetLanguage;
   output: ExportOutput;
   batchId: string | null;
+  mixMode: DubbedMixMode;
   status: ProjectExportStatus;
   exportObjectKey: string | null;
   subtitleObjectKey: string | null;
@@ -22,6 +24,7 @@ type ProjectExportRow = {
   target_language: TargetLanguage;
   output: ExportOutput;
   batch_id: string | null;
+  mix_mode: DubbedMixMode;
   status: ProjectExportStatus;
   export_object_key: string | null;
   subtitle_object_key: string | null;
@@ -36,6 +39,7 @@ function fromRow(row: ProjectExportRow): ProjectExport {
     targetLanguage: row.target_language,
     output: row.output,
     batchId: row.batch_id,
+    mixMode: row.mix_mode ?? 'dubbed_only',
     status: row.status,
     exportObjectKey: row.export_object_key,
     subtitleObjectKey: row.subtitle_object_key,
@@ -70,19 +74,21 @@ export class ProjectExportRepository {
     targetLanguage: TargetLanguage,
     output: ExportOutput,
     batchId: string | null = null,
+    mixMode: DubbedMixMode = 'dubbed_only',
   ): Promise<ProjectExport> {
     await this.assertProject(projectId, userId);
     const id = this.makeId();
     await this.db.prepare(
-      `INSERT INTO project_exports (id, project_id, target_language, output, batch_id, status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`,
-    ).bind(id, projectId, targetLanguage, output, batchId).run();
+      `INSERT INTO project_exports (id, project_id, target_language, output, batch_id, mix_mode, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+    ).bind(id, projectId, targetLanguage, output, batchId, mixMode).run();
     return {
       id,
       projectId,
       targetLanguage,
       output,
       batchId,
+      mixMode,
       status: 'pending',
       exportObjectKey: null,
       subtitleObjectKey: null,
@@ -93,7 +99,7 @@ export class ProjectExportRepository {
 
   async get(projectId: string, exportId: string, userId: string): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.mix_mode, e.status,
               e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
@@ -110,7 +116,7 @@ export class ProjectExportRepository {
     output: ExportOutput,
   ): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.mix_mode, e.status,
               e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
@@ -128,7 +134,7 @@ export class ProjectExportRepository {
     output: ExportOutput,
   ): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.mix_mode, e.status,
               e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
@@ -142,7 +148,7 @@ export class ProjectExportRepository {
 
   async listBatch(projectId: string, userId: string, batchId: string): Promise<ProjectExport[]> {
     const result = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.status,
+      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.mix_mode, e.status,
               e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id

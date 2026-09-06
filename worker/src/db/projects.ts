@@ -17,6 +17,7 @@ export type Project = {
   sourceLanguage: CreateProjectInput['sourceLanguage'];
   targetLanguage: 'vi';
   targetLanguagesRevision: number;
+  sourceRevision: number;
   status: ProjectStatus;
   sourceObjectKey?: string | null;
   exportObjectKey?: string | null;
@@ -59,6 +60,7 @@ type ProjectRow = {
   source_language: CreateProjectInput['sourceLanguage'];
   target_language: 'vi';
   target_languages_revision: number;
+  source_revision: number;
   status: ProjectStatus;
   source_object_key?: string | null;
   export_object_key?: string | null;
@@ -76,6 +78,7 @@ function fromRow(row: ProjectRow): Project {
     sourceLanguage: row.source_language,
     targetLanguage: row.target_language,
     targetLanguagesRevision: row.target_languages_revision,
+    sourceRevision: row.source_revision,
     status: row.status,
     sourceObjectKey: row.source_object_key,
     exportObjectKey: row.export_object_key,
@@ -86,7 +89,7 @@ function fromRow(row: ProjectRow): Project {
   };
 }
 
-const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
+const PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, source_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
 
 export class ProjectRepository implements ProjectStore {
   constructor(private readonly db: D1DatabaseLike) {}
@@ -112,6 +115,7 @@ export class ProjectRepository implements ProjectStore {
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
       targetLanguagesRevision: 1,
+      sourceRevision: 1,
       status: 'draft',
     };
   }
@@ -133,9 +137,11 @@ export class ProjectRepository implements ProjectStore {
   async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
     await this.db.prepare(
       `UPDATE projects
-       SET source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
+       SET source_revision = source_revision + 1 - CASE
+             WHEN source_object_key IS NULL OR source_object_key = ? THEN 1 ELSE 0 END,
+           source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
-    ).bind(objectKey, sizeBytes, id, userId).run();
+    ).bind(objectKey, objectKey, sizeBytes, id, userId).run();
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
