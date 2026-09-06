@@ -10,6 +10,15 @@ describe('FFmpeg ASR analysis windows', () => {
     ]);
   });
 
+  it('does not emit an overlap-only tail when the first window already covers the source', () => {
+    expect(buildAudioWindows(300_000, 300, 8)).toEqual([
+      { offsetMs: 0, durationMs: 300_000 },
+    ]);
+    expect(buildAudioWindows(295_000, 300, 8)).toEqual([
+      { offsetMs: 0, durationMs: 295_000 },
+    ]);
+  });
+
   it.each([-1, 31, 300])('rejects invalid overlap %s', (overlapSeconds) => {
     expect(() => buildAudioWindows(610_000, 300, overlapSeconds)).toThrow(/overlapSeconds/);
   });
