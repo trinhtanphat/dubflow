@@ -1,0 +1,36 @@
+name: Live one-shot probe after #62
+
+on:
+  push:
+    branches:
+      - probe/live-once-62
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe production once
+        shell: bash
+        run: |
+          set -u
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+          probe() {
+            curl --silent --show-error --location --output "$2" --write-out '%{http_code}' --max-time 20 "$1" || printf '000'
+          }
+          ready_file="$(mktemp)"
+          sink="$(mktemp)"
+          ready="$(probe "$base/api/ready" "$ready_file")"
+          projects="$(probe "$base/api/projects" "$sink")"
+          usage="$(probe "$base/api/usage" "$sink")"
+          p1="$(probe "$base/api/projects/$project1" "$sink")"
+          p2="$(probe "$base/api/projects/$project2" "$sink")"
+          schema10='no'
+          grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file" && schema10='yes'
+          printf 'ready=%s schema10=%s projects=%s usage=%s project1=%s project2=%s\n' "$ready" "$schema10" "$projects" "$usage" "$p1" "$p2"
+          printf 'ready_body=' && cat "$ready_file" && printf '\n'
+          [[ "$projects" != '500' && "$usage" != '500' && "$p1" != '500' && "$p2" != '500' ]]
