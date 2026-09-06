@@ -48,7 +48,9 @@ export class ElevenLabsVoiceCloneProvider implements VoiceCloneProvider {
     }
     return {
       providerVoiceId,
-      requiresVerification: data.requires_verification === true,
+      // Only an explicit provider `false` is eligible for ready state. Missing or
+      // malformed verification metadata stays fail-closed and non-assignable.
+      requiresVerification: data.requires_verification !== false,
     };
   }
 
