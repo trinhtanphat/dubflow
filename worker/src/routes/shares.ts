@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
+import { MultilangRepository, type MultilangStore } from '../db/multilang';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { ShareRepository, type ShareStore } from '../db/shares';
 import { errorBody } from '../http/json';
@@ -18,6 +19,7 @@ const MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60;
 export type ProjectShareRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
   makeShares?: (env: Env) => ShareStore;
+  makeMultilang?: (env: Env) => MultilangStore;
   createToken?: typeof createShareToken;
   now?: () => Date;
 };
@@ -72,6 +74,7 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
   const routes = new Hono<{ Bindings: Env }>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeShares = deps.makeShares ?? ((env: Env) => new ShareRepository(env.DB));
+  const makeMultilang = deps.makeMultilang ?? ((env: Env) => new MultilangRepository(env.DB));
   const makeToken = deps.createToken ?? createShareToken;
   const now = deps.now ?? (() => new Date());
 
@@ -80,9 +83,6 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     const projectId = c.req.param('id');
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
-    if (!project.exportObjectKey) {
-      return c.json(errorBody('EXPORT_NOT_READY', 'Final export is not ready to share.'), 409);
-    }
 
     const body = await readCreateBody(c.req.raw);
     if (!body) return c.json(errorBody('INVALID_JSON', 'Request body must be a JSON object.'), 400);
@@ -97,14 +97,35 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
       );
     }
 
+    if (body.exportId !== undefined && (typeof body.exportId !== 'string' || !body.exportId.trim())) {
+      return c.json(errorBody('EXPORT_ID_INVALID', 'Export id must be a non-empty string.'), 400);
+    }
+    const exportId = typeof body.exportId === 'string' ? body.exportId.trim() : null;
+
+    let exportObjectKey: string;
+    if (exportId) {
+      const variant = await makeMultilang(c.env).getExport(projectId, exportId, userId);
+      if (!variant) return c.json(errorBody('EXPORT_NOT_FOUND', 'Export not found.'), 404);
+      if (variant.status !== 'completed' || !variant.objectKey) {
+        return c.json(errorBody('EXPORT_NOT_READY', 'Selected export is not ready to share.'), 409);
+      }
+      exportObjectKey = variant.objectKey;
+    } else {
+      if (!project.exportObjectKey) {
+        return c.json(errorBody('EXPORT_NOT_READY', 'Final Vietnamese export is not ready to share.'), 409);
+      }
+      exportObjectKey = project.exportObjectKey;
+    }
+
     const createdAt = now();
     const secret = await makeToken();
     const share = await makeShares(c.env).create({
       projectId,
       userId,
+      exportId,
       tokenHash: secret.tokenHash,
       tokenHint: secret.tokenHint,
-      exportObjectKey: project.exportObjectKey,
+      exportObjectKey,
       expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000).toISOString(),
     });
     const shareUrl = `${CANONICAL_SHARE_ORIGIN}/api/shares/${encodeURIComponent(share.id)}/media?token=${encodeURIComponent(secret.token)}`;
