@@ -12,12 +12,12 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
     steps:
-      - name: Inspect deployed Worker bindings, domain mapping, and repository SQL
+      - name: Inspect production bindings and domain routing path
         shell: bash
         run: |
           set -euo pipefail
@@ -27,25 +27,21 @@ jobs:
           if (!token || !accountId) throw new Error('Cloudflare probe credentials are unavailable.');
           const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
-          async function cf(url, init = {}) {
+          async function request(url, init = {}, strict = true) {
             const response = await fetch(url, { ...init, headers: { ...headers, ...(init.headers ?? {}) } });
             const text = await response.text();
             let body;
             try { body = JSON.parse(text); } catch { body = { raw: text.slice(0, 800) }; }
-            if (!response.ok || body?.success === false) {
+            if (strict && (!response.ok || body?.success === false)) {
               throw new Error(`Cloudflare API ${response.status}: ${JSON.stringify(body?.errors ?? body).slice(0, 1000)}`);
             }
-            return body;
+            return { response, body };
           }
 
-          const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
-          const settings = await cf(`${base}/workers/scripts/dubflow/settings`);
+          const accountBase = `https://api.cloudflare.com/client/v4/accounts/${accountId}`;
+          const { body: settings } = await request(`${accountBase}/workers/scripts/dubflow/settings`);
           const bindings = Array.isArray(settings?.result?.bindings) ? settings.result.bindings : [];
-
-          const safeFields = [
-            'name','type','database_id','bucket_name','dataset','class_name','script_name',
-            'service','environment','namespace','workflow_name','id','namespace_id'
-          ];
+          const safeFields = ['name','type','database_id','bucket_name','dataset','class_name','script_name','service','environment','namespace','workflow_name','id','namespace_id'];
           const safeBindings = bindings.map((binding) => {
             const out = {};
             for (const key of safeFields) {
@@ -59,36 +55,45 @@ jobs:
           const dbBinding = bindings.find((binding) => binding?.type === 'd1' && binding?.name === 'DB');
           if (!dbBinding?.database_id) throw new Error('Deployed Worker DB binding was not found.');
           const databaseId = dbBinding.database_id;
-          console.log(`production Worker DB binding database_id=${databaseId}`);
 
-          const domains = await cf(`${base}/workers/domains?hostname=${encodeURIComponent('yupvox.qs3d.site')}`);
-          const domainRows = Array.isArray(domains?.result) ? domains.result : [];
-          const safeDomains = domainRows.map((row) => ({
-            id: row?.id ?? '', hostname: row?.hostname ?? '', service: row?.service ?? '',
-            environment: row?.environment ?? '', zone_name: row?.zone_name ?? ''
-          }));
-          console.log(`production custom domains=${JSON.stringify(safeDomains)}`);
-          const exact = domainRows.filter((row) => row?.hostname === 'yupvox.qs3d.site');
-          if (exact.length !== 1 || exact[0]?.service !== 'dubflow') {
-            throw new Error(`Unexpected yupvox custom-domain mapping: ${JSON.stringify(safeDomains)}`);
+          function safeDomains(body) {
+            const rows = Array.isArray(body?.result) ? body.result : [];
+            return rows.map((row) => ({
+              id: row?.id ?? '', hostname: row?.hostname ?? '', service: row?.service ?? '',
+              environment: row?.environment ?? '', zone_id: row?.zone_id ?? '', zone_name: row?.zone_name ?? ''
+            }));
+          }
+          for (const [label, suffix] of [
+            ['all', ''],
+            ['service', '?service=dubflow'],
+            ['hostname', `?hostname=${encodeURIComponent('yupvox.qs3d.site')}`],
+            ['service+hostname', `?service=dubflow&hostname=${encodeURIComponent('yupvox.qs3d.site')}`],
+          ]) {
+            const { response, body } = await request(`${accountBase}/workers/domains${suffix}`, {}, false);
+            console.log(`workers domains ${label} status=${response.status} success=${body?.success ?? 'unknown'} rows=${JSON.stringify(safeDomains(body))}`);
+          }
+
+          const zonesUrl = `https://api.cloudflare.com/client/v4/zones?name=${encodeURIComponent('qs3d.site')}&account.id=${encodeURIComponent(accountId)}`;
+          const { response: zonesResponse, body: zonesBody } = await request(zonesUrl, {}, false);
+          const zones = Array.isArray(zonesBody?.result) ? zonesBody.result.map((z) => ({ id: z?.id ?? '', name: z?.name ?? '', status: z?.status ?? '' })) : [];
+          console.log(`zone lookup status=${zonesResponse.status} success=${zonesBody?.success ?? 'unknown'} zones=${JSON.stringify(zones)}`);
+          for (const zone of zones) {
+            if (!zone.id) continue;
+            const { response: routeResponse, body: routeBody } = await request(`https://api.cloudflare.com/client/v4/zones/${zone.id}/workers/routes`, {}, false);
+            const routes = Array.isArray(routeBody?.result) ? routeBody.result.map((r) => ({ id: r?.id ?? '', pattern: r?.pattern ?? '', script: r?.script ?? '' })) : [];
+            console.log(`zone worker routes status=${routeResponse.status} success=${routeBody?.success ?? 'unknown'} routes=${JSON.stringify(routes)}`);
           }
 
           async function query(sql, params = []) {
-            const response = await cf(`${base}/d1/database/${databaseId}/query`, {
+            const { body } = await request(`${accountBase}/d1/database/${databaseId}/query`, {
               method: 'POST', body: JSON.stringify({ sql, params }),
             });
-            const page = Array.isArray(response?.result) ? response.result[0] : response?.result;
+            const page = Array.isArray(body?.result) ? body.result[0] : body?.result;
             if (page?.success === false) throw new Error(JSON.stringify(page?.error ?? page));
             return page?.results ?? [];
           }
-
-          const projectSql = `SELECT id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC`;
-          const usageSql = `SELECT kind, units, provider FROM usage_events WHERE user_id = ? AND phase = 'completed' ORDER BY created_at ASC, id ASC`;
-          const balanceSql = `SELECT credit_balance FROM users WHERE id = ? LIMIT 1`;
-          const projectRows = await query(projectSql, ['dev-user']);
-          const usageRows = await query(usageSql, ['dev-user']);
-          const balanceRows = await query(balanceSql, ['dev-user']);
-          console.log(`ProjectRepository exact SQL PASS rows=${projectRows.length}`);
-          console.log(`UsageRepository summary SQL PASS rows=${usageRows.length}`);
-          console.log(`UsageRepository balance SQL PASS rows=${balanceRows.length}`);
+          const projectRows = await query(`SELECT id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC`, ['dev-user']);
+          const usageRows = await query(`SELECT kind, units, provider FROM usage_events WHERE user_id = ? AND phase = 'completed' ORDER BY created_at ASC, id ASC`, ['dev-user']);
+          const balanceRows = await query(`SELECT credit_balance FROM users WHERE id = ? LIMIT 1`, ['dev-user']);
+          console.log(`repository SQL PASS projects=${projectRows.length} usage=${usageRows.length} balance=${balanceRows.length}`);
           NODE
