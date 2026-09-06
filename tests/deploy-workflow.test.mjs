@@ -2,28 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const workflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
-const wranglerConfig = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+const deployWorkflowUrl = new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url);
+const ciWorkflow = fs.readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+const policyUrl = new URL('../docs/DEPLOYMENT-POLICY.md', import.meta.url);
 
-test('Cloudflare deployment is manual-only while container credentials are externally qualified', () => {
-  assert.doesNotMatch(workflow, /^  push:\s*$/m);
-  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+test('GitHub Actions never performs production deploys', () => {
+  assert.equal(fs.existsSync(deployWorkflowUrl), false, 'remove the GitHub production deploy workflow');
+  assert.doesNotMatch(ciWorkflow, /wrangler\s+deploy(?!\s+--dry-run)/i);
+  assert.doesNotMatch(ciWorkflow, /CLOUDFLARE_API_TOKEN/);
 });
 
-test('production deploy uses the same Cloudflare account as Wrangler', () => {
-  const match = workflow.match(/CLOUDFLARE_ACCOUNT_ID:\s*([0-9a-f]{32})/i);
-  assert.ok(match, 'deployment workflow must declare CLOUDFLARE_ACCOUNT_ID');
-  assert.equal(match[1], wranglerConfig.account_id);
-});
-
-test('production deploy wires optional translation, diarization and ElevenLabs voice secrets without committing values', () => {
-  assert.match(workflow, /GOOGLE_CLOUD_TRANSLATE_API_KEY:\s*\$\{\{ secrets\.GOOGLE_CLOUD_TRANSLATE_API_KEY \}\}/);
-  assert.match(workflow, /DEEPGRAM_API_KEY:\s*\$\{\{ secrets\.DEEPGRAM_API_KEY \}\}/);
-  assert.match(workflow, /ELEVENLABS_API_KEY:\s*\$\{\{ secrets\.ELEVENLABS_API_KEY \}\}/);
-  assert.match(workflow, /ELEVENLABS_DEFAULT_VOICE_ID:\s*\$\{\{ secrets\.ELEVENLABS_DEFAULT_VOICE_ID \}\}/);
-  assert.match(workflow, /wrangler secret put DEEPGRAM_API_KEY/);
-  assert.match(workflow, /wrangler secret put ELEVENLABS_API_KEY/);
-  assert.match(workflow, /wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID/);
-  assert.doesNotMatch(workflow, /Authorization:\s*Token\s+[A-Za-z0-9]/i);
-  assert.doesNotMatch(workflow, /xi-api-key:\s*[A-Za-z0-9]/i);
+test('Cloudflare Workers Builds is the only production deployment lane', () => {
+  assert.equal(fs.existsSync(policyUrl), true, 'document the deployment policy');
+  const policy = fs.readFileSync(policyUrl, 'utf8');
+  assert.match(policy, /Cloudflare Workers Builds/i);
+  assert.match(policy, /main/i);
+  assert.match(policy, /automatic(?:ally)? build/i);
+  assert.match(policy, /automatic(?:ally)? deploy/i);
+  assert.match(policy, /GitHub Actions.*CI/i);
+  assert.match(policy, /must not deploy/i);
 });
