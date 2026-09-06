@@ -33,7 +33,12 @@ function harness(initial: AudioSeparation | null = null, qualified = true) {
   let providerError: Error | null = null;
   const deps = {
     projects: { async getByIdForUser() { return project; } },
-    jobs: { async getForProject() { return { status: jobStatus }; } },
+    jobs: {
+      async getForProject() { return { status: jobStatus }; },
+      async setProgress() {},
+      async complete() {},
+      async fail() {},
+    },
     separations: {
       async getCurrent() { return separation; },
       async createQueued(input: any) {
@@ -74,6 +79,7 @@ function harness(initial: AudioSeparation | null = null, qualified = true) {
         return usage.get(mapKey);
       },
     },
+    telemetry: { write() {} },
   };
   const step = { async do<T>(_name: string, callback: () => Promise<T>) { return callback(); } };
   return {

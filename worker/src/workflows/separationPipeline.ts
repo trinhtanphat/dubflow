@@ -1,5 +1,8 @@
 import type { AudioSeparation } from '../db/audio-separation';
 import { separationObjectPrefix } from '../db/audio-separation';
+import type { JobStore } from '../db/jobs';
+import type { TelemetrySink } from '../observability/telemetry';
+import { withProviderTelemetry } from '../observability/telemetry';
 import type { AudioSeparationProvider, SeparationCapabilities, SeparationResult } from '../services/separation/types';
 import { assertJobActive, type JobStatusReader } from './jobCancellation';
 
@@ -7,6 +10,7 @@ export type SeparationWorkflowParams = {
   projectId: string;
   userId: string;
   jobId: string;
+  requestId?: string;
 };
 
 type ProjectSnapshot = {
@@ -75,12 +79,15 @@ type WorkflowStep = {
   do<T>(name: string, callback: () => Promise<T>): Promise<T>;
 };
 
+type SeparationJobStore = JobStatusReader & Pick<JobStore, 'setProgress' | 'complete' | 'fail'>;
+
 export type SeparationPipelineDeps = {
   projects: ProjectReader;
-  jobs: JobStatusReader;
+  jobs: SeparationJobStore;
   separations: SeparationStore;
   provider: AudioSeparationProvider;
   usage: SeparationUsageStore;
+  telemetry: TelemetrySink;
 };
 
 export type SeparationPipelineResult = {
@@ -196,6 +203,7 @@ export async function runSeparationPipeline(
 
   await step.do('check-cancellation-before-separation', async () => assertJobActive(deps.jobs, project.id, params.jobId, params.userId));
   await step.do('mark-separation-running', async () => deps.separations.markRunning(project.id, separation!.id, params.userId));
+  await step.do('mark-separation-job-running', async () => deps.jobs.setProgress(params.jobId, 0.1, 'separating_audio'));
 
   const started = await step.do('load-started-usage', async () => deps.usage.getByOperation(opKey, 'started'));
   if (!started) {
@@ -213,23 +221,41 @@ export async function runSeparationPipeline(
 
   let providerResult: SeparationResult;
   try {
-    providerResult = await step.do('run-audio-separation', async () => deps.provider.separate({
-      projectId: project.id,
-      sourceObjectKey: project.sourceObjectKey!,
-      sourceRevision: project.sourceRevision,
-      provider: capabilities.provider,
-      modelId: capabilities.modelId,
-      modelDigest: capabilities.modelDigest,
-    }));
-    assertValidProviderResult(providerResult, expectedKeys);
+    providerResult = await step.do('run-audio-separation', async () => withProviderTelemetry(
+      deps.telemetry,
+      {
+        requestId: params.requestId,
+        actorId: params.userId,
+        projectId: project.id,
+        jobId: params.jobId,
+        operation: 'audio_separation',
+        provider: capabilities.provider,
+        errorCode: 'SEPARATION_FAILED',
+      },
+      async () => {
+        const result = await deps.provider.separate({
+          projectId: project.id,
+          sourceObjectKey: project.sourceObjectKey!,
+          sourceRevision: project.sourceRevision,
+          provider: capabilities.provider,
+          modelId: capabilities.modelId,
+          modelDigest: capabilities.modelDigest,
+        });
+        assertValidProviderResult(result, expectedKeys);
+        return result;
+      },
+    ));
   } catch (error) {
+    const code = errorCode(error);
+    const message = errorMessage(error);
     await step.do('mark-separation-failed', async () => deps.separations.fail(
       project.id,
       separation!.id,
       params.userId,
-      errorCode(error),
-      errorMessage(error),
+      code,
+      message,
     ));
+    await step.do('mark-separation-job-failed', async () => deps.jobs.fail(params.jobId, code, message));
     throw error;
   }
 
@@ -261,5 +287,6 @@ export async function runSeparationPipeline(
     }));
   }
 
+  await step.do('complete-separation-job', async () => deps.jobs.complete(params.jobId));
   return { status: 'completed', separationId: separation.id, reused: false };
 }
