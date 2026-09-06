@@ -11,16 +11,16 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CURRENT_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
-      LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
-      CURRENT_TAG: ed49a7dcf94c407aafa2bedf4311331f
-      LEGACY_TAG: cec78627dd174827ab210bc09108fb1c
-      GITHUB_ACCOUNT_ID: '89531707'
-      GITHUB_REPO_ID: '1357840238'
+      PRODUCTION_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      STALE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+      PRODUCTION_TAG: cec78627dd174827ab210bc09108fb1c
+      STALE_TAG: ed49a7dcf94c407aafa2bedf4311331f
+      TARGET_SHA: 6424f990404b635164dfb61595e471d7b66ea008
     steps:
-      - name: Inspect legacy Builds prerequisites
+      - name: Qualify corrected Workers Builds lane and public production
         shell: bash
         run: |
           set -euo pipefail
@@ -28,18 +28,73 @@ jobs:
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
 
-          echo '=== CURRENT BUILDS TOKENS ==='
-          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/tokens" \
-            | jq -c '{success,errors,result:[.result[]? | {build_token_uuid,build_token_name,created_on,modified_on}]}'
+          echo '=== topology guard ==='
+          prod_triggers="$(cfget "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_TAG/triggers")"
+          stale_triggers="$(cfget "$api/accounts/$STALE_ACCOUNT_ID/builds/workers/$STALE_TAG/triggers")"
+          printf '%s' "$prod_triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,build_token_name,build_command,deploy_command,branch_includes,repo_connection_uuid:.repo_connection.repo_connection_uuid}]}'
+          printf '%s' "$stale_triggers" | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,branch_includes}]}'
+          printf '%s' "$prod_triggers" | jq -e '.success == true and ([.result[]? | select((.branch_includes // []) | index("main"))] | length) == 1' >/dev/null
+          printf '%s' "$stale_triggers" | jq -e '.success == true and ([.result[]? | select((.branch_includes // []) | index("main"))] | length) == 0' >/dev/null
 
-          echo '=== LEGACY BUILDS TOKENS ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/tokens" \
-            | jq -c '{success,errors,result:[.result[]? | {build_token_uuid,build_token_name,created_on,modified_on}]}'
+          echo '=== wait for the main merge build on the production account ==='
+          found=''
+          for attempt in $(seq 1 60); do
+            builds="$(cfget "$api/accounts/$PRODUCTION_ACCOUNT_ID/builds/workers/$PRODUCTION_TAG/builds")"
+            printf '%s' "$builds" | jq -e '.success == true' >/dev/null
+            found="$(printf '%s' "$builds" | jq -c --arg sha "$TARGET_SHA" '.result[]? | select(.build_trigger_metadata.commit_hash == $sha)' | head -n1)"
+            if [[ -n "$found" ]]; then
+              uuid="$(printf '%s' "$found" | jq -r '.build_uuid')"
+              outcome="$(printf '%s' "$found" | jq -r '.build_outcome // empty')"
+              status="$(printf '%s' "$found" | jq -r '.status // empty')"
+              printf '%s' "$found" | jq -c '{build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata:{branch:.build_trigger_metadata.branch,commit_hash:.build_trigger_metadata.commit_hash,build_trigger_source:.build_trigger_metadata.build_trigger_source,build_command:.build_trigger_metadata.build_command,deploy_command:.build_trigger_metadata.deploy_command,build_token_name:.build_trigger_metadata.build_token_name}}'
+              echo "attempt=$attempt build_uuid=$uuid status=$status outcome=$outcome"
+              if [[ "$outcome" == 'success' ]]; then
+                echo "AUTOMATIC_BUILD_GREEN=$uuid"
+                break
+              fi
+              if [[ "$outcome" == 'fail' || "$outcome" == 'cancelled' || "$outcome" == 'terminated' ]]; then
+                echo "Automatic production build ended with outcome=$outcome" >&2
+                exit 1
+              fi
+            else
+              echo "attempt=$attempt target build not visible yet"
+            fi
+            if [[ "$attempt" == '60' ]]; then
+              echo 'Timed out waiting for corrected automatic production build.' >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
-          echo '=== LEGACY GITHUB REPO CONFIG AUTOFILL ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/repos/github/$GITHUB_ACCOUNT_ID/$GITHUB_REPO_ID/config_autofill" \
-            | jq -c '{success,errors,messages,result}'
-
-          echo '=== CURRENT TRIGGER FULL CONNECTION METADATA ==='
-          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/workers/$CURRENT_TAG/triggers" \
-            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,build_token_uuid,build_token_name,repo_connection,external_script_id,build_command,deploy_command}]}'
+          echo '=== public production qualification ==='
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+          probe() {
+            curl --silent --show-error --location --output "$2" --write-out '%{http_code}' --max-time 20 "$1" || printf '000'
+          }
+          for attempt in $(seq 1 30); do
+            ready_file="$(mktemp)"
+            projects_file="$(mktemp)"
+            usage_file="$(mktemp)"
+            sink="$(mktemp)"
+            ready="$(probe "$base/api/ready" "$ready_file")"
+            projects="$(probe "$base/api/projects" "$projects_file")"
+            usage="$(probe "$base/api/usage" "$usage_file")"
+            p1="$(probe "$base/api/projects/$project1" "$sink")"
+            p2="$(probe "$base/api/projects/$project2" "$sink")"
+            schema10='no'
+            grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file" && schema10='yes' || true
+            project_count="$(jq 'if type=="array" then length else -1 end' "$projects_file" 2>/dev/null || echo -1)"
+            echo "attempt=$attempt ready=$ready schema10=$schema10 projects=$projects count=$project_count usage=$usage p1=$p1 p2=$p2"
+            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$project_count" == '4' && "$p1" == '200' && "$p2" == '200' ]]; then
+              echo 'PUBLIC_PRODUCTION_QUALIFIED'
+              echo "ready_body=$(cat "$ready_file")"
+              rm -f "$ready_file" "$projects_file" "$usage_file" "$sink"
+              exit 0
+            fi
+            rm -f "$ready_file" "$projects_file" "$usage_file" "$sink"
+            sleep 10
+          done
+          echo 'Public production failed qualification after corrected automatic build.' >&2
+          exit 1
