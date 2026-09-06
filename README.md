@@ -35,7 +35,7 @@ YupVox is a Cloudflare-first AI dubbing workstation. The repository remains `dub
 Production account ID:
 
 ```text
-6c5207813df3d5b83b9508125e0e9e12
+50afb4fd3c4c7a1f3e1bdb7f22d4af7f
 ```
 
 Production custom domain:
@@ -58,7 +58,7 @@ GitHub Actions is **CI only**. It may install dependencies, test, build, run `wr
 
 `.github/workflows/deploy-cloudflare.yml` must not exist. Do not recreate a GitHub production deploy workflow to work around a Cloudflare failure.
 
-Because the project deploys an FFmpeg Cloudflare Container, the API token configured in Cloudflare **Settings > Builds** must include the normal Worker/resource permissions plus **Containers Edit** for account `6c5207813df3d5b83b9508125e0e9e12`. Secret token values must never be committed.
+Because the project deploys an FFmpeg Cloudflare Container, the API token configured in Cloudflare **Settings > Builds** must include the normal Worker/resource permissions plus **Containers Edit** for account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. Secret token values must never be committed.
 
 Optional runtime providers use secrets such as:
 
