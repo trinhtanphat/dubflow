@@ -130,9 +130,21 @@ describe('legacy production schema read compatibility', () => {
     const repo = new UsageRepository(usageLegacyDb());
 
     await expect(repo.summarizeForUser('dev-user')).resolves.toEqual({
-      totals: { asrAudioSeconds: 12.5, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0 },
+      totals: {
+        asrAudioSeconds: 12.5,
+        translationCharacters: 0,
+        ttsAudioSeconds: 0,
+        stemSeparationAudioSeconds: 0,
+        renderSeconds: 0,
+      },
       providers: {
-        'deepgram-nova-3': { asrAudioSeconds: 12.5, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0 },
+        'deepgram-nova-3': {
+          asrAudioSeconds: 12.5,
+          translationCharacters: 0,
+          ttsAudioSeconds: 0,
+          stemSeparationAudioSeconds: 0,
+          renderSeconds: 0,
+        },
       },
     });
     await expect(repo.getCreditBalance('dev-user')).resolves.toBe(50000);
