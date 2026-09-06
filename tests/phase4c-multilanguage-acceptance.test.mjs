@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const migration = read('migrations/0009_multilanguage_variants.sql');
+const migration = read('migrations/0010_multilanguage_variants.sql');
 
 test('Phase 4C keeps one canonical project while adding exact target-language variants', () => {
   assert.match(migration, /ALTER TABLE projects ADD COLUMN target_languages_revision INTEGER NOT NULL DEFAULT 1/);
