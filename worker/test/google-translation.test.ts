@@ -8,14 +8,14 @@ const activeContext = {
 };
 
 describe('Google Cloud Translation provider', () => {
-  it('advertises raw-only availability from credential presence', () => {
+  it('advertises raw-only availability from credential presence for every Phase 4C target', () => {
     expect(new GoogleCloudTranslationProvider('secret-key')).toHaveProperty(
       'capabilities',
-      { contextual: false, available: true },
+      { contextual: false, available: true, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
     );
     expect(new GoogleCloudTranslationProvider('')).toHaveProperty(
       'capabilities',
-      { contextual: false, available: false },
+      { contextual: false, available: false, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
     );
   });
 
