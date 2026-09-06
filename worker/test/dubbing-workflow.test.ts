@@ -3,6 +3,25 @@ import type { UsageRecordInput } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
 const noUsage = { async record(input: UsageRecordInput) { return input as never; } };
+const neutralContext = { revision: 1, style: 'neutral' as const, glossary: [] };
+
+function rawTranslationDeps(onBatch?: (items: Array<{ id: string; text: string }>) => void) {
+  return {
+    translationContext: {
+      async getContext() { return neutralContext; },
+    },
+    translationRouter: {
+      async translate(_mode: unknown, items: Array<{ id: string; text: string }>) {
+        onBatch?.(items);
+        return {
+          mode: 'workers-ai' as const,
+          primary: items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' })),
+          contextRevision: null,
+        };
+      },
+    },
+  };
+}
 
 describe('dubbing workflow pipeline', () => {
   it('runs media -> diarized bounded chunk ASR -> persist -> translate in order and meters real provider work', async () => {
@@ -60,19 +79,12 @@ describe('dubbing workflow pipeline', () => {
       },
       async setTranslationResult(_p: string, id: string) { calls.push(`segments:translate:${id}`); return null; },
     };
-    const translation = {
-      capabilities: { contextual: false, available: true },
-      async translateBatch(items: { id: string; text: string }[]) {
-        calls.push('translation:batch');
-        return items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' }));
-      },
-    };
     const usage = { async record(input: UsageRecordInput) { usageEvents.push(input); return input as never; } };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
     const deps = {
-      projects, jobs, media, bucket, asr, segments, translation, usage,
+      projects, jobs, media, bucket, asr, segments, usage,
       asrProviderId: 'deepgram-nova-3',
-      translationProviderId: 'workers-ai',
+      ...rawTranslationDeps(() => calls.push('translation:batch')),
     };
 
     await runDubbingPipeline(
@@ -122,10 +134,9 @@ describe('dubbing workflow pipeline', () => {
         bucket: { async get(key: string) { return { key, size: 1, body: new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); c.close(); } }) }; } },
         asr: { async transcribe() { return { text: '', segments: [] }; } },
         segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-        translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
         usage: { async record(input: UsageRecordInput) { events.push(input); return input as never; } },
         asrProviderId: 'workers-ai-whisper-large-v3-turbo',
-        translationProviderId: 'workers-ai',
+        ...rawTranslationDeps(),
       };
       const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
       await runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step);
@@ -159,10 +170,9 @@ describe('dubbing workflow pipeline', () => {
       },
       asr: { async transcribe() { throw new Error('provider down'); } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-      translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
       usage: noUsage,
       asrProviderId: 'deepgram-nova-3',
-      translationProviderId: 'workers-ai',
+      ...rawTranslationDeps(),
     };
 
     await expect(runDubbingPipeline({ projectId: 'p', userId: 'u', jobId: 'j' }, deps, step)).rejects.toThrow('provider down');
@@ -197,10 +207,9 @@ describe('dubbing workflow pipeline', () => {
       bucket: { async get() { calls.push('bucket:get'); return { key: 'x', size: 1, body: new ReadableStream<Uint8Array>() }; } },
       asr: { async transcribe() { calls.push('asr:called'); return { text: 'x', segments: [] }; } },
       segments: { async replaceFromAsr() { return []; }, async setTranslationResult() { return null; } },
-      translation: { capabilities: { contextual: false, available: true }, async translateBatch() { return []; } },
       usage: noUsage,
       asrProviderId: 'workers-ai-whisper-large-v3-turbo',
-      translationProviderId: 'workers-ai',
+      ...rawTranslationDeps(),
     };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 

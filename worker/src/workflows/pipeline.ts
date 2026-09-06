@@ -2,12 +2,13 @@ import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
 import type { Project, ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
 import type { SegmentStore } from '../db/segments';
+import type { TranslationContextStore } from '../db/translation-context';
 import type { UsageStore } from '../db/usage';
 import type { R2BucketLike } from '../cloudflare/r2';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider } from '../services/asr/types';
 import { normalizeAsrChunks } from '../services/asr/normalize';
-import type { TranslationProvider } from '../services/translation/types';
+import type { TranslationRouter } from '../services/translation/router';
 import { assertJobActive, isJobCancelledError } from './jobCancellation';
 
 export type DubbingWorkflowParams = { projectId: string; userId: string; jobId: string };
@@ -29,6 +30,8 @@ type PipelineJobs = {
   ): Promise<Pick<DubbingJob, 'status' | 'retryCount'> | null>;
 } & Pick<JobStore, 'setProgress' | 'fail' | 'complete'>;
 type PipelineSegments = Pick<SegmentStore, 'replaceFromAsr' | 'setTranslationResult'>;
+type PipelineTranslationContextStore = Pick<TranslationContextStore, 'getContext'>;
+type PipelineTranslationRouter = Pick<TranslationRouter, 'translate'>;
 type UsageMeter = Pick<UsageStore, 'record'>;
 
 export type DubbingPipelineDeps = {
@@ -39,8 +42,8 @@ export type DubbingPipelineDeps = {
   asr: AsrProvider;
   asrProviderId: string;
   segments: PipelineSegments;
-  translation: TranslationProvider;
-  translationProviderId: string;
+  translationContext: PipelineTranslationContextStore;
+  translationRouter: PipelineTranslationRouter;
   usage: UsageMeter;
 };
 
@@ -88,7 +91,6 @@ export async function runDubbingPipeline(
     const retryCount = job.retryCount;
     if (!Number.isInteger(retryCount) || retryCount < 0) throw new Error('Job retry generation is invalid.');
     const asrProvider = providerId(deps.asrProviderId, 'ASR');
-    const translationProvider = providerId(deps.translationProviderId, 'Translation');
 
     await step.do('mark processing', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'processing');
@@ -159,33 +161,69 @@ export async function runDubbingPipeline(
     );
 
     failureCode = 'TRANSLATION_FAILED';
+    const context = await step.do('load translation context snapshot', async () =>
+      deps.translationContext.getContext(params.projectId, params.userId),
+    );
+    if (!context) throw new Error('Project translation context not found.');
+
     const batchSize = 25;
     for (let offset = 0; offset < persisted.length; offset += batchSize) {
       const batch = persisted.slice(offset, offset + batchSize);
       await step.do(`check cancellation before translation ${offset + 1}`, ensureActive);
-      const translated = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () => {
+      const routed = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () => {
         const items = batch.map((segment) => ({ id: segment.id, text: segment.sourceText }));
+        const result = await deps.translationRouter.translate(
+          undefined,
+          items,
+          project.sourceLanguage,
+          'vi',
+          context,
+        );
+        if (result.mode === 'compare') {
+          throw new Error('Compare mode cannot be persisted by the dubbing workflow.');
+        }
+
+        const usageProvider = result.mode === 'contextual'
+          ? 'workers-ai-contextual'
+          : result.mode === 'google'
+            ? 'google'
+            : 'workers-ai';
         const units = sourceCharacters(items.map((item) => item.text));
-        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, translationProvider);
+        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, usageProvider);
         const common = {
           userId: params.userId,
           projectId: params.projectId,
           jobId: params.jobId,
           kind: 'translation_character' as const,
           units,
-          provider: translationProvider,
+          provider: usageProvider,
           operationKey: key,
         };
         await deps.usage.record({ ...common, phase: 'started' });
-        const results = await deps.translation.translateBatch(items, project.sourceLanguage, 'vi');
-        const unexpected = results.find((result) => result.provider !== translationProvider);
-        if (unexpected) {
-          throw new Error(`Translation provider mismatch: expected ${translationProvider}, received ${unexpected.provider}.`);
+
+        if (result.primary.length !== items.length) {
+          throw new Error(`Translation result count mismatch: expected ${items.length}, received ${result.primary.length}.`);
         }
+        const expectedIds = new Set(items.map((item) => item.id));
+        const seenIds = new Set<string>();
+        for (const translated of result.primary) {
+          if (!expectedIds.has(translated.id) || seenIds.has(translated.id)) {
+            throw new Error(`Translation result id mismatch: ${translated.id}.`);
+          }
+          if (translated.provider !== usageProvider) {
+            throw new Error(`Translation provider mismatch: expected ${usageProvider}, received ${translated.provider}.`);
+          }
+          seenIds.add(translated.id);
+        }
+        if (seenIds.size !== expectedIds.size) {
+          throw new Error('Translation results are missing one or more segment ids.');
+        }
+
         await deps.usage.record({ ...common, phase: 'completed' });
-        return results;
+        return result;
       });
-      const byId = new Map(translated.map((item) => [item.id, item]));
+
+      const byId = new Map(routed.primary.map((item) => [item.id, item]));
       await step.do(`persist translations ${offset + 1}-${offset + batch.length}`, async () => {
         for (const segment of batch) {
           const result = byId.get(segment.id);
@@ -196,7 +234,8 @@ export async function runDubbingPipeline(
             params.userId,
             segment.version,
             result.text,
-            'workers-ai',
+            routed.mode === 'google' ? 'google' : 'workers-ai',
+            routed.contextRevision,
           );
         }
       });
