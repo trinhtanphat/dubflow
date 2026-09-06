@@ -2,13 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { fetchVoiceCapabilities, fetchVoicePreview } from './voiceApi';
 
 describe('voiceApi', () => {
-  it('loads live voice capabilities from the Worker', async () => {
-    const fetcher = vi.fn(async () => Response.json({
-      provider: 'elevenlabs', configured: true, languages: ['vi'], cloning: true, preview: true,
-    }));
-    await expect(fetchVoiceCapabilities(fetcher as typeof fetch)).resolves.toEqual({
-      provider: 'elevenlabs', configured: true, languages: ['vi'], cloning: true, preview: true,
-    });
+  it('loads live voice capabilities from the Worker including managed clone enrollment', async () => {
+    const payload = {
+      provider: 'elevenlabs',
+      configured: true,
+      languages: ['vi'],
+      cloning: true,
+      preview: true,
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
+    } as const;
+    const fetcher = vi.fn(async () => Response.json(payload));
+    await expect(fetchVoiceCapabilities(fetcher as typeof fetch)).resolves.toEqual(payload);
     expect(fetcher).toHaveBeenCalledWith('/api/voice/capabilities', expect.anything());
   });
 

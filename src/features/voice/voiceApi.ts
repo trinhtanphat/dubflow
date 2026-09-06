@@ -6,6 +6,11 @@ export type VoiceCapabilities = {
   languages: string[] | 'unknown';
   cloning: boolean;
   preview?: boolean;
+  cloneEnrollment: {
+    provider: 'elevenlabs';
+    mode: 'ivc';
+    available: boolean;
+  };
 };
 
 export type VoicePreviewInput = {

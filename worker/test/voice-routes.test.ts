@@ -21,7 +21,7 @@ function voiceEnv(overrides: Partial<Env> = {}): Env {
 }
 
 describe('voice HTTP routes', () => {
-  it('reports configured ElevenLabs preview capability without exposing secrets', async () => {
+  it('reports configured ElevenLabs preview and managed IVC capability without exposing secrets', async () => {
     const routes = createVoiceRoutes(async () => new Response('audio'));
     const response = await routes.fetch(new Request('https://yupvox.test/capabilities'), voiceEnv());
     expect(response.status).toBe(200);
@@ -32,6 +32,7 @@ describe('voice HTTP routes', () => {
       languages: ['vi'],
       cloning: true,
       preview: true,
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
     });
     expect(JSON.stringify(payload)).not.toContain('secret-key');
   });

@@ -10,8 +10,13 @@ export type ElevenLabsVoiceCapabilities = {
   provider: 'elevenlabs';
   configured: boolean;
   languages: ['vi'];
-  cloning: true;
+  cloning: boolean;
   preview: boolean;
+  cloneEnrollment: {
+    provider: 'elevenlabs';
+    mode: 'ivc';
+    available: boolean;
+  };
 };
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -26,13 +31,19 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
   ) {}
 
   capabilities(): ElevenLabsVoiceCapabilities {
-    const configured = Boolean(this.apiKey.trim() && this.config.defaultVoiceId?.trim());
+    const apiConfigured = Boolean(this.apiKey.trim());
+    const previewConfigured = Boolean(apiConfigured && this.config.defaultVoiceId?.trim());
     return {
       provider: 'elevenlabs',
-      configured,
+      configured: previewConfigured,
       languages: ['vi'],
-      cloning: true,
-      preview: configured,
+      cloning: apiConfigured,
+      preview: previewConfigured,
+      cloneEnrollment: {
+        provider: 'elevenlabs',
+        mode: 'ivc',
+        available: apiConfigured,
+      },
     };
   }
 
