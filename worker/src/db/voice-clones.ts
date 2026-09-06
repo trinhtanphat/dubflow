@@ -98,6 +98,7 @@ export class VoiceCloneRepository implements VoiceCloneStore {
   }
 
   async list(projectId: string, userId: string): Promise<VoiceClone[]> {
+    await this.assertProjectOwned(projectId, userId);
     const result = await this.db.prepare(
       `SELECT ${COLUMNS} FROM voice_clones vc
        JOIN projects p ON p.id = vc.project_id
