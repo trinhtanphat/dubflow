@@ -31,7 +31,13 @@ function dubbingDeps(events: TelemetryEvent[], failAsr = false) {
       media: {
         async probe() { return { durationMs: 1_000 }; },
         async extractAudioChunks() {
-          return [{ objectKey: 'projects/p1/audio/000.wav', offsetMs: 0, durationMs: 1_000 }];
+          return [{
+            objectKey: 'projects/p1/audio/000.wav',
+            offsetMs: 0,
+            durationMs: 1_000,
+            overlapBeforeMs: 0,
+            overlapAfterMs: 0,
+          }];
         },
       },
       bucket: {
@@ -51,6 +57,7 @@ function dubbingDeps(events: TelemetryEvent[], failAsr = false) {
       },
       asrProviderId: 'deepgram-nova-3',
       segments: {
+        async list() { return []; },
         async replaceFromAsr() {
           return [{
             id: 's1', projectId: 'p1', speakerId: 'spk-1', startMs: 0, endMs: 500,
