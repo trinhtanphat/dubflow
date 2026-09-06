@@ -11,6 +11,8 @@ function recordingTelemetry(events: TelemetryEvent[]) {
   return { write(event: TelemetryEvent) { events.push(event); } };
 }
 
+const neutralContext = { revision: 1, style: 'neutral' as const, glossary: [] };
+
 function dubbingDeps(events: TelemetryEvent[], failAsr = false) {
   const usageEvents: Array<{ phase: string; kind: string }> = [];
   return {
@@ -54,18 +56,24 @@ function dubbingDeps(events: TelemetryEvent[], failAsr = false) {
         async replaceFromAsr() {
           return [{
             id: 's1', projectId: 'p1', speakerId: 'spk-1', startMs: 0, endMs: 500,
-            sourceText: 'private source sentence', translatedText: '', translationEngine: 'workers-ai',
+            sourceText: 'private source sentence', translatedText: '', translationEngine: 'workers-ai', translationContextRevision: null,
             translationStatus: 'pending', voiceStatus: 'pending', dubbedObjectKey: null, version: 1, splitParentId: null,
           }];
         },
         async setTranslationResult() { return null; },
       },
-      translation: {
-        async translateBatch(items: Array<{ id: string }>) {
-          return items.map((item) => ({ id: item.id, text: 'private translated sentence', provider: 'workers-ai' }));
+      translationContext: {
+        async getContext() { return neutralContext; },
+      },
+      translationRouter: {
+        async translate(_mode: unknown, items: Array<{ id: string }>) {
+          return {
+            mode: 'workers-ai' as const,
+            primary: items.map((item) => ({ id: item.id, text: 'private translated sentence', provider: 'workers-ai' })),
+            contextRevision: null,
+          };
         },
       },
-      translationProviderId: 'workers-ai',
       usage: {
         async record(input: { phase: string; kind: string }) {
           usageEvents.push({ phase: input.phase, kind: input.kind });
