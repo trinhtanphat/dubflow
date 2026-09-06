@@ -50,6 +50,16 @@ Authorized summaries are exposed through `GET /api/usage` and `GET /api/projects
 
 A GREEN Phase 3B acceptance gate qualifies repository source behavior only. It does **not** change the production-runtime status below: the Cloudflare Container credential and real provider/media fixture gates must still pass before runtime can be called qualified.
 
+## Phase 3C observability, rate-limit, and sharing qualification
+
+Phase 3C source/CI qualification adds Cloudflare-native operational telemetry and admission controls without turning them into billing or quota accounting. `ANALYTICS` is bound to the `dubflow_events` Analytics Engine dataset, invocation logs are enabled, query strings are redacted, and Worker traces use a 5% head-sampling rate. Telemetry remains bounded to opaque identifiers, operation/provider/status metadata, HTTP status and latency; transcript/media payloads, provider secrets, bearer tokens and raw URLs are outside the telemetry schema.
+
+Five independent Cloudflare Rate Limiting bindings protect expensive operations with server-derived actor keys and one-minute windows: process `4/min`, export `4/min`, translation `30/min`, voice preview `30/min`, and upload `20/min`. A denial returns HTTP 429 with stable `RATE_LIMITED` semantics and `Retry-After: 60`. These counters are abuse/admission controls only: Phase 3C rate limiting and telemetry do not write `usage_events`, decrement `credit_balance`, establish pricing, or create a payment/quota system.
+
+Final exported media can be shared through owner-managed, revocable links. Owners can create, list and revoke share records; plaintext bearer tokens are returned only in the create response, while D1 persists only a unique token hash plus a short non-secret hint. Share expiry is bounded from one hour to 30 days and the Studio defaults to seven days. Anonymous shared media requires both share ID and token, returns the same not-found shape for invalid/unknown/expired/revoked access, supports byte ranges, and sends `Referrer-Policy: no-referrer` so the bearer-token URL is not leaked through browser referrers. Owner listings never reconstruct or return the secret URL after reload.
+
+The Phase 3C acceptance gates verify the Cloudflare bindings, distinct limiter namespaces, token-hash persistence, non-secret owner list contract, public token route, telemetry/billing isolation, and compact responsive Studio sharing surface. This is repository source/configuration qualification only. It does **not** qualify the deployed Container, real providers, or real-media runtime.
+
 ## Studio reference qualification
 
 Desktop reference qualification uses the supplied 1448×1086 YupVox workstation reference, while the responsive fidelity layer also remains active on common 1364px desktop screens. The production shell activates the isolated `reference-fidelity` presentation layer and keeps the approved three-column workstation geometry.
