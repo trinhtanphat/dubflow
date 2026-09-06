@@ -1,0 +1,39 @@
+name: Cloudflare Workers Builds state probe
+
+on:
+  push:
+    branches:
+      - probe/cloudflare-build-state
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
+    steps:
+      - name: Inspect Workers Builds trigger and recent builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          scripts="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" -H "$auth")"
+          tag="$(printf '%s' "$scripts" | jq -r '.result[] | select(.id == "dubflow") | .tag' | head -n1)"
+          if [[ -z "$tag" || "$tag" == 'null' ]]; then
+            echo 'dubflow worker tag not found'
+            exit 1
+          fi
+          echo "worker=dubflow tag=$tag"
+
+          triggers="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$tag/triggers" -H "$auth")"
+          echo '=== triggers ==='
+          printf '%s' "$triggers" | jq -c '.result[] | {trigger_uuid,trigger_name,build_command,deploy_command,root_directory,branch_includes,branch_excludes,path_includes,path_excludes}'
+
+          builds="$(curl -fsS "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/builds/workers/$tag/builds" -H "$auth")"
+          echo '=== recent builds ==='
+          printf '%s' "$builds" | jq -c '(.result.builds // .result // [])[:10][] | {build_uuid,status,created_on,created_at,modified_on,branch:(.build_trigger_metadata.branch // .branch),commit_hash:(.build_trigger_metadata.commit_hash // .commit_hash),trigger_uuid:(.trigger.trigger_uuid // null)}'
