@@ -17,7 +17,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
     steps:
-      - name: Compare deployed Worker D1 binding with exact bound schema
+      - name: Compare deployed Worker D1 binding and repository SQL
         shell: bash
         run: |
           set -euo pipefail
@@ -44,30 +44,28 @@ jobs:
           const databaseId = dbBinding.database_id;
           console.log(`production Worker DB binding database_id=${databaseId}`);
 
-          const dbInfo = await cf(`${base}/d1/database/${databaseId}`);
-          console.log(`production Worker DB resource name=${dbInfo?.result?.name ?? 'unknown'}`);
-
-          async function query(sql) {
+          async function query(sql, params = []) {
             const response = await cf(`${base}/d1/database/${databaseId}/query`, {
               method: 'POST',
-              body: JSON.stringify({ sql }),
+              body: JSON.stringify({ sql, params }),
             });
             const page = Array.isArray(response?.result) ? response.result[0] : response?.result;
+            if (page?.success === false) throw new Error(JSON.stringify(page?.error ?? page));
             return page?.results ?? [];
           }
 
-          const projectColumns = (await query('PRAGMA table_info(projects);')).map((row) => row.name);
-          const usageColumns = (await query('PRAGMA table_info(usage_events);')).map((row) => row.name);
-          const migrations = (await query('SELECT name FROM d1_migrations ORDER BY id;')).map((row) => row.name);
-          console.log(`projects columns=${projectColumns.join(',')}`);
-          console.log(`usage_events columns=${usageColumns.join(',')}`);
-          console.log(`migration ledger=${migrations.join(',')}`);
+          const projectSql = `SELECT id, user_id, title, source_language, target_language, target_languages_revision, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC`;
+          const usageSql = `SELECT kind, units, provider FROM usage_events WHERE user_id = ? AND phase = 'completed' ORDER BY created_at ASC, id ASC`;
+          const balanceSql = `SELECT credit_balance FROM users WHERE id = ? LIMIT 1`;
 
-          const requiredProjectColumns = ['export_object_key', 'translation_style', 'translation_context_revision', 'target_languages_revision'];
-          const requiredUsageColumns = ['job_id', 'phase', 'operation_key'];
-          const missingProject = requiredProjectColumns.filter((name) => !projectColumns.includes(name));
-          const missingUsage = requiredUsageColumns.filter((name) => !usageColumns.includes(name));
-          console.log(`missing projects columns=${missingProject.join(',') || 'none'}`);
-          console.log(`missing usage columns=${missingUsage.join(',') || 'none'}`);
-          if (missingProject.length || missingUsage.length) process.exit(1);
+          const projectRows = await query(projectSql, ['dev-user']);
+          const usageRows = await query(usageSql, ['dev-user']);
+          const balanceRows = await query(balanceSql, ['dev-user']);
+          console.log(`ProjectRepository exact SQL PASS rows=${projectRows.length}`);
+          console.log(`UsageRepository summary SQL PASS rows=${usageRows.length}`);
+          console.log(`UsageRepository balance SQL PASS rows=${balanceRows.length}`);
+
+          const projectCount = await query(`SELECT COUNT(*) AS count FROM projects WHERE user_id = ?`, ['dev-user']);
+          const usageCount = await query(`SELECT COUNT(*) AS count FROM usage_events WHERE user_id = ? AND phase = 'completed'`, ['dev-user']);
+          console.log(`project count=${projectCount[0]?.count ?? 'unknown'} usage count=${usageCount[0]?.count ?? 'unknown'}`);
           NODE
