@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
 export const READINESS_URL = 'https://yupvox.qs3d.site/api/ready';
+export const CURRENT_SCHEMA_REVISION = 10;
 
 export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
   try {
@@ -9,7 +10,13 @@ export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
       redirect: 'follow',
     });
     const body = await response.json();
-    const ready = response.ok && body?.ready === true && body?.service === 'dubflow' && body?.database === 'ready';
+    const ready = (
+      response.ok
+      && body?.ready === true
+      && body?.service === 'dubflow'
+      && body?.database === 'ready'
+      && body?.schemaRevision === CURRENT_SCHEMA_REVISION
+    );
     return { ok: ready, status: response.status, body };
   } catch (error) {
     return {
@@ -32,7 +39,7 @@ export async function waitForDeployment({ attempts = 12, delayMs = 5000, fetchIm
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   waitForDeployment()
-    .then((result) => console.log(`YupVox ready: ${READINESS_URL} (${result.status})`))
+    .then((result) => console.log(`YupVox ready: ${READINESS_URL} (${result.status}) schema=${CURRENT_SCHEMA_REVISION}`))
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
