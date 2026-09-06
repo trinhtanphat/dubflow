@@ -1,7 +1,8 @@
 import type { AiBinding } from '../../cloudflare/ai';
 import type { SourceLanguage } from '../../domain/project';
+import type { TargetLanguage } from '../../domain/target-language';
 import { isTranslationContextActive, type TranslationContext } from './context';
-import { workersAISourceLanguage, WORKERS_AI_VIETNAMESE } from './language-map';
+import { workersAISourceLanguage, workersAITargetLanguage } from './language-map';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
 
@@ -23,7 +24,7 @@ export class WorkersAITranslationProvider implements TranslationProvider {
   async translateBatch(
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
     if (context && isTranslationContextActive(context)) {
@@ -32,8 +33,8 @@ export class WorkersAITranslationProvider implements TranslationProvider {
         'Raw translation provider cannot apply active project context.',
       );
     }
-    if (target !== 'vi') throw new TranslationProviderError('TRANSLATION_TARGET_UNSUPPORTED', 'Vietnamese is the only supported target.');
     const sourceLang = workersAISourceLanguage(source);
+    const targetLang = workersAITargetLanguage(target);
     const results: TranslationResult[] = [];
     for (const item of items) {
       if (!item.text.trim()) {
@@ -43,7 +44,7 @@ export class WorkersAITranslationProvider implements TranslationProvider {
       const response = await this.ai.run(WORKERS_AI_TRANSLATION_MODEL, {
         text: item.text,
         source_lang: sourceLang,
-        target_lang: WORKERS_AI_VIETNAMESE,
+        target_lang: targetLang,
       });
       results.push({ id: item.id, text: translatedText(response), provider: 'workers-ai' });
     }
