@@ -21,6 +21,22 @@ function renderOptions(input) {
   return { targetLanguage: input.targetLanguage, exportId: input.exportId };
 }
 
+function validateBackgroundObject(input, options) {
+  if (input?.backgroundObjectKey === undefined) return;
+  if (!options) throw new Error('backgroundObjectKey requires targetLanguage and exportId.');
+  if (typeof input.backgroundObjectKey !== 'string') throw new Error('Invalid background stem object key.');
+
+  const prefix = `${projectPrefix(input.projectId)}stems/`;
+  const suffix = '/background.wav';
+  if (!input.backgroundObjectKey.startsWith(prefix) || !input.backgroundObjectKey.endsWith(suffix)) {
+    throw new Error('Background stem is outside the project or non-canonical.');
+  }
+  const sourceRevision = input.backgroundObjectKey.slice(prefix.length, -suffix.length);
+  if (!/^[A-Za-z0-9._-]{1,200}$/.test(sourceRevision)) {
+    throw new Error('Background stem source revision is invalid.');
+  }
+}
+
 export function validateRenderExportInput(input) {
   if (!input || !validProjectId(input.projectId)) throw new Error('Invalid projectId.');
   if (typeof input.objectKey !== 'string' || !input.objectKey.startsWith(`${projectPrefix(input.projectId)}source/`)) {
@@ -31,6 +47,7 @@ export function validateRenderExportInput(input) {
   }
 
   const options = renderOptions(input);
+  validateBackgroundObject(input, options);
   const clipPrefix = options
     ? `${projectPrefix(input.projectId)}voices/${options.targetLanguage}/`
     : `${projectPrefix(input.projectId)}dubbed/`;
@@ -80,9 +97,12 @@ export function buildAtempoChain(sourceDurationMs, targetDurationMs) {
   return filters.join(',');
 }
 
-export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clips, clipPaths, clipDurationsMs }) {
+export function buildRenderExportArgs({ sourcePath, backgroundPath, outputPath, durationMs, clips, clipPaths, clipDurationsMs }) {
   if (typeof sourcePath !== 'string' || !sourcePath || typeof outputPath !== 'string' || !outputPath) {
     throw new Error('Source and output paths are required.');
+  }
+  if (backgroundPath !== undefined && (typeof backgroundPath !== 'string' || !backgroundPath)) {
+    throw new Error('Background path must be a non-empty string when provided.');
   }
   if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Source duration is invalid.');
   if (!Array.isArray(clips) || !Array.isArray(clipPaths) || clips.length === 0 || clips.length !== clipPaths.length) {
@@ -97,10 +117,17 @@ export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clip
   }
 
   const durationSeconds = seconds(durationMs);
-  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath, '-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo'];
+  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath];
+  if (backgroundPath) {
+    args.push('-i', backgroundPath);
+  } else {
+    args.push('-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo');
+  }
   for (const path of clipPaths) args.push('-i', path);
 
-  const filters = [`[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]`];
+  const filters = [backgroundPath
+    ? `[1:a]aresample=48000,atrim=duration=${durationSeconds},apad=whole_dur=${durationSeconds},asetpts=PTS-STARTPTS[base]`
+    : `[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]`];
   const labels = ['[base]'];
   clips.forEach((clip, index) => {
     const inputIndex = index + 2;
