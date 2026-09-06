@@ -135,9 +135,10 @@ export class ProjectRepository implements ProjectStore {
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
-    const prefix = `projects/${id}/export/`;
-    if (!objectKey.startsWith(prefix)) {
-      throw new Error('Export object key must belong to the project export prefix.');
+    const legacyPrefix = `projects/${id}/export/`;
+    const multilingualVietnamesePrefix = `projects/${id}/exports/vi/`;
+    if (!objectKey.startsWith(legacyPrefix) && !objectKey.startsWith(multilingualVietnamesePrefix)) {
+      throw new Error('Export object key must belong to the project Vietnamese export prefix.');
     }
     await this.db.prepare(
       `UPDATE projects SET export_object_key = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,

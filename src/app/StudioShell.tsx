@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CommandPalette } from '../components/CommandPalette/CommandPalette';
+import { MultiLanguageExportPanel } from '../features/export/MultiLanguageExportPanel';
 import { UploadPanel, type UploadPanelProps } from '../features/upload/UploadPanel';
 import { SpeakerList } from '../features/speakers/SpeakerList';
 import { VideoStage } from '../features/player/VideoStage';
@@ -250,6 +251,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorError, setEditorError] = useState('');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [shareExportId, setShareExportId] = useState<string | null>(null);
   const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
   const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
   const previousSelectedSegmentId = useRef(state.selectedSegmentId);
@@ -510,7 +512,10 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         exportBusy={exportBusy}
         exportHref={exportHref}
         canShare={Boolean(exportHref)}
-        onShare={() => setShareOpen((value) => !value)}
+        onShare={() => {
+          setShareExportId(null);
+          setShareOpen((value) => !value);
+        }}
         onExport={() => { void startFinalExport(); }}
         onUndo={() => { void editorActions.undo(); }}
         onRedo={() => { void editorActions.redo(); }}
@@ -519,8 +524,15 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         onOpenInspector={() => toggleMobilePanel('inspector')}
       />
 
-      {shareOpen && state.project.exportObjectKey ? (
-        <SharePanel projectId={state.project.id} onClose={() => setShareOpen(false)} />
+      {shareOpen && (state.project.exportObjectKey || shareExportId) ? (
+        <SharePanel
+          projectId={state.project.id}
+          exportId={shareExportId ?? undefined}
+          onClose={() => {
+            setShareOpen(false);
+            setShareExportId(null);
+          }}
+        />
       ) : null}
 
       <CommandPalette
@@ -538,6 +550,17 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
           {cloudEditable && (
             <section className="panel translation-settings-host">
               <TranslationSettingsPanel projectId={state.project.id} />
+            </section>
+          )}
+          {cloudEditable && (
+            <section className="panel multi-language-export-host">
+              <MultiLanguageExportPanel
+                projectId={state.project.id}
+                onShareVariant={(exportId) => {
+                  setShareExportId(exportId);
+                  setShareOpen(true);
+                }}
+              />
             </section>
           )}
         </aside>

@@ -12,5 +12,6 @@ import './styles/speaker-voice.css';
 import './styles/project-dashboard.css';
 import './styles/reference-fidelity.css';
 import './features/sharing/sharing.css';
+import './features/export/multilang-export.css';
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

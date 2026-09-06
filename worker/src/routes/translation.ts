@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import { MultilangRepository, type MultilangStore } from '../db/multilang';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { SegmentPersistenceError, SegmentRepository, type SegmentStore } from '../db/segments';
 import { TranslationContextRepository, type TranslationContextStore } from '../db/translation-context';
+import { parseTargetLanguage, type TargetLanguage } from '../domain/target-language';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
@@ -22,10 +24,11 @@ export type TranslationRouteDeps = {
   makeSegments?: (env: Env) => SegmentStore;
   makeContext?: (env: Env) => TranslationContextStore;
   makeRouter?: (env: Env) => TranslationRouter;
+  makeMultilang?: (env: Env) => MultilangStore;
 };
 
 function providerErrorStatus(code: string): 400 | 409 | 502 | 503 {
-  if (code === 'TRANSLATION_CONTEXT_TOO_LARGE') return 400;
+  if (code === 'TRANSLATION_TARGET_UNSUPPORTED' || code === 'TRANSLATION_CONTEXT_TOO_LARGE') return 400;
   if (code === 'TRANSLATION_CONTEXT_UNSUPPORTED') return 409;
   if (code === 'CONTEXT_TRANSLATION_UNAVAILABLE') return 503;
   return 502;
@@ -36,6 +39,7 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeSegments = deps.makeSegments ?? ((env: Env) => new SegmentRepository(env.DB));
   const makeContext = deps.makeContext ?? ((env: Env) => new TranslationContextRepository(env.DB));
+  const makeMultilang = deps.makeMultilang ?? ((env: Env) => new MultilangRepository(env.DB));
   const makeRouter = deps.makeRouter ?? ((env: Env) => new TranslationRouter(
     new WorkersAITranslationProvider(env.AI),
     new GoogleCloudTranslationProvider(env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? ''),
@@ -49,15 +53,16 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
     const projects = makeProjects(c.env);
     const segments = makeSegments(c.env);
     const contexts = makeContext(c.env);
+    const multilang = makeMultilang(c.env);
 
     const project = await projects.getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
     const segment = await segments.get(projectId, segmentId, userId);
     if (!segment) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
 
-    let input: { expectedVersion?: number; mode?: TranslationMode };
+    let input: { expectedVersion?: number; mode?: TranslationMode; targetLanguage?: unknown };
     try {
-      input = await c.req.json() as { expectedVersion?: number; mode?: TranslationMode };
+      input = await c.req.json() as { expectedVersion?: number; mode?: TranslationMode; targetLanguage?: unknown };
     } catch {
       return c.json(errorBody('TRANSLATION_REQUEST_INVALID', 'Request body must contain valid JSON.'), 400);
     }
@@ -68,6 +73,12 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
     }
     if (input.mode !== undefined && !MODES.has(input.mode)) {
       return c.json(errorBody('TRANSLATION_MODE_INVALID', 'Unknown translation mode.'), 400);
+    }
+    let targetLanguage: TargetLanguage;
+    try {
+      targetLanguage = parseTargetLanguage(input.targetLanguage);
+    } catch {
+      return c.json(errorBody('TRANSLATION_TARGET_UNSUPPORTED', 'Unsupported target language.'), 400);
     }
     if (segment.version !== expectedVersion) {
       return c.json({
@@ -99,25 +110,44 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
         input.mode,
         [{ id: segment.id, text: segment.sourceText }],
         project.sourceLanguage,
-        'vi',
+        targetLanguage,
         context,
       ));
-      if (result.mode === 'compare') return c.json(result);
+      if (result.mode === 'compare') return c.json({ ...result, targetLanguage });
 
       const translated = result.primary[0];
       if (!translated) return c.json(errorBody('TRANSLATION_EMPTY', 'Translation provider returned no result.'), 502);
       const engine = translated.provider === 'google' ? 'google' : 'workers-ai';
-      const updated = await segments.setTranslationResult(
-        projectId,
+
+      if (targetLanguage === 'vi') {
+        const updated = await segments.setTranslationResult(
+          projectId,
+          segmentId,
+          userId,
+          expectedVersion as number,
+          translated.text,
+          engine,
+          result.contextRevision,
+        );
+        if (!updated) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
+        return c.json({ mode: result.mode, result: translated, segment: updated, targetLanguage });
+      }
+
+      const existing = await multilang.getTranslation(projectId, segmentId, userId, targetLanguage);
+      const translation = await multilang.upsertTranslation({
         segmentId,
+        projectId,
         userId,
-        expectedVersion as number,
-        translated.text,
-        engine,
-        result.contextRevision,
-      );
-      if (!updated) return c.json(errorBody('SEGMENT_NOT_FOUND', 'Segment not found.'), 404);
-      return c.json({ mode: result.mode, result: translated, segment: updated });
+        targetLanguage,
+        translatedText: translated.text,
+        translationEngine: engine,
+        translationStatus: 'completed',
+        contextRevision: result.contextRevision ?? null,
+        sourceSegmentVersion: expectedVersion as number,
+        version: (existing?.version ?? 0) + 1,
+      });
+      await multilang.invalidateSegmentTarget(projectId, segmentId, userId, targetLanguage);
+      return c.json({ mode: result.mode, result: translated, targetLanguage, translation });
     } catch (error) {
       if (error instanceof SegmentPersistenceError && error.code === 'SEGMENT_VERSION_CONFLICT') {
         const canonical = await segments.get(projectId, segmentId, userId);

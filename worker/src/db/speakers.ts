@@ -1,3 +1,4 @@
+import type { MultilangStore } from './multilang';
 import type { D1DatabaseLike } from './projects';
 
 export type Speaker = {
@@ -55,7 +56,10 @@ export class SpeakerPersistenceError extends Error {
 }
 
 export class SpeakerRepository implements SpeakerStore {
-  constructor(private readonly db: D1DatabaseLike) {}
+  constructor(
+    private readonly db: D1DatabaseLike,
+    private readonly multilang?: Pick<MultilangStore, 'invalidateSpeakerAllTargets'>,
+  ) {}
 
   async list(projectId: string, userId: string): Promise<Speaker[]> {
     const result = await this.db.prepare(
@@ -124,6 +128,10 @@ export class SpeakerRepository implements SpeakerStore {
            WHERE id = ? AND user_id = ?`,
         ).bind(projectId, userId).run();
       }
+    }
+
+    if (voiceChanged) {
+      await this.multilang?.invalidateSpeakerAllTargets(projectId, speakerId, userId);
     }
 
     return {

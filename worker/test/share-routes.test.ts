@@ -51,6 +51,7 @@ function appWith(
   app.route('/api/projects', createProjectShareRoutes({
     makeProjects: () => projectStore(project) as never,
     makeShares: () => shares as ShareStore,
+    makeMultilang: () => ({ async listExports() { return []; } }) as never,
     createToken: async () => ({ token: 'plain_secret', tokenHash: 'hash-secret', tokenHint: 'n_secret' }),
     now: () => new Date(NOW),
   }));
