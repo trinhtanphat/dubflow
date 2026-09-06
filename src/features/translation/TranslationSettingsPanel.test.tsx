@@ -5,6 +5,7 @@ const glossary = [
   {
     id: 'g1',
     projectId: 'cloud-p1',
+    targetLanguage: 'vi' as const,
     sourceTerm: 'Acme',
     preferredTranslation: 'Acme',
     note: 'Tên thương hiệu',
@@ -15,6 +16,7 @@ const glossary = [
   {
     id: 'g2',
     projectId: 'cloud-p1',
+    targetLanguage: 'vi' as const,
     sourceTerm: 'Azure Gate',
     preferredTranslation: 'Cổng Azure',
     note: null,
