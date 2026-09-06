@@ -2,14 +2,14 @@ import { createContext, useContext } from 'react';
 import type { Segment } from '../features/timeline/types';
 import type {
   TargetLanguage,
-  TranslationSegmentDto,
+  TranslationVariantDto,
 } from '../features/translation/languageVariantsApi';
 import type { StudioLanguage } from '../features/translation/TargetLanguagesPanel';
 
 export type Phase4CStudioContextValue = {
   currentLanguage: StudioLanguage;
   targetLanguage: TargetLanguage | null;
-  targetSegments: TranslationSegmentDto[];
+  targetSegments: TranslationVariantDto[];
   targetDrafts: Record<string, string>;
   targetConflict: string;
   editTargetTranslation: (segmentId: string, text: string) => void;
@@ -28,7 +28,7 @@ export function usePhase4CStudio() {
 
 export function composeTargetSegment(
   canonical: Segment,
-  variant?: TranslationSegmentDto | null,
+  variant?: TranslationVariantDto | null,
   draftText?: string,
 ): Segment {
   return {
