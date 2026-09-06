@@ -14,6 +14,7 @@ import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
+import type { SeparationMode } from '../services/separation/types';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import type { VoiceCapabilities } from '../services/voice/types';
 
@@ -65,6 +66,38 @@ function readableBucket(env: Env): R2ReadableBucketLike {
 
 function parseOutput(value: unknown): ExportOutput | null {
   return value === 'dubbed' || value === 'subtitles' ? value : null;
+}
+
+function parseSeparationMode(value: unknown): SeparationMode | null {
+  if (value === undefined || value === null || value === 'source_mix') return 'source_mix';
+  return value === 'preserve_background' ? 'preserve_background' : null;
+}
+
+function separationAvailable(env: Env): boolean {
+  return Boolean(env.FFMPEG_CONTAINER && env.ELEVENLABS_API_KEY?.trim());
+}
+
+function separationAdmissionError(
+  env: Env,
+  output: ExportOutput,
+  separationMode: SeparationMode,
+): ExportValidationError | null {
+  if (separationMode === 'source_mix') return null;
+  if (output !== 'dubbed') {
+    return {
+      status: 400,
+      code: 'STEM_SEPARATION_OUTPUT_INVALID',
+      message: 'Background-preserving separation is available only for dubbed video export.',
+    };
+  }
+  if (!separationAvailable(env)) {
+    return {
+      status: 503,
+      code: 'STEM_SEPARATION_UNAVAILABLE',
+      message: 'Dialogue/background separation is not available for this deployment.',
+    };
+  }
+  return null;
 }
 
 function voiceTargetError(capabilities: VoiceCapabilities, targetLanguage: TargetLanguage): ExportValidationError | null {
@@ -188,6 +221,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     userId: string,
     targetLanguage: TargetLanguage,
     output: ExportOutput,
+    separationMode: SeparationMode,
     batchId: string | null,
     requestId: string | undefined,
     legacy: boolean,
@@ -206,6 +240,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
           exportId: attempt.id,
           targetLanguage,
           output,
+          separationMode,
           requestId,
         },
       });
@@ -234,10 +269,19 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
   }
 
-  async function startSingle(c: any, targetLanguage: string, output: ExportOutput, legacy: boolean) {
+  async function startSingle(
+    c: any,
+    targetLanguage: string,
+    output: ExportOutput,
+    separationMode: SeparationMode,
+    legacy: boolean,
+  ) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     try {
+      const separationError = separationAdmissionError(c.env, output, separationMode);
+      if (separationError) return c.json(errorBody(separationError.code, separationError.message), separationError.status);
+
       const validated = await validateTarget(c.env, projectId, userId, targetLanguage, output);
       if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
 
@@ -250,6 +294,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         userId,
         validated.targetLanguage,
         output,
+        separationMode,
         null,
         c.get('requestId'),
         legacy,
@@ -269,6 +314,21 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   async function startLegacy(c: any) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
+    let separationMode: SeparationMode = 'source_mix';
+    if (c.req.header('content-type')?.includes('application/json')) {
+      let payload: { separationMode?: unknown };
+      try {
+        payload = await c.req.json();
+      } catch {
+        return c.json(errorBody('EXPORT_REQUEST_INVALID', 'Export body must be valid JSON.'), 400);
+      }
+      const parsed = parseSeparationMode(payload.separationMode);
+      if (!parsed) return c.json(errorBody('STEM_SEPARATION_MODE_INVALID', 'Invalid separation mode.'), 400);
+      separationMode = parsed;
+    }
+    const separationError = separationAdmissionError(c.env, 'dubbed', separationMode);
+    if (separationError) return c.json(errorBody(separationError.code, separationError.message), separationError.status);
+
     const projects = makeProjects(c.env);
     const project = await projects.getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
@@ -300,6 +360,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
           exportId: attempt.id,
           targetLanguage: 'vi',
           output: 'dubbed',
+          separationMode,
           requestId: c.get('requestId'),
         },
       });
@@ -313,10 +374,24 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
   }
 
+  routes.get('/:id/export-capabilities', async (c) => {
+    const userId = getCurrentUserId();
+    const projectId = c.req.param('id');
+    const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
+    if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
+    const available = separationAvailable(c.env);
+    return c.json({
+      dialogueBackgroundSeparation: {
+        available,
+        modes: available ? ['source_mix', 'preserve_background'] : ['source_mix'],
+      },
+    });
+  });
+
   routes.post('/:id/exports/batch', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
-    let payload: { targetLanguages?: unknown; output?: unknown };
+    let payload: { targetLanguages?: unknown; output?: unknown; separationMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -324,6 +399,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
+    const separationMode = parseSeparationMode(payload.separationMode);
+    if (!separationMode) return c.json(errorBody('STEM_SEPARATION_MODE_INVALID', 'Invalid separation mode.'), 400);
+    const separationError = separationAdmissionError(c.env, output, separationMode);
+    if (separationError) return c.json(errorBody(separationError.code, separationError.message), separationError.status);
     if (!Array.isArray(payload.targetLanguages) || payload.targetLanguages.length === 0) {
       return c.json(errorBody('EXPORT_TARGETS_INVALID', 'At least one target language is required.'), 400);
     }
@@ -354,6 +433,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         userId,
         target,
         output,
+        separationMode,
         batchId,
         c.get('requestId'),
         false,
@@ -363,7 +443,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   });
 
   routes.post('/:id/exports/:language', async (c) => {
-    let payload: { output?: unknown };
+    let payload: { output?: unknown; separationMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -371,7 +451,9 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
-    return startSingle(c, c.req.param('language'), output, false);
+    const separationMode = parseSeparationMode(payload.separationMode);
+    if (!separationMode) return c.json(errorBody('STEM_SEPARATION_MODE_INVALID', 'Invalid separation mode.'), 400);
+    return startSingle(c, c.req.param('language'), output, separationMode, false);
   });
 
   routes.get('/:id/exports/:language', async (c) => {
