@@ -5,6 +5,7 @@ import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
 import { UsageRepository } from '../db/usage';
+import { createTelemetry } from '../observability/telemetry';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { asrCapabilities, createAsrProvider } from '../services/asr/router';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
@@ -25,6 +26,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         translation: new WorkersAITranslationProvider(this.env.AI),
         translationProviderId: 'workers-ai',
         usage: new UsageRepository(this.env.DB),
+        telemetry: createTelemetry(this.env),
       },
       step,
     );
