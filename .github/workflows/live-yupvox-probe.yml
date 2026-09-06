@@ -1,0 +1,33 @@
+name: Live YupVox Probe
+
+on:
+  push:
+    branches:
+      - verify/live-yupvox-500
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe production API without logging project data
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ready_body="$RUNNER_TEMP/ready.json"
+          ready_status="$(curl --retry 5 --retry-delay 2 --retry-all-errors -sS -o "$ready_body" -w '%{http_code}' https://yupvox.qs3d.site/api/ready)"
+          echo "GET /api/ready -> $ready_status"
+          cat "$ready_body"
+          echo
+          test "$ready_status" = "200"
+          node -e "const fs=require('fs'); const b=JSON.parse(fs.readFileSync(process.argv[1],'utf8')); if (b.ready !== true || b.service !== 'dubflow' || b.database !== 'ready') process.exit(1)" "$ready_body"
+
+          for path in projects usage; do
+            status="$(curl --retry 5 --retry-delay 2 --retry-all-errors -sS -o /dev/null -w '%{http_code}' "https://yupvox.qs3d.site/api/$path")"
+            echo "GET /api/$path -> $status"
+            test "$status" = "200"
+          done
