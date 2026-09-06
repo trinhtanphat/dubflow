@@ -383,16 +383,21 @@ async function resolveSeparatedBackground(
   }
 
   const units = durationMs / 1000;
-  await step.do('record dialogue separation started usage', () => deps.usage.record({
-    userId: params.userId,
-    projectId: params.projectId,
-    jobId: params.jobId,
-    kind: 'dialogue_separation_second',
-    units,
-    provider,
-    phase: 'started',
-    operationKey: usageKey,
-  }));
+  const startedUsage = await step.do('load started dialogue separation usage', () =>
+    deps.usage.getByOperation(usageKey, 'started'),
+  );
+  if (!startedUsage) {
+    await step.do('record dialogue separation started usage', () => deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'dialogue_separation_second',
+      units,
+      provider,
+      phase: 'started',
+      operationKey: usageKey,
+    }));
+  }
   await step.do('check cancellation before dialogue separation provider', ensureActive);
 
   let result;
