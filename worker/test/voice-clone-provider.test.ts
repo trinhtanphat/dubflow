@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { ElevenLabsVoiceCloneProvider } from '../src/services/voice-clone/elevenlabs';
 
 describe('ElevenLabs managed voice clone provider', () => {
@@ -50,13 +50,17 @@ describe('ElevenLabs managed voice clone provider', () => {
   });
 
   it('deletes the exact encoded provider voice id', async () => {
-    const fetcher = vi.fn(async () => new Response(null, { status: 204 }));
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      calls.push({ input, init });
+      return new Response(null, { status: 204 });
+    };
     const provider = new ElevenLabsVoiceCloneProvider('secret-key', fetcher);
 
     await provider.deleteClone('voice/with spaces');
 
-    expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(String(fetcher.mock.calls[0][0])).toBe('https://api.elevenlabs.io/v1/voices/voice%2Fwith%20spaces');
-    expect(fetcher.mock.calls[0][1]?.method).toBe('DELETE');
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0].input)).toBe('https://api.elevenlabs.io/v1/voices/voice%2Fwith%20spaces');
+    expect(calls[0].init?.method).toBe('DELETE');
   });
 });
