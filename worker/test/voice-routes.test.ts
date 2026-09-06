@@ -7,6 +7,8 @@ const ai = {
   async run() { return new Response('workers-ai'); },
 } satisfies AiBinding;
 
+type AnalyticsPoint = { blobs?: string[]; doubles?: number[]; indexes?: string[] };
+
 function voiceEnv(overrides: Partial<Env> = {}): Env {
   return {
     AI: ai,
@@ -34,8 +36,9 @@ describe('voice HTTP routes', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-key');
   });
 
-  it('returns generated audio from POST /preview when the provider is configured', async () => {
+  it('returns generated audio and emits sanitized provider success telemetry', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const points: AnalyticsPoint[] = [];
     const routes = createVoiceRoutes(async (input, init) => {
       calls.push({ url: String(input), init });
       return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/mpeg' } });
@@ -44,13 +47,36 @@ describe('voice HTTP routes', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text: 'Xin chào', language: 'vi' }),
-    }), voiceEnv());
+    }), voiceEnv({ ANALYTICS: { writeDataPoint(point: AnalyticsPoint) { points.push(point); } } as Env['ANALYTICS'] }));
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('audio/mpeg');
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
     expect(calls).toHaveLength(1);
+    const event = points.find((point) => point.blobs?.[0] === 'provider_success');
+    expect(event?.blobs?.[6]).toBe('voice');
+    expect(event?.blobs?.[7]).toBe('elevenlabs');
+    expect(event?.blobs?.[8]).toBe('success');
+    expect(JSON.stringify(event)).not.toContain('Xin chào');
+    expect(JSON.stringify(event)).not.toContain('secret-key');
+  });
+
+  it('emits normalized provider failure telemetry without provider response bodies', async () => {
+    const points: AnalyticsPoint[] = [];
+    const rawBody = 'secret provider body';
+    const routes = createVoiceRoutes(async () => new Response(rawBody, { status: 500 }));
+    const response = await routes.fetch(new Request('https://yupvox.test/preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Xin chào', language: 'vi' }),
+    }), voiceEnv({ ANALYTICS: { writeDataPoint(point: AnalyticsPoint) { points.push(point); } } as Env['ANALYTICS'] }));
+
+    expect(response.status).toBe(502);
+    const event = points.find((point) => point.blobs?.[0] === 'provider_failure');
+    expect(event?.blobs?.[7]).toBe('elevenlabs');
+    expect(event?.blobs?.[9]).toBe('VOICE_PROVIDER_FAILED');
+    expect(JSON.stringify(event)).not.toContain(rawBody);
   });
 
   it('rejects a valid configured preview before provider work when rate limited', async () => {
