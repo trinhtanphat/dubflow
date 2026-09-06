@@ -30,9 +30,7 @@ jobs:
 
           async function post(path, body) {
             const response = await fetch(`${base}/${path}`, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(body),
+              method: 'POST', headers, body: JSON.stringify(body),
             });
             const text = await response.text();
             let parsed;
@@ -43,85 +41,70 @@ jobs:
             return parsed;
           }
 
-          const paths = ['/api/ready', '/api/projects', '/api/usage'];
-          for (const path of paths) {
+          const requestStarted = Date.now();
+          for (const path of ['/api/ready', '/api/projects', '/api/usage']) {
             const response = await fetch(`https://yupvox.qs3d.site${path}`, {
               headers: { accept: 'application/json', 'cache-control': 'no-cache' },
             });
             console.log(`fresh production request ${path} status=${response.status}`);
           }
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-
-          const keys = await post('keys', {});
-          const keyRows = Array.isArray(keys?.result) ? keys.result : [];
-          const interestingKeys = keyRows
-            .map((item) => item?.key)
-            .filter((key) => typeof key === 'string' && (
-              key.includes('$metadata') || /error|exception|message|status|url|request/i.test(key)
-            ));
-          console.log(`observability keys available=${keyRows.length}`);
-          console.log(`interesting keys=${interestingKeys.slice(0, 80).join(',')}`);
-
+          await new Promise((resolve) => setTimeout(resolve, 4000));
           const now = Date.now();
+          const timeframe = { from: requestStarted - 5 * 60 * 1000, to: now + 15 * 1000 };
+
+          const values = await post('values', {
+            datasets: [],
+            key: '$metadata.service',
+            timeframe,
+            type: 'string',
+          });
+          const valueRows = Array.isArray(values?.result) ? values.result : [];
+          const safeServices = valueRows
+            .map((row) => ({ dataset: String(row?.dataset ?? ''), service: String(row?.value ?? '') }))
+            .filter((row) => row.service)
+            .slice(0, 100);
+          console.log(`service values=${JSON.stringify(safeServices)}`);
+
           const query = await post('query', {
-            queryId: `dubflow-runtime-${now}`,
-            timeframe: { from: now - 5 * 60 * 1000, to: now + 10 * 1000 },
+            queryId: `dubflow-discovery-${now}`,
+            timeframe,
             view: 'events',
             limit: 200,
             dry: true,
-            parameters: {
-              datasets: [],
-              filterCombination: 'and',
-              filters: [
-                { key: '$metadata.service', operation: 'eq', type: 'string', value: 'dubflow' }
-              ]
-            }
+            parameters: { datasets: [] },
           });
 
-          const result = query?.result ?? {};
-          const eventEnvelope = result?.events ?? {};
-          const events = Array.isArray(eventEnvelope?.events) ? eventEnvelope.events : [];
-          const totalCount = Number(eventEnvelope?.count ?? events.length);
-          console.log(`observability matching events=${events.length} total=${Number.isFinite(totalCount) ? totalCount : 'unknown'}`);
+          const envelope = query?.result?.events ?? {};
+          const events = Array.isArray(envelope?.events) ? envelope.events : [];
+          console.log(`unfiltered events returned=${events.length} total=${envelope?.count ?? events.length}`);
 
-          function pick(obj, key) {
-            if (!obj || typeof obj !== 'object') return undefined;
-            if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
-            return undefined;
-          }
-          function sanitizeEvent(event) {
+          function sanitized(event) {
             const metadata = event?.$metadata ?? event?.metadata ?? {};
-            const attrs = event?.attributes ?? event?.data ?? {};
             const workers = event?.$workers ?? {};
-            const candidates = {
-              id: metadata?.id,
+            return {
               service: metadata?.service,
               trigger: metadata?.trigger,
               type: metadata?.type,
               level: metadata?.level,
-              statusCode: metadata?.statusCode ?? metadata?.status_code,
               error: metadata?.error,
               message: metadata?.message,
-              requestUrl: metadata?.url ?? metadata?.request?.url,
-              outcome: workers?.outcome ?? metadata?.outcome,
+              url: metadata?.url,
+              requestId: metadata?.requestId ?? workers?.requestId,
+              outcome: workers?.outcome,
               scriptName: workers?.scriptName,
-              requestId: workers?.requestId ?? metadata?.requestId,
-              exception: pick(attrs, 'exception') ?? pick(attrs, 'exceptions') ?? pick(event, 'exceptions'),
-              eventMessage: pick(event, 'message'),
-              source: typeof event?.source === 'string' ? event.source.slice(0, 1600) : undefined,
             };
-            const text = JSON.stringify(candidates);
-            return text.length > 5000 ? text.slice(0, 5000) : text;
           }
 
-          const relevant = events.filter((event) => {
-            const text = JSON.stringify(event);
-            return text.includes('/api/projects') || text.includes('/api/usage') || text.includes('/api/ready') || /error|exception|500|USAGE_SUMMARY_FAILED|Internal Server Error/i.test(text);
+          const candidates = events.filter((event) => {
+            const meta = sanitized(event);
+            const text = JSON.stringify(meta);
+            return meta.service === 'dubflow' || meta.scriptName === 'dubflow' ||
+              /yupvox\.qs3d\.site|\/api\/(ready|projects|usage)|USAGE_SUMMARY_FAILED|Internal Server Error|exception|error/i.test(text);
           });
-          console.log(`relevant events=${relevant.length}`);
-          for (const event of relevant.slice(0, 80)) console.log(sanitizeEvent(event));
+          console.log(`candidate production events=${candidates.length}`);
+          for (const event of candidates.slice(0, 120)) console.log(JSON.stringify(sanitized(event)));
 
-          if (events.length === 0) {
-            throw new Error('Workers Observability query succeeded but returned no dubflow events in the fresh request window.');
+          if (valueRows.length === 0 && events.length === 0) {
+            throw new Error('Workers Observability returned neither service values nor events for the fresh account window.');
           }
           NODE
