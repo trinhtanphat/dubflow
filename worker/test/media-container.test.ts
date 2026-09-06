@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ContainerMediaProcessor } from '../src/services/media/container';
 
 describe('ContainerMediaProcessor', () => {
-  it('requests bounded five-minute audio chunks from a project-named container', async () => {
+  it('requests bounded overlapping five-minute ASR windows from a project-named container', async () => {
     const requests: Request[] = [];
     const namespace = {
       getByName(name: string) {
@@ -32,6 +32,7 @@ describe('ContainerMediaProcessor', () => {
       projectId: 'project-1',
       objectKey: 'projects/project-1/source/source.mp4',
       chunkSeconds: 300,
+      overlapSeconds: 8,
     });
   });
 
