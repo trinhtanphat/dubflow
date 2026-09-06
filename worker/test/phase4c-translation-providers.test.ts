@@ -105,6 +105,21 @@ describe('Phase 4C translation provider target contract', () => {
     expect(JSON.parse(input.messages[1]?.content ?? '{}')).toMatchObject({ targetLanguage: 'ja' });
   });
 
+  it('routes a supported non-Vietnamese target through the selected raw provider', async () => {
+    const workers = new StubProvider('workers-ai');
+    const google = new StubProvider('google');
+    const contextual = new StubProvider('workers-ai-contextual', TARGET_LANGUAGES, true);
+    const router = new TranslationRouter(workers as any, google as any, contextual as any);
+
+    await expect((router.translate as any)('google', [{ id: 'a', text: 'Hello' }], 'en', 'ja'))
+      .resolves.toMatchObject({
+        mode: 'google',
+        primary: [{ id: 'a', text: 'google:ja:Hello', provider: 'google' }],
+      });
+    expect(google.calls).toEqual(['ja']);
+    expect(workers.calls).toEqual([]);
+  });
+
   it('rejects unsupported router targets before calling any provider', async () => {
     const workers = new StubProvider('workers-ai');
     const google = new StubProvider('google');
