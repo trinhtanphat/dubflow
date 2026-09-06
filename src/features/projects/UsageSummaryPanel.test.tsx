@@ -9,6 +9,7 @@ const summary: UsageSummaryResponse = {
     asrAudioSeconds: 90,
     translationCharacters: 1200,
     ttsAudioSeconds: 35.5,
+    stemSeparationAudioSeconds: 0,
     renderSeconds: 150,
   },
   providers: {
@@ -16,12 +17,14 @@ const summary: UsageSummaryResponse = {
       asrAudioSeconds: 90,
       translationCharacters: 0,
       ttsAudioSeconds: 0,
+      stemSeparationAudioSeconds: 0,
       renderSeconds: 0,
     },
     elevenlabs: {
       asrAudioSeconds: 0,
       translationCharacters: 0,
       ttsAudioSeconds: 35.5,
+      stemSeparationAudioSeconds: 0,
       renderSeconds: 0,
     },
   },
