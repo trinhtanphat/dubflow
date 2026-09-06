@@ -1,5 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
+import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { VoiceProviderError } from '../services/voice/types';
 import { WorkersAIVoiceProvider } from '../services/voice/workers-ai';
@@ -49,6 +51,9 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
     if (!hasElevenLabs(c.env)) {
       return c.json({ code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'ElevenLabs voice preview is not configured.' }, 503);
     }
+
+    const rateLimited = await enforceRateLimit(c, 'voice', getCurrentUserId());
+    if (rateLimited) return rateLimited;
 
     const provider = new ElevenLabsVoiceProvider(
       c.env.ELEVENLABS_API_KEY ?? '',
