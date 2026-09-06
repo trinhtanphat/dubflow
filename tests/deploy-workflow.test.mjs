@@ -3,10 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const workflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
+const wranglerConfig = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 
 test('Cloudflare deployment is manual-only while container credentials are externally qualified', () => {
   assert.doesNotMatch(workflow, /^  push:\s*$/m);
   assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+});
+
+test('production deploy uses the same Cloudflare account as Wrangler', () => {
+  const match = workflow.match(/CLOUDFLARE_ACCOUNT_ID:\s*([0-9a-f]{32})/i);
+  assert.ok(match, 'deployment workflow must declare CLOUDFLARE_ACCOUNT_ID');
+  assert.equal(match[1], wranglerConfig.account_id);
 });
 
 test('production deploy wires optional translation, diarization and ElevenLabs voice secrets without committing values', () => {
