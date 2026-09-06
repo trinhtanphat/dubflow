@@ -40,7 +40,7 @@ The contextual model runtime is not proven by source CI. Production runtime stat
 
 ## Phase 4A project-stable diarization qualification
 
-Phase 4A source/CI qualification uses bounded 300-second ASR windows with a 15-second overlap, deterministic duplicate suppression, conservative cross-window speaker stitching and safe historical speaker-ID reconciliation. Ambiguous evidence remains split; no biometric embedding, voiceprint or biometric template store is introduced.
+Phase 4A source/CI qualification uses bounded 300-second ASR windows with a 15-second overlap. The canonical next-window stride is **285 seconds** (`300 − 15`), preserving the superseding fixed overlap contract. Duplicate suppression, conservative cross-window speaker stitching and safe historical speaker-ID reconciliation remain deterministic; ambiguous evidence remains split and no biometric embedding, voiceprint or biometric template store is introduced.
 
 Phase 3B still meters the actual audio sent to the ASR provider. Production runtime remains **UNQUALIFIED** until a real Deepgram/media fixture proves cross-window persisted speaker linkage and safe rerun reconciliation.
 
