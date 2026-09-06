@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../env';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
+import { ProjectExportRepository } from '../db/project-exports';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { ShareRepository, type ShareStore } from '../db/shares';
 import { errorBody } from '../http/json';
@@ -15,9 +16,12 @@ const DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MIN_SHARE_TTL_SECONDS = 60 * 60;
 const MAX_SHARE_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+export type ProjectExportStore = Pick<ProjectExportRepository, 'get' | 'latestCompleted'>;
+
 export type ProjectShareRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
   makeShares?: (env: Env) => ShareStore;
+  makeExports?: (env: Env) => ProjectExportStore;
   createToken?: typeof createShareToken;
   now?: () => Date;
 };
@@ -72,6 +76,7 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
   const routes = new Hono<{ Bindings: Env }>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeShares = deps.makeShares ?? ((env: Env) => new ShareRepository(env.DB));
+  const makeExports = deps.makeExports ?? ((env: Env) => new ProjectExportRepository(env.DB));
   const makeToken = deps.createToken ?? createShareToken;
   const now = deps.now ?? (() => new Date());
 
@@ -80,9 +85,6 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     const projectId = c.req.param('id');
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
-    if (!project.exportObjectKey) {
-      return c.json(errorBody('EXPORT_NOT_READY', 'Final export is not ready to share.'), 409);
-    }
 
     const body = await readCreateBody(c.req.raw);
     if (!body) return c.json(errorBody('INVALID_JSON', 'Request body must be a JSON object.'), 400);
@@ -97,14 +99,55 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
       );
     }
 
+    if (body.exportId !== undefined && (typeof body.exportId !== 'string' || !body.exportId.trim())) {
+      return c.json(errorBody('EXPORT_ID_INVALID', 'Export id must be a non-empty string.'), 400);
+    }
+    const requestedExportId = typeof body.exportId === 'string' ? body.exportId.trim() : null;
+
+    let resolvedExportId: string | null = null;
+    let exportObjectKey: string | null = null;
+    const exportsStore = makeExports(c.env);
+
+    if (requestedExportId) {
+      const attempt = await exportsStore.get(projectId, requestedExportId, userId);
+      if (!attempt) return c.json(errorBody('EXPORT_NOT_FOUND', 'Export not found.'), 404);
+      const objectKey = attempt.output === 'subtitles' ? attempt.subtitleObjectKey : attempt.exportObjectKey;
+      if (attempt.status !== 'completed' || !objectKey) {
+        return c.json(errorBody('EXPORT_NOT_READY', 'Selected export is not ready to share.'), 409);
+      }
+      resolvedExportId = attempt.id;
+      exportObjectKey = objectKey;
+    } else {
+      let latestVietnamese = null;
+      try {
+        latestVietnamese = await exportsStore.latestCompleted(projectId, userId, 'vi', 'dubbed');
+      } catch {
+        // Legacy callers can still share an already-published project-level Vietnamese artifact
+        // while a pre-0010 database is being reconciled.
+      }
+
+      if (project.exportObjectKey) {
+        exportObjectKey = project.exportObjectKey;
+        if (latestVietnamese?.exportObjectKey === project.exportObjectKey) resolvedExportId = latestVietnamese.id;
+      } else if (latestVietnamese?.exportObjectKey) {
+        exportObjectKey = latestVietnamese.exportObjectKey;
+        resolvedExportId = latestVietnamese.id;
+      }
+
+      if (!exportObjectKey) {
+        return c.json(errorBody('EXPORT_NOT_READY', 'Final Vietnamese export is not ready to share.'), 409);
+      }
+    }
+
     const createdAt = now();
     const secret = await makeToken();
     const share = await makeShares(c.env).create({
       projectId,
       userId,
+      exportId: resolvedExportId,
       tokenHash: secret.tokenHash,
       tokenHint: secret.tokenHint,
-      exportObjectKey: project.exportObjectKey,
+      exportObjectKey,
       expiresAt: new Date(createdAt.getTime() + ttlSeconds * 1000).toISOString(),
     });
     const shareUrl = `${CANONICAL_SHARE_ORIGIN}/api/shares/${encodeURIComponent(share.id)}/media?token=${encodeURIComponent(secret.token)}`;
@@ -170,7 +213,7 @@ export function createPublicShareRoutes(deps: PublicShareRouteDeps = {}) {
         makeBucket(c.env),
         share.exportObjectKey,
         c.req.raw,
-        `${share.projectId}-dubbed.mp4`,
+        share.exportObjectKey.endsWith('.srt') ? `${share.projectId}-subtitles.srt` : `${share.projectId}-dubbed.mp4`,
       );
       const rangeRequest = Boolean(c.req.header('range'));
       const success = response.status === 200 || response.status === 206;
