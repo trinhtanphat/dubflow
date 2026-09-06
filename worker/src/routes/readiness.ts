@@ -12,7 +12,7 @@ export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
-  schemaRevision: 10 | null;
+  schemaRevision: 11 | null;
   asr: AsrCapabilities;
 };
 
@@ -23,9 +23,12 @@ type ReadinessSchemaRow = {
   target_languages_revision_column: number;
   project_target_languages_table: number;
   project_exports_output_column: number;
+  project_source_generation_column: number;
+  project_exports_audio_mode_column: number;
+  project_audio_stems_table: number;
 };
 
-const CURRENT_SCHEMA_REVISION = 10 as const;
+const CURRENT_SCHEMA_REVISION = 11 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   if (!row) return false;
@@ -35,7 +38,10 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
     Number(row.usage_operation_column) === 1 &&
     Number(row.target_languages_revision_column) === 1 &&
     Number(row.project_target_languages_table) === 1 &&
-    Number(row.project_exports_output_column) === 1
+    Number(row.project_exports_output_column) === 1 &&
+    Number(row.project_source_generation_column) === 1 &&
+    Number(row.project_exports_audio_mode_column) === 1 &&
+    Number(row.project_audio_stems_table) === 1
   );
 }
 
@@ -67,7 +73,19 @@ export async function checkReadiness(db: ReadinessDatabaseLike, deepgramApiKey?:
         EXISTS(
           SELECT 1 FROM pragma_table_info('project_exports')
           WHERE name = 'output'
-        ) AS project_exports_output_column
+        ) AS project_exports_output_column,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('projects')
+          WHERE name = 'source_generation'
+        ) AS project_source_generation_column,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('project_exports')
+          WHERE name = 'audio_mode'
+        ) AS project_exports_audio_mode_column,
+        EXISTS(
+          SELECT 1 FROM sqlite_master
+          WHERE type = 'table' AND name = 'project_audio_stems'
+        ) AS project_audio_stems_table
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
