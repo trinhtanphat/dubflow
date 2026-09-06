@@ -10,7 +10,18 @@ class FakeAI implements AiBinding {
   }
 }
 
+const activeContext = {
+  revision: 3,
+  style: 'formal' as const,
+  glossary: [],
+};
+
 describe('Workers AI translation', () => {
+  it('advertises raw-only availability', () => {
+    const provider = new WorkersAITranslationProvider(new FakeAI());
+    expect(provider).toHaveProperty('capabilities', { contextual: false, available: true });
+  });
+
   it('preserves ids and maps source/target languages without trusting model identity', async () => {
     const ai = new FakeAI();
     const provider = new WorkersAITranslationProvider(ai);
@@ -44,5 +55,11 @@ describe('Workers AI translation', () => {
       await provider.translateBatch([{ id: source, text: 'x' }], source, 'vi');
       expect(ai.calls.at(-1)?.input).toMatchObject({ source_lang: expected, target_lang: 'vietnamese' });
     }
+  });
+
+  it('fails closed if a direct raw-provider call would discard active context', async () => {
+    const provider = new WorkersAITranslationProvider(new FakeAI());
+    await expect((provider.translateBatch as any)([{ id: 'seg-1', text: 'Hello' }], 'en', 'vi', activeContext))
+      .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
   });
 });

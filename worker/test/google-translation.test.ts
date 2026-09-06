@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { GoogleCloudTranslationProvider } from '../src/services/translation/google';
 
+const activeContext = {
+  revision: 3,
+  style: 'formal' as const,
+  glossary: [],
+};
+
 describe('Google Cloud Translation provider', () => {
+  it('advertises raw-only availability from credential presence', () => {
+    expect(new GoogleCloudTranslationProvider('secret-key')).toHaveProperty(
+      'capabilities',
+      { contextual: false, available: true },
+    );
+    expect(new GoogleCloudTranslationProvider('')).toHaveProperty(
+      'capabilities',
+      { contextual: false, available: false },
+    );
+  });
+
   it('uses the official v2 endpoint, preserves order/ids, and decodes entities', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const fakeFetch: typeof fetch = async (input, init) => {
@@ -37,5 +54,11 @@ describe('Google Cloud Translation provider', () => {
   it('rejects auto source until it is resolved', async () => {
     const provider = new GoogleCloudTranslationProvider('x', async () => Response.json({}));
     await expect(provider.translateBatch([{ id: 'a', text: 'Hello' }], 'auto', 'vi')).rejects.toMatchObject({ code: 'TRANSLATION_SOURCE_UNRESOLVED' });
+  });
+
+  it('fails closed if a direct raw-provider call would discard active context', async () => {
+    const provider = new GoogleCloudTranslationProvider('secret-key', async () => Response.json({ data: { translations: [{ translatedText: 'x' }] } }));
+    await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'vi', activeContext))
+      .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
   });
 });

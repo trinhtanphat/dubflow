@@ -10,10 +10,26 @@ import { TranslationRouter } from '../src/services/translation/router';
 afterEach(() => vi.unstubAllGlobals());
 
 class StubProvider implements TranslationProvider {
-  constructor(private readonly name: string) {}
+  readonly capabilities: { contextual: boolean; available: boolean };
+
+  constructor(private readonly name: string, contextual = false, available = true) {
+    this.capabilities = { contextual, available };
+  }
+
   async translateBatch(items: TranslationItem[], _source: SourceLanguage, _target: 'vi'): Promise<TranslationResult[]> {
     return items.map((item) => ({ id: item.id, text: `${this.name}:${item.text}`, provider: this.name }));
   }
+}
+
+const neutralContext = { revision: 1, style: 'neutral' as const, glossary: [] };
+const activeContext = { revision: 7, style: 'natural' as const, glossary: [] };
+
+function makeRouter(contextualAvailable = true) {
+  return new (TranslationRouter as any)(
+    new StubProvider('workers-ai'),
+    new StubProvider('google'),
+    new StubProvider('workers-ai-contextual', true, contextualAvailable),
+  );
 }
 
 class TranslationStatement implements D1StatementLike {
@@ -93,22 +109,53 @@ function translationEnv(db: TranslationDb): Env {
 }
 
 describe('translation router', () => {
-  it('selects workers-ai or google modes', async () => {
-    const router = new TranslationRouter(new StubProvider('workers-ai'), new StubProvider('google'));
-    expect(await router.translate('workers-ai', [{ id: '1', text: 'x' }], 'en', 'vi')).toEqual({
-      mode: 'workers-ai', primary: [{ id: '1', text: 'workers-ai:x', provider: 'workers-ai' }],
-    });
-    expect(await router.translate('google', [{ id: '1', text: 'x' }], 'en', 'vi')).toEqual({
-      mode: 'google', primary: [{ id: '1', text: 'google:x', provider: 'google' }],
+  it('derives raw workers-ai for neutral empty context and includes null provenance', async () => {
+    const router = makeRouter();
+    await expect((router.translate as any)(undefined, [{ id: '1', text: 'x' }], 'en', 'vi', neutralContext)).resolves.toEqual({
+      mode: 'workers-ai',
+      primary: [{ id: '1', text: 'workers-ai:x', provider: 'workers-ai' }],
+      contextRevision: null,
     });
   });
 
-  it('returns both alternatives in compare mode without choosing one', async () => {
-    const router = new TranslationRouter(new StubProvider('workers-ai'), new StubProvider('google'));
-    expect(await router.translate('compare', [{ id: '1', text: 'x' }], 'en', 'vi')).toEqual({
+  it('derives contextual mode when project context is active', async () => {
+    const router = makeRouter();
+    await expect((router.translate as any)(undefined, [{ id: '1', text: 'x' }], 'en', 'vi', activeContext)).resolves.toEqual({
+      mode: 'contextual',
+      primary: [{ id: '1', text: 'workers-ai-contextual:x', provider: 'workers-ai-contextual' }],
+      contextRevision: 7,
+    });
+  });
+
+  it('allows explicit contextual mode for neutral context', async () => {
+    const router = makeRouter();
+    await expect((router.translate as any)('contextual', [{ id: '1', text: 'x' }], 'en', 'vi', neutralContext)).resolves.toMatchObject({
+      mode: 'contextual',
+      contextRevision: 1,
+    });
+  });
+
+  it('rejects raw or compare modes when active context would be discarded', async () => {
+    const router = makeRouter();
+    for (const mode of ['workers-ai', 'google', 'compare']) {
+      await expect((router.translate as any)(mode, [{ id: '1', text: 'x' }], 'en', 'vi', activeContext))
+        .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
+    }
+  });
+
+  it('rejects contextual mode when the contextual provider is unavailable', async () => {
+    const router = makeRouter(false);
+    await expect((router.translate as any)('contextual', [{ id: '1', text: 'x' }], 'en', 'vi', neutralContext))
+      .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_UNAVAILABLE' });
+  });
+
+  it('returns both raw alternatives in compare mode only for inactive context', async () => {
+    const router = makeRouter();
+    await expect((router.translate as any)('compare', [{ id: '1', text: 'x' }], 'en', 'vi', neutralContext)).resolves.toEqual({
       mode: 'compare',
       workersAI: [{ id: '1', text: 'workers-ai:x', provider: 'workers-ai' }],
       google: [{ id: '1', text: 'google:x', provider: 'google' }],
+      contextRevision: null,
     });
   });
 });
