@@ -1,5 +1,5 @@
 import type { D1DatabaseLike } from './projects';
-import { parseBatchTargetLanguages, type TargetLanguage } from '../domain/target-language';
+import { parseProjectTargetLanguages, type TargetLanguage } from '../domain/target-language';
 
 export type TargetTranslation = {
   segmentId: string;
@@ -104,7 +104,7 @@ export class MultilangRepository implements MultilangStore {
 
   async replaceTargets(projectId: string, userId: string, targets: TargetLanguage[]): Promise<TargetLanguage[]> {
     if (!(await this.ownsProject(projectId, userId))) return [];
-    const normalized = parseBatchTargetLanguages(targets);
+    const normalized = parseProjectTargetLanguages(targets);
     const effective = normalized.includes('vi') ? normalized : ['vi', ...normalized];
     const statements = [
       this.db.prepare('DELETE FROM project_targets WHERE project_id = ?').bind(projectId),
