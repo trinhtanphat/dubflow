@@ -10,6 +10,35 @@ const sharesRouteSource = read('worker/src/routes/shares.ts');
 const telemetrySource = read('worker/src/observability/telemetry.ts');
 const requestTelemetrySource = read('worker/src/observability/requestTelemetry.ts');
 const rateLimitSource = read('worker/src/security/rate-limit.ts');
+const processRouteSource = read('worker/src/routes/process.ts');
+const exportRouteSource = read('worker/src/routes/export.ts');
+const uploadRouteSource = read('worker/src/routes/uploads.ts');
+const translationRouteSource = read('worker/src/routes/translation.ts');
+const voiceRouteSource = read('worker/src/routes/voice.ts');
+const mediaStreamSource = read('worker/src/http/media-stream.ts');
+const shareTokenSource = read('worker/src/security/share-token.ts');
+const shareStoreSource = read('worker/src/db/shares.ts');
+const shareApiSource = read('src/features/sharing/shareApi.ts');
+const sharePanelSource = read('src/features/sharing/SharePanel.tsx');
+const studioShellSource = read('src/app/StudioShell.tsx');
+const deploymentStatus = read('docs/deployment-status.md');
+
+function assertInOrder(source, labels) {
+  let previous = -1;
+  for (const label of labels) {
+    const index = source.indexOf(label);
+    assert.notEqual(index, -1, `missing ordered source marker: ${label}`);
+    assert.ok(index > previous, `source marker is out of order: ${label}`);
+    previous = index;
+  }
+}
+
+function typeBlock(source, declaration) {
+  const start = source.indexOf(declaration);
+  const end = source.indexOf('\n};', start);
+  assert.ok(start >= 0 && end > start, `type declaration must remain identifiable: ${declaration}`);
+  return source.slice(start, end + 3);
+}
 
 test('Phase 3C safety gate pins observability and five isolated Cloudflare limiter namespaces', () => {
   assert.match(wrangler, /"analytics_engine_datasets"/);
@@ -61,4 +90,98 @@ test('Phase 3C safety gate keeps telemetry bounded and outside billing state', (
     assert.doesNotMatch(source, /usage_events|credit_balance/i);
     assert.doesNotMatch(source, /UPDATE\s+users|INSERT\s+INTO\s+usage_events/i);
   }
+});
+
+test('Phase 3C safety gate locks validation-before-limit and limiter-before-expensive-side-effect ordering', () => {
+  assert.match(rateLimitSource, /key: `\$\{actor\}:\$\{operation\}`/);
+  assert.match(rateLimitSource, /Retry-After/);
+  assert.match(rateLimitSource, /RATE_LIMITED/);
+  assert.doesNotMatch(rateLimitSource, /usage_events|credit_balance|cost_basis|price/i);
+
+  assertInOrder(processRouteSource, [
+    'getByIdForUser(projectId, userId)',
+    'project.sourceObjectKey',
+    "enforceRateLimit(c, 'process'",
+    "jobs.create(projectId, 'dubbing')",
+    'DUBBING_WORKFLOW.create',
+  ]);
+  assertInOrder(exportRouteSource, [
+    'getByIdForUser(projectId, userId)',
+    'project.sourceObjectKey',
+    "['needs_review', 'completed']",
+    'voiceConfigured(c.env)',
+    "enforceRateLimit(c, 'export'",
+    "jobs.create(projectId, 'export')",
+    "setStatus(projectId, userId, 'processing')",
+    'EXPORT_WORKFLOW.create',
+  ]);
+  assertInOrder(uploadRouteSource, [
+    'validateBegin(projectId, userId, await c.req.json())',
+    "enforceRateLimit(c, 'upload'",
+    'beginValidated(projectId, input)',
+  ]);
+  const multipartContinuation = uploadRouteSource.slice(uploadRouteSource.indexOf("routes.put('/:id/uploads/:uploadId/parts/:partNumber'"));
+  assert.doesNotMatch(multipartContinuation, /enforceRateLimit/);
+
+  assertInOrder(translationRouteSource, [
+    'getByIdForUser(projectId, userId)',
+    'segments.get(projectId, segmentId, userId)',
+    'const expectedVersion = input.expectedVersion',
+    'MODES.has(mode)',
+    'segment.version !== expectedVersion',
+    "enforceRateLimit(c, 'translate'",
+    'router.translate(',
+  ]);
+  assertInOrder(voiceRouteSource, [
+    'payload = await c.req.json()',
+    'if (!text)',
+    'text.length > 2000',
+    "language !== 'vi'",
+    '!hasElevenLabs(c.env)',
+    "enforceRateLimit(c, 'voice'",
+    'provider.generate(',
+  ]);
+});
+
+test('Phase 3C safety gate locks 256-bit hash-only bearer shares and one Range implementation', () => {
+  assert.match(shareTokenSource, /new Uint8Array\(32\)/);
+  assert.match(shareTokenSource, /crypto\.getRandomValues/);
+  assert.match(shareTokenSource, /SHA-256/);
+  assert.doesNotMatch(sharesMigration, /\btoken\s+TEXT\b/i);
+  assert.doesNotMatch(typeBlock(shareStoreSource, 'export type ExportShare = {'), /tokenHash|token_hash|shareUrl/);
+
+  assert.match(mediaStreamSource, /status: 416/);
+  assert.match(mediaStreamSource, /status: parsedRange \? 206 : 200/);
+  assert.match(mediaStreamSource, /Accept-Ranges/);
+  assert.match(mediaStreamSource, /Content-Range/);
+  assert.match(exportRouteSource, /streamMediaObject\(/);
+  assert.match(sharesRouteSource, /streamMediaObject\(/);
+});
+
+test('Phase 3C safety gate locks one-time Studio bearer-link semantics', () => {
+  assert.doesNotMatch(typeBlock(shareApiSource, 'export type ExportShare = {'), /shareUrl|tokenHash|token_hash/);
+  assert.match(typeBlock(shareApiSource, 'export type CreateShareResult = {'), /shareUrl: string/);
+  assert.match(sharePanelSource, /const \[createdShareUrl, setCreatedShareUrl\] = useState\(''\)/);
+  assert.match(sharePanelSource, /setCreatedShareUrl\(result\.shareUrl\)/);
+  assert.match(sharePanelSource, /listShares\(projectId\)/);
+  assert.match(sharePanelSource, /Mã cuối: \{share\.tokenHint\}/);
+  assert.doesNotMatch(sharePanelSource, /tokenHint[^\n]*(?:shareUrl|\/api\/shares)/);
+  assert.match(studioShellSource, /shareOpen && state\.project\.exportObjectKey/);
+  assert.match(studioShellSource, /<SharePanel projectId=\{state\.project\.id\}/);
+});
+
+test('Phase 3C safety gate requires source-only qualification docs without upgrading runtime status', () => {
+  assert.match(deploymentStatus, /## Phase 3C .*qualification/i);
+  for (const name of [
+    'RATE_LIMIT_PROCESS',
+    'RATE_LIMIT_EXPORT',
+    'RATE_LIMIT_TRANSLATE',
+    'RATE_LIMIT_VOICE',
+    'RATE_LIMIT_UPLOAD',
+  ]) assert.match(deploymentStatus, new RegExp(name));
+  assert.match(deploymentStatus, /dubflow_events/);
+  assert.match(deploymentStatus, /revocable/i);
+  assert.match(deploymentStatus, /SHARE_NOT_FOUND/);
+  assert.match(deploymentStatus, /manual-only/i);
+  assert.match(deploymentStatus, /runtime (?:status )?remains \*\*UNQUALIFIED\*\*/i);
 });
