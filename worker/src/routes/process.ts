@@ -37,11 +37,11 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
       if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before processing.'), 400);
 
-      const admissionError = streamAdmissionError(c.env);
-      if (admissionError) return c.json(admissionError, 503);
-
       const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
       if (rateLimited) return rateLimited;
+
+      const admissionError = streamAdmissionError(c.env);
+      if (admissionError) return c.json(admissionError, 503);
 
       const job = await jobs.create(projectId, 'dubbing');
       try {

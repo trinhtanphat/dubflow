@@ -33,7 +33,7 @@ describe('zero-container process admission', () => {
 
     const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: { code: 'STREAM_BINDING_UNAVAILABLE' } });
+    expect(await response.json()).toMatchObject({ error: true, code: 'STREAM_BINDING_UNAVAILABLE' });
     expect(created).toBe(false);
   });
 });
