@@ -12,6 +12,8 @@ test('Phase 4C persists bounded target-aware translation dubbing and export stat
   assert.match(migration, /CREATE TABLE IF NOT EXISTS project_exports/i);
   assert.match(migration, /target_language\s+TEXT[^;]*CHECK\s*\(target_language IN \('vi','en','ja','ko','zh'\)\)/is);
   assert.match(migration, /enabled\s+INTEGER[^;]*CHECK\s*\(enabled IN \(0,1\)\)/is);
+  assert.match(migration, /batch_id\s+TEXT\s+NOT NULL/i);
+  assert.doesNotMatch(migration, /CREATE TABLE IF NOT EXISTS (?:export_)?batches/i);
 });
 
 test('Phase 4C exposes one bounded target-language authority and batch limit', async () => {
@@ -61,6 +63,14 @@ test('Phase 4C uses target-scoped dubbed and export object keys and concrete exp
   assert.match(pipeline, /dubbed\/\$\{targetLanguage\}/);
   assert.match(pipeline, /exports\/\$\{targetLanguage\}/);
   assert.match(shares, /exportId/);
+});
+
+test('Phase 4C mirrors completed Vietnamese target exports into the legacy project field', async () => {
+  const projects = await read('worker/src/db/projects.ts');
+  const pipeline = await read('worker/src/workflows/exportPipeline.ts');
+  assert.match(projects, /exports\/vi\//);
+  assert.match(pipeline, /targetLanguage === 'vi'/);
+  assert.match(pipeline, /setExportObject/);
 });
 
 test('Phase 4C mounts owner-scoped target and batch export routes', async () => {
