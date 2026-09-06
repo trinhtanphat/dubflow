@@ -22,6 +22,16 @@ class Statement implements D1StatementLike {
   }
 }
 
+type SpeakerRow = {
+  id: string;
+  projectId: string;
+  label: string;
+  displayName: string;
+  voiceProvider: string | null;
+  voiceId: string | null;
+  avatarObjectKey: string | null;
+};
+
 class RecordingDb implements D1DatabaseLike {
   rows: Array<Record<string, unknown>> = [
     {
@@ -30,6 +40,7 @@ class RecordingDb implements D1DatabaseLike {
       translation_status: 'completed', voice_status: 'pending', version: 3,
     },
   ];
+  speakerRows = new Map<string, SpeakerRow>();
   batches: Statement[][] = [];
 
   prepare(sql: string) { return new Statement(this, sql); }
@@ -39,6 +50,21 @@ class RecordingDb implements D1DatabaseLike {
     this.batches.push(typed);
     this.rows = [];
     for (const statement of typed) {
+      if (/INSERT INTO speakers/i.test(statement.sql)) {
+        const [id, projectId, displayName] = statement.values as [string, string, string];
+        const existing = this.speakerRows.get(id);
+        if (existing && /ON CONFLICT\s*\(id\)\s*DO NOTHING/i.test(statement.sql)) continue;
+        this.speakerRows.set(id, {
+          id,
+          projectId,
+          label: 'AI diarization',
+          displayName,
+          voiceProvider: null,
+          voiceId: null,
+          avatarObjectKey: null,
+        });
+        continue;
+      }
       if (!statement.sql.startsWith('INSERT INTO segments')) continue;
       const values = statement.values;
       const [id, projectId] = values;
@@ -101,6 +127,30 @@ describe('ASR segment persistence', () => {
     expect(speakerInsert?.values.slice(0, 2)).toEqual(['spk_1234abcd', 'project-1']);
     expect(segmentInsert?.values.slice(0, 3)).toEqual(['a', 'project-1', 'spk_1234abcd']);
     expect(segments[0]).toMatchObject({ speakerId: 'spk_1234abcd' });
+  });
+
+  it('preserves custom metadata and ElevenLabs voice when a reconciled speaker id is reused', async () => {
+    const db = new RecordingDb();
+    db.speakerRows.set('spk_existing', {
+      id: 'spk_existing',
+      projectId: 'project-1',
+      label: 'AI diarization',
+      displayName: 'Nữ chính',
+      voiceProvider: 'elevenlabs',
+      voiceId: 'voice-heroine',
+      avatarObjectKey: 'projects/project-1/avatars/heroine.png',
+    });
+    const before = { ...db.speakerRows.get('spk_existing')! };
+    const repository = new SegmentRepository(db);
+
+    const segments = await repository.replaceFromAsr('project-1', 'dev-user', [
+      { id: 'new-a', speakerId: 'spk_existing', startMs: 1000, endMs: 5000, sourceText: 'same character' },
+    ]);
+
+    const speakerInsert = db.batches[0].find((statement) => /INSERT INTO speakers/i.test(statement.sql));
+    expect(speakerInsert?.sql).toMatch(/ON CONFLICT\s*\(id\)\s*DO NOTHING/i);
+    expect(db.speakerRows.get('spk_existing')).toEqual(before);
+    expect(segments[0]).toMatchObject({ speakerId: 'spk_existing' });
   });
 
   it('rejects writes to a project outside the current user', async () => {
