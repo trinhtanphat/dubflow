@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TARGET_LANGUAGES } from '../src/domain/language';
 import { GoogleCloudTranslationProvider } from '../src/services/translation/google';
 
 const activeContext = {
@@ -11,11 +12,11 @@ describe('Google Cloud Translation provider', () => {
   it('advertises raw-only availability from credential presence', () => {
     expect(new GoogleCloudTranslationProvider('secret-key')).toHaveProperty(
       'capabilities',
-      { contextual: false, available: true },
+      { contextual: false, available: true, targets: TARGET_LANGUAGES },
     );
     expect(new GoogleCloudTranslationProvider('')).toHaveProperty(
       'capabilities',
-      { contextual: false, available: false },
+      { contextual: false, available: false, targets: TARGET_LANGUAGES },
     );
   });
 
