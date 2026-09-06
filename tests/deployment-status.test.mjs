@@ -7,7 +7,7 @@ const policy = fs.readFileSync(new URL('../docs/DEPLOYMENT-POLICY.md', import.me
 
 test('deployment status pins production hostname and Workers Builds contract', () => {
   assert.match(status, /yupvox\.qs3d\.site/);
-  assert.match(status, /6c5207813df3d5b83b9508125e0e9e12/);
+  assert.match(status, /50afb4fd3c4c7a1f3e1bdb7f22d4af7f/);
   assert.match(policy, /Cloudflare Workers Builds/i);
   assert.match(policy, /GitHub Actions is CI only/i);
   assert.match(policy, /must not deploy production/i);
