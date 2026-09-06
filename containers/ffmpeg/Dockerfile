@@ -9,6 +9,7 @@ COPY server.mjs /app/server.mjs
 COPY render-export.mjs /app/render-export.mjs
 COPY stem-separation.mjs /app/stem-separation.mjs
 
+ENV NODE_EXTRA_CA_CERTS=/etc/cloudflare/certs/cloudflare-containers-ca.crt
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "/app/server.mjs"]
