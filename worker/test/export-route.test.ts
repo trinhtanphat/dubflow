@@ -81,6 +81,7 @@ describe('export route', () => {
       exportId: 'export-vi-1',
       targetLanguage: 'vi',
       output: 'dubbed',
+      separationMode: 'source_mix',
       requestId: undefined,
     } }]);
     expect(calls).toEqual(['export:create', 'job:create', 'project:processing', 'workflow:create']);
