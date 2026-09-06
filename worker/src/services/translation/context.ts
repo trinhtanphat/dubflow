@@ -1,3 +1,5 @@
+import { isTargetLanguage, type TargetLanguage } from '../../domain/language';
+
 export const TRANSLATION_STYLES = ['neutral', 'natural', 'formal', 'casual', 'cinematic'] as const;
 export type TranslationStyle = typeof TRANSLATION_STYLES[number];
 
@@ -10,6 +12,7 @@ export const MAX_CONTEXT_PAYLOAD_BYTES = 128 * 1024;
 export type GlossaryEntry = {
   id: string;
   projectId: string;
+  targetLanguage: TargetLanguage;
   sourceTerm: string;
   preferredTranslation: string;
   note: string | null;
@@ -19,6 +22,7 @@ export type GlossaryEntry = {
 };
 
 export type GlossaryEntryInput = {
+  targetLanguage: TargetLanguage;
   sourceTerm: string;
   preferredTranslation: string;
   note?: string | null;
@@ -26,6 +30,7 @@ export type GlossaryEntryInput = {
 };
 
 export type NormalizedGlossaryEntryInput = {
+  targetLanguage: TargetLanguage;
   sourceTerm: string;
   sourceTermKey: string;
   preferredTranslation: string;
@@ -50,6 +55,16 @@ function unicodeLength(value: string): number {
   return Array.from(value).length;
 }
 
+export function validateTargetLanguage(value: unknown): TargetLanguage {
+  if (!isTargetLanguage(value)) {
+    throw new TranslationContextValidationError(
+      'TARGET_LANGUAGE_UNSUPPORTED',
+      'Target language is unsupported.',
+    );
+  }
+  return value;
+}
+
 export function validateTranslationStyle(value: unknown): TranslationStyle {
   if (typeof value !== 'string' || !TRANSLATION_STYLES.includes(value as TranslationStyle)) {
     throw new TranslationContextValidationError(
@@ -69,6 +84,8 @@ export function normalizeGlossaryInput(input: GlossaryEntryInput): NormalizedGlo
   if (!input || typeof input !== 'object') {
     throw new TranslationContextValidationError('GLOSSARY_SOURCE_TERM_INVALID', 'Glossary entry is invalid.');
   }
+
+  const targetLanguage = validateTargetLanguage(input.targetLanguage);
 
   if (typeof input.caseSensitive !== 'boolean') {
     throw new TranslationContextValidationError(
@@ -121,6 +138,7 @@ export function normalizeGlossaryInput(input: GlossaryEntryInput): NormalizedGlo
   const note = trimmedNote || null;
 
   return {
+    targetLanguage,
     sourceTerm,
     sourceTermKey: normalizeGlossaryKey(sourceTerm, input.caseSensitive),
     preferredTranslation,
