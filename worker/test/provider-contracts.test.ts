@@ -70,8 +70,14 @@ const exportWorkflow = {
   },
 } satisfies Env['EXPORT_WORKFLOW'];
 
+const languageTranslationWorkflow = {
+  async create(_input: { id?: string; params?: unknown }) {
+    return { id: 'language-translation-workflow-1' };
+  },
+} satisfies Env['LANGUAGE_TRANSLATION_WORKFLOW'];
+
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI, R2, Analytics Engine, rate limits, Container and both Workflow bindings plus provider secrets', () => {
+  it('accepts portable AI, R2, Analytics Engine, rate limits, Container and Workflow bindings plus provider secrets', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
@@ -87,6 +93,7 @@ describe('Cloudflare provider contracts', () => {
       FFMPEG_CONTAINER: ffmpegContainer,
       DUBBING_WORKFLOW: dubbingWorkflow,
       EXPORT_WORKFLOW: exportWorkflow,
+      LANGUAGE_TRANSLATION_WORKFLOW: languageTranslationWorkflow,
       GOOGLE_CLOUD_TRANSLATE_API_KEY: 'secret',
       ELEVENLABS_API_KEY: 'voice-secret',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice-id',
@@ -104,6 +111,7 @@ describe('Cloudflare provider contracts', () => {
     expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
+    expect(env.LANGUAGE_TRANSLATION_WORKFLOW).toBe(languageTranslationWorkflow);
     expect(env.GOOGLE_CLOUD_TRANSLATE_API_KEY).toBe('secret');
   });
 });
