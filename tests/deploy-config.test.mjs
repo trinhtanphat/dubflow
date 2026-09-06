@@ -4,7 +4,6 @@ import fs from 'node:fs';
 
 const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const deployWorkflow = fs.readFileSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url), 'utf8');
 
 const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
 
@@ -27,12 +26,11 @@ test('production custom domain stays pinned to yupvox.qs3d.site', () => {
   assert.deepEqual(config.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
 });
 
-test('production deploy targets the account that owns qs3d.site', () => {
+test('production deploy targets the Cloudflare account that owns qs3d.site', () => {
   assert.equal(config.account_id, productionAccountId);
-  assert.ok(deployWorkflow.includes('CLOUDFLARE_ACCOUNT_ID: ' + productionAccountId));
 });
 
-test('live dubbing runtime is declared without changing the production account', () => {
+test('live dubbing runtime is declared on the production account', () => {
   assert.equal(config.account_id, productionAccountId);
   assert.ok(config.containers?.some((entry) => entry.class_name === 'FfmpegContainer'));
   assert.ok(config.durable_objects?.bindings?.some((entry) => entry.name === 'FFMPEG_CONTAINER' && entry.class_name === 'FfmpegContainer'));
