@@ -31,21 +31,8 @@ test('Workers Builds production deploy applies remote D1 migrations before readi
   ]);
 });
 
-test('Workers Builds build phase applies D1 migrations only for production main', async () => {
-  const scriptUrl = new URL('../scripts/cloudflare-workers-build-migrate.mjs', import.meta.url);
-  assert.equal(
-    fs.existsSync(scriptUrl),
-    true,
-    'npm run build must own a Workers Builds migration hook so dashboard deploy-command drift cannot skip D1 migrations',
-  );
-  assert.match(pkg.scripts.build, /node scripts\/cloudflare-workers-build-migrate\.mjs/);
-
-  const { shouldRunWorkersBuildMigrations, workersBuildMigrationPlan } = await import(scriptUrl.href);
-  assert.equal(shouldRunWorkersBuildMigrations({ WORKERS_CI: '1', WORKERS_CI_BRANCH: 'main' }), true);
-  assert.equal(shouldRunWorkersBuildMigrations({ WORKERS_CI: '1', WORKERS_CI_BRANCH: 'feature/test' }), false);
-  assert.equal(shouldRunWorkersBuildMigrations({ CI: 'true' }), false);
-  assert.equal(shouldRunWorkersBuildMigrations({}), false);
-  assert.deepEqual(workersBuildMigrationPlan(), [
-    ['npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote']],
-  ]);
+test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {
+  assert.doesNotMatch(pkg.scripts.build, /cloudflare-workers-build-migrate/i);
+  assert.doesNotMatch(pkg.scripts.build, /wrangler\s+d1\s+migrations\s+apply/i);
+  assert.equal(pkg.scripts.build, 'tsc -b && vite build');
 });
