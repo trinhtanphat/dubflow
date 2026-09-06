@@ -22,3 +22,12 @@ test('Cloudflare Workers Builds is the only production deployment lane', () => {
   assert.match(policy, /GitHub Actions.*CI/i);
   assert.match(policy, /must not deploy/i);
 });
+
+test('Workers Builds container deploy token requirement is documented', () => {
+  const policy = fs.readFileSync(policyUrl, 'utf8');
+  assert.match(policy, /Workers Builds.*API token/is);
+  assert.match(policy, /Containers Edit/i);
+  assert.match(policy, /Settings\s*>\s*Builds/i);
+  assert.match(policy, /Unauthorized/i);
+  assert.match(policy, /do not.*GitHub.*deploy/is);
+});
