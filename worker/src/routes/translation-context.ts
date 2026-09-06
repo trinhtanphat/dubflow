@@ -4,6 +4,7 @@ import {
   TranslationContextRepository,
   type TranslationContextStore,
 } from '../db/translation-context';
+import { isTargetLanguage, type TargetLanguage } from '../domain/language';
 import type { Env } from '../env';
 import { errorBody } from '../http/json';
 import { getCurrentUserId } from '../security/current-user';
@@ -56,6 +57,17 @@ function readExpectedRevision(record: Record<string, unknown>): number {
   return value as number;
 }
 
+function readTargetLanguage(value: unknown): TargetLanguage {
+  if (value === undefined || value === null || value === '') return 'vi';
+  if (!isTargetLanguage(value)) {
+    throw new TranslationContextRequestError(
+      'TARGET_LANGUAGE_UNSUPPORTED',
+      'Target language is not supported.',
+    );
+  }
+  return value;
+}
+
 async function readJsonRecord(c: any): Promise<Record<string, unknown>> {
   let payload: unknown;
   try {
@@ -85,6 +97,7 @@ function readGlossaryMutation(record: Record<string, unknown>): {
 } {
   const expectedRevision = readExpectedRevision(record);
   const normalized = normalizeGlossaryInput({
+    targetLanguage: readTargetLanguage(record.targetLanguage),
     sourceTerm: record.sourceTerm as string,
     preferredTranslation: record.preferredTranslation as string,
     note: record.note as string | null | undefined,
@@ -93,6 +106,7 @@ function readGlossaryMutation(record: Record<string, unknown>): {
   return {
     expectedRevision,
     input: {
+      targetLanguage: normalized.targetLanguage,
       sourceTerm: normalized.sourceTerm,
       preferredTranslation: normalized.preferredTranslation,
       note: normalized.note,
@@ -141,7 +155,7 @@ export function createTranslationContextRoutes(deps: TranslationContextRouteDeps
 
   routes.get('/:id/translation-settings', async (c) => {
     try {
-      const context = await makeContext(c.env).getContext(c.req.param('id'), getCurrentUserId());
+      const context = await makeContext(c.env).getContext(c.req.param('id'), getCurrentUserId(), 'vi');
       if (!context) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       return c.json(settingsBody(context, c.env));
     } catch (error) {
@@ -166,9 +180,15 @@ export function createTranslationContextRoutes(deps: TranslationContextRouteDeps
 
   routes.get('/:id/glossary', async (c) => {
     try {
-      const context = await makeContext(c.env).getContext(c.req.param('id'), getCurrentUserId());
+      const targetLanguage = readTargetLanguage(c.req.query('targetLanguage'));
+      const context = await makeContext(c.env).getContext(
+        c.req.param('id'),
+        getCurrentUserId(),
+        targetLanguage,
+      );
       if (!context) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
       return c.json({
+        targetLanguage,
         contextRevision: context.revision,
         glossary: context.glossary,
       });
@@ -219,13 +239,16 @@ export function createTranslationContextRoutes(deps: TranslationContextRouteDeps
   routes.delete('/:id/glossary/:entryId', async (c) => {
     try {
       const record = await readJsonRecord(c);
+      const targetLanguage = readTargetLanguage(c.req.query('targetLanguage'));
       const context = await makeContext(c.env).deleteEntry(
         c.req.param('id'),
         c.req.param('entryId'),
         getCurrentUserId(),
         readExpectedRevision(record),
+        targetLanguage,
       );
       return c.json({
+        targetLanguage,
         contextRevision: context.revision,
         context,
       });
