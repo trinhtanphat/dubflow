@@ -1,4 +1,4 @@
-name: Cloudflare Analytics Probe
+name: Cloudflare Analytics Binding Probe
 
 on:
   push:
@@ -13,12 +13,24 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment: production
     env:
       CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PROBE_WORKER: dubflow-analytics-entitlement-probe
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
       - name: Require Cloudflare token
         shell: bash
         run: |
@@ -27,22 +39,51 @@ jobs:
             exit 1
           fi
 
-      - name: Probe Analytics Engine SQL API
+      - name: Confirm Analytics Engine SQL API
         shell: bash
         run: |
           set -euo pipefail
-          response_file="$(mktemp)"
-          http_code="$(curl --silent --show-error \
-            --output "$response_file" \
-            --write-out '%{http_code}' \
+          code="$(curl --silent --show-error --output /tmp/ae-sql.json --write-out '%{http_code}' \
             --request POST \
             "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/analytics_engine/sql" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
             --header 'Content-Type: text/plain' \
             --data 'SHOW TABLES')"
-          echo "Analytics Engine SQL HTTP status: ${http_code}"
-          cat "$response_file"
+          echo "Analytics Engine SQL HTTP status: ${code}"
+          cat /tmp/ae-sql.json
           echo
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            exit 1
-          fi
+          test "$code" = "200"
+
+      - name: Create minimal Analytics Engine probe worker files
+        shell: bash
+        run: |
+          mkdir -p /tmp/ae-probe
+          cat > /tmp/ae-probe/index.js <<'EOF'
+          export default {
+            async fetch(_request, env) {
+              env.ANALYTICS.writeDataPoint({ blobs: ['probe'], doubles: [1], indexes: ['probe'] });
+              return new Response('ok');
+            }
+          };
+          EOF
+          cat > /tmp/ae-probe/wrangler.jsonc <<EOF
+          {
+            "name": "${PROBE_WORKER}",
+            "account_id": "${CLOUDFLARE_ACCOUNT_ID}",
+            "main": "index.js",
+            "compatibility_date": "2026-09-05",
+            "workers_dev": true,
+            "analytics_engine_datasets": [
+              { "binding": "ANALYTICS", "dataset": "dubflow_entitlement_probe" }
+            ]
+          }
+          EOF
+
+      - name: Deploy minimal Analytics Engine binding probe
+        working-directory: /tmp/ae-probe
+        run: npx --prefix "$GITHUB_WORKSPACE" wrangler deploy --config wrangler.jsonc
+
+      - name: Delete minimal probe worker
+        if: ${{ always() }}
+        shell: bash
+        run: npx wrangler delete --name "$PROBE_WORKER" --force >/dev/null 2>&1 || true
