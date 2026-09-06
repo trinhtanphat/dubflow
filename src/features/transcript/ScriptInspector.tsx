@@ -29,7 +29,7 @@ export function ScriptInspector(props: Props) {
     : canonical;
 
   const editDraft: Props['onEditDraft'] = (segmentId, patch) => {
-    if (!phase?.targetLanguage) {
+    if (!phase?.targetLanguage || useVietnameseCompatibility) {
       props.onEditDraft?.(segmentId, patch);
       return;
     }
@@ -45,7 +45,7 @@ export function ScriptInspector(props: Props) {
 
   const flushDraft: Props['onFlushDraft'] = (segmentId) => {
     props.onFlushDraft?.(segmentId);
-    if (phase?.targetLanguage) void phase.flushTargetTranslation(segmentId);
+    if (phase?.targetLanguage && !useVietnameseCompatibility) void phase.flushTargetTranslation(segmentId);
   };
 
   const canonicalDraft = phase?.targetLanguage && props.draft && !useVietnameseCompatibility
