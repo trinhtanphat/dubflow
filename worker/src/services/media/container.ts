@@ -1,4 +1,4 @@
-import type { AudioChunk, ExportClip, MediaProcessor } from './types';
+import type { AudioChunk, ExportClip, ExportRenderOptions, MediaProcessor } from './types';
 
 export interface ContainerStubLike {
   fetch(request: Request): Promise<Response>;
@@ -53,6 +53,13 @@ function assertExportClip(projectId: string, raw: ExportClip): ExportClip {
   }
   assertProjectObject(projectId, raw.objectKey, 'dubbed');
   return raw;
+}
+
+function assertRenderOptions(options?: ExportRenderOptions) {
+  if (!options) return;
+  if (!/^[A-Za-z0-9._-]{1,160}$/.test(options.exportId)) {
+    throw new MediaProcessorError('MEDIA_EXPORT_TARGET_INVALID', 'Export id is invalid.');
+  }
 }
 
 export class ContainerMediaProcessor implements MediaProcessor {
@@ -113,8 +120,9 @@ export class ContainerMediaProcessor implements MediaProcessor {
     });
   }
 
-  async renderExport(projectId: string, objectKey: string, clips: ExportClip[]): Promise<{ exportObjectKey: string }> {
+  async renderExport(projectId: string, objectKey: string, clips: ExportClip[], options?: ExportRenderOptions): Promise<{ exportObjectKey: string }> {
     assertProjectObject(projectId, objectKey);
+    assertRenderOptions(options);
     if (!Array.isArray(clips) || clips.length === 0) {
       throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'At least one dubbed clip is required for export.');
     }
@@ -123,11 +131,12 @@ export class ContainerMediaProcessor implements MediaProcessor {
       projectId,
       objectKey,
       clips: validated,
+      ...(options ?? {}),
     }) as { exportObjectKey?: unknown };
-    if (
-      typeof result.exportObjectKey !== 'string' ||
-      !result.exportObjectKey.startsWith(`${projectPrefix(projectId)}export/`)
-    ) {
+    const expectedPrefix = options
+      ? `${projectPrefix(projectId)}exports/${options.targetLanguage}/${options.exportId}`
+      : `${projectPrefix(projectId)}export/`;
+    if (typeof result.exportObjectKey !== 'string' || !result.exportObjectKey.startsWith(expectedPrefix)) {
       throw new MediaProcessorError('MEDIA_PROCESSOR_RESPONSE_INVALID', 'Media processor returned an invalid export object key.');
     }
     return { exportObjectKey: result.exportObjectKey };
