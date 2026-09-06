@@ -12,7 +12,7 @@ test('Phase 4A wires bounded overlapping ASR windows', () => {
   const audioWindows = source('containers/ffmpeg/audio-windows.mjs');
 
   assert.match(mediaClient, /chunkSeconds:\s*300/);
-  assert.match(mediaClient, /overlapSeconds:\s*8/);
+  assert.match(mediaClient, /overlapSeconds:\s*15/);
   assert.match(containerServer, /overlapSeconds/);
   assert.match(audioWindows, /chunkSeconds\s*-\s*overlapSeconds/);
   assert.match(audioWindows, /overlapSeconds[^\n]*30|30[^\n]*overlapSeconds/);
@@ -24,9 +24,12 @@ test('Phase 4A uses a dedicated conservative speaker stitching boundary', () => 
 
   assert.match(stitch, /export function stitchAsrChunks/);
   assert.match(stitch, /speakerIndex/);
-  assert.match(stitch, /unique|ambiguous|candidate/i);
+  assert.match(stitch, /uniqueBest/);
   assert.match(stitch, /normalize\('NFKC'\)/);
   assert.match(stitch, /1500/);
+  assert.match(stitch, /750/);
+  assert.match(stitch, /\p\{P\}/);
+  assert.match(stitch, /\p\{S\}/);
   assert.match(pipeline, /stitchAsrChunks/);
 });
 
