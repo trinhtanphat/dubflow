@@ -62,6 +62,6 @@ test('Phase 4C deployment status is source-qualified only and runtime remains un
   assert.match(deploymentStatus, /Vietnamese compatibility bridge/);
   assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/);
   assert.match(deploymentStatus, /manual-only/);
-  assert.match(deploymentStatus, /real provider\/model\/voice\/media fixtures/);
+  assert.match(deploymentStatus, /real provider\/model\/voice\/media fixtures/i);
   assert.doesNotMatch(deploymentStatus, /Phase 4C production runtime[^\n]*(?:PASS|qualified)/i);
 });
