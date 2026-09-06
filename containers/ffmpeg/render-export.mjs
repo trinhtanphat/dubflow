@@ -1,5 +1,6 @@
 const MAX_EXPORT_CLIPS = 4096;
 const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
+const AUDIO_MODES = new Set(['dubbed_only', 'duck_original', 'separated_background']);
 
 function projectPrefix(projectId) {
   return `projects/${projectId}/`;
@@ -13,12 +14,38 @@ function renderOptions(input) {
   const hasTarget = input?.targetLanguage !== undefined;
   const hasExport = input?.exportId !== undefined;
   if (hasTarget !== hasExport) throw new Error('targetLanguage and exportId must be provided together.');
-  if (!hasTarget) return null;
+  if (!hasTarget) {
+    if (input?.audioMode !== undefined || input?.backgroundObjectKey !== undefined) {
+      throw new Error('Audio render options require targetLanguage and exportId.');
+    }
+    return null;
+  }
   if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
   if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
     throw new Error('Invalid exportId.');
   }
-  return { targetLanguage: input.targetLanguage, exportId: input.exportId };
+
+  const audioMode = input.audioMode === undefined ? 'dubbed_only' : input.audioMode;
+  if (!AUDIO_MODES.has(audioMode)) throw new Error('Invalid audio mode.');
+
+  const backgroundObjectKey = input.backgroundObjectKey;
+  if (audioMode === 'separated_background') {
+    if (typeof backgroundObjectKey !== 'string' || backgroundObjectKey.length === 0) {
+      throw new Error('Separated backgroundObjectKey is required.');
+    }
+    if (!backgroundObjectKey.startsWith(`${projectPrefix(input.projectId)}stems/`)) {
+      throw new Error('Separated background object is outside the project.');
+    }
+  } else if (backgroundObjectKey !== undefined) {
+    throw new Error('backgroundObjectKey is only valid for separated_background.');
+  }
+
+  return {
+    targetLanguage: input.targetLanguage,
+    exportId: input.exportId,
+    audioMode,
+    ...(audioMode === 'separated_background' ? { backgroundObjectKey } : {}),
+  };
 }
 
 export function validateRenderExportInput(input) {
@@ -48,7 +75,7 @@ export function validateRenderExportInput(input) {
     if (seen.has(clip.segmentId)) throw new Error(`Duplicate segmentId: ${clip.segmentId}`);
     seen.add(clip.segmentId);
   }
-  return input;
+  return options ? { ...input, ...options } : input;
 }
 
 function seconds(ms) {
