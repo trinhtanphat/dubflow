@@ -24,6 +24,7 @@
 - Every task follows strict RED -> GREEN -> fresh CI evidence; no force push and no bypass of a red gate.
 
 Implementation started from exact plan head `6fbd253202fd303adc2f55efc001fcc23286d876`.
+RED test branch sibling prepared at `e5c8b23c53d9973acd4a9e0d71087bf141e9a742`; it is being merged non-force into the carrier rather than rewriting either line.
 
 ---
 
@@ -51,45 +52,17 @@ Implementation started from exact plan head `6fbd253202fd303adc2f55efc001fcc2328
 
 ### Task 2: Domain/provider contract and dedicated separator container
 
-**Files:**
-- Create: `worker/src/services/separation/types.ts`
-- Create: `worker/src/services/separation/container.ts`
-- Create: `worker/src/services/separation/unavailable.ts`
-- Create: `worker/src/containers/SeparatorContainer.ts`
-- Create: `containers/separator/Dockerfile`
-- Create: `containers/separator/server.mjs`
-- Create: `containers/separator/separate.mjs`
-- Create: `containers/separator/separate.test.mjs`
-- Create: `worker/test/separation-provider.test.ts`
-- Modify: `worker/src/env.ts`
-- Modify: `worker/src/index.ts`
-
-**Interfaces:**
-```ts
-export type SeparationCapabilities = { configured: boolean; qualified: boolean; provider: string; modelId: string; modelDigest: string; };
-export type SeparationInput = { projectId: string; sourceObjectKey: string; sourceRevision: number; durationMs: number; };
-export type SeparationResult = { backgroundObjectKey: string; dialogueObjectKey: string; durationMs: number; };
-export interface AudioSeparationProvider { capabilities(): SeparationCapabilities; separate(input: SeparationInput): Promise<SeparationResult>; }
-```
-
-- [ ] **Step 1: Write RED provider/container contract tests.** Reject unqualified capability, invalid source keys, cross-project output keys, missing stem, mismatched duration, floating/empty model digest, path traversal, and request-controlled shell arguments.
-- [ ] **Step 2: Run RED.** `npx vitest run worker/test/separation-provider.test.ts && node --test containers/separator/separate.test.mjs`.
-- [ ] **Step 3: Implement server-owned deterministic key derivation.** Exact output prefix: `projects/{projectId}/stems/{sourceRevision}/{provider}/{modelDigest}/`; filenames `background.wav` and `dialogue.wav`.
-- [ ] **Step 4: Implement dedicated `SeparatorContainer`.** Mirror the safe R2 GET/PUT bridge pattern from `FfmpegContainer`, use a distinct binding, disable arbitrary outbound Internet, and keep model/runtime inputs server-owned.
-- [ ] **Step 5: Pin model provenance in image/build inputs.** The image must contain an exact provider/model/digest contract and must not fetch `latest` during a user request.
-- [ ] **Step 6: Run GREEN and commit.** `feat(phase4d): add dedicated separation provider container`.
+- [ ] Write RED provider/container tests.
+- [ ] Implement `AudioSeparationProvider`, `SeparatorContainer`, pinned model provenance, deterministic stem keys.
+- [ ] GREEN + commit `feat(phase4d): add dedicated separation provider container`.
 
 ### Task 3: Separation workflow, usage idempotency, and cancellation
 
-**Files:** `worker/src/workflows/SeparationWorkflow.ts`, `worker/src/workflows/separationPipeline.ts`, `worker/test/separation-workflow.test.ts`, `worker/src/db/usage.ts`, `worker/src/index.ts`.
-
 - [ ] RED workflow tests: first run, stem reuse, usage recovery, invariant failure, cancellation boundaries, provider failure.
-- [ ] Implement exact project-level operation key `project:{projectId}:source:{sourceRevision}:separation:{provider}:{modelDigest}` and `audio_separation_minute`.
+- [ ] Implement project-level operation key and `audio_separation_minute`.
 - [ ] GREEN + commit `feat(phase4d): add idempotent separation workflow`.
 
 ### Task 4: Separation API, rate limit, Cloudflare bindings, and readiness
-
-**Files:** `worker/src/routes/separation.ts`, route tests, `app.ts`, `env.ts`, `rate-limit.ts`, `wrangler.jsonc`, readiness.
 
 - [ ] RED route/config tests for ownership, idempotency, retry, `RATE_LIMIT_SEPARATION`, `SEPARATOR_CONTAINER`, `SEPARATION_WORKFLOW`.
 - [ ] Implement POST/GET separation API and truthful readiness.
@@ -99,7 +72,6 @@ export interface AudioSeparationProvider { capabilities(): SeparationCapabilitie
 
 - [ ] RED export route/pipeline/share tests.
 - [ ] Implement `DubbedMixMode = 'dubbed_only' | 'preserve_background'`, persist/return `mixMode`, require current completed separation, never auto-start it from export.
-- [ ] Extend `RenderExportOptions` with `mixMode` and `backgroundObjectKey` validation.
 - [ ] GREEN + commit `feat(phase4d): add preserve-background export mode`.
 
 ### Task 6: FFmpeg preserve-background render graph
@@ -122,12 +94,12 @@ export interface AudioSeparationProvider { capabilities(): SeparationCapabilitie
 
 ### Task 9: Full fresh verification, latest-main reconciliation, PR, merge, post-merge evidence
 
-- [ ] Fresh FULL GREEN exact carrier: source/tests/build, Wrangler, CJK screenshots, artifact, separator contracts.
-- [ ] Re-fetch carrier/live main; non-force reconcile any drift and require fresh FULL GREEN again.
+- [ ] Fresh FULL GREEN exact carrier.
+- [ ] Reconcile latest main non-force and require fresh FULL GREEN.
 - [ ] Create one PR, merge only exact green/mergeable head, no bypass.
 - [ ] Verify live main merge SHA and post-merge FULL GREEN.
-- [ ] Do not manually deploy production; Workers Builds owns deployment.
+- [ ] No manual production deploy.
 
 ## Plan self-review
 
-Spec coverage is complete for persistence, dedicated container/provider, workflow/idempotency, API/rate limit, export integration, FFmpeg, UI, telemetry/usage, deployment boundary, and runtime qualification. Naming is canonical: `sourceRevision`, `AudioSeparationProvider`, `SeparationWorkflowParams`, `DubbedMixMode`, `mixMode`, `backgroundObjectKey`, `RATE_LIMIT_SEPARATION`, `SEPARATOR_CONTAINER`, `SEPARATION_WORKFLOW`.
+Spec coverage is complete for persistence, dedicated container/provider, workflow/idempotency, API/rate limit, export integration, FFmpeg, UI, telemetry/usage, deployment boundary, and runtime qualification. Canonical naming remains `sourceRevision`, `AudioSeparationProvider`, `SeparationWorkflowParams`, `DubbedMixMode`, `mixMode`, `backgroundObjectKey`, `RATE_LIMIT_SEPARATION`, `SEPARATOR_CONTAINER`, `SEPARATION_WORKFLOW`.
