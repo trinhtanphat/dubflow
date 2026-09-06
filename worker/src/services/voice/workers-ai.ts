@@ -12,7 +12,14 @@ export class WorkersAIVoiceProvider implements VoiceProvider {
   constructor(private readonly ai: AiBinding, private readonly config: WorkersAIVoiceConfig = {}) {}
 
   capabilities(): VoiceCapabilities {
-    return { languages: this.config.verifiedLanguages ?? 'unknown', cloning: false };
+    return {
+      provider: 'workers-ai',
+      configured: Boolean(this.config.model),
+      languages: this.config.verifiedLanguages ?? 'unknown',
+      cloning: false,
+      preview: Boolean(this.config.model && this.config.verifiedLanguages?.length),
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: false },
+    };
   }
 
   async generate(input: VoiceGenerateInput): Promise<unknown> {
