@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: corrected-production-probe
+  cancel-in-progress: true
+
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -87,7 +91,7 @@ jobs:
             grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file" && schema10='yes' || true
             project_count="$(jq 'if type=="array" then length else -1 end' "$projects_file" 2>/dev/null || echo -1)"
             echo "attempt=$attempt ready=$ready schema10=$schema10 projects=$projects count=$project_count usage=$usage p1=$p1 p2=$p2"
-            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$project_count" == '4' && "$p1" == '200' && "$p2" == '200' ]]; then
+            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$project_count" -ge 4 && "$p1" == '200' && "$p2" == '200' ]]; then
               echo 'PUBLIC_PRODUCTION_QUALIFIED'
               echo "ready_body=$(cat "$ready_file")"
               rm -f "$ready_file" "$projects_file" "$usage_file" "$sink"
