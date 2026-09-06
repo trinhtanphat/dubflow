@@ -1,4 +1,4 @@
-name: Cloudflare Workers Subscription Probe
+name: Cloudflare CI Token Policy Probe
 
 on:
   push:
@@ -16,7 +16,6 @@ jobs:
     timeout-minutes: 10
     environment: production
     env:
-      CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - name: Require Cloudflare token
@@ -27,16 +26,38 @@ jobs:
             exit 1
           fi
 
-      - name: Read account subscriptions
+      - name: Verify token and inspect its policy metadata
         shell: bash
         run: |
           set -euo pipefail
-          code="$(curl --silent --show-error --output /tmp/subscriptions.json --write-out '%{http_code}' \
-            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/subscriptions" \
+          verify_code="$(curl --silent --show-error --output /tmp/token-verify.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" \
             --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
-          echo "Account subscriptions HTTP status: ${code}"
-          cat /tmp/subscriptions.json
-          echo
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+          echo "Token verify HTTP status: ${verify_code}"
+          test "$verify_code" = "200"
+          token_id="$(node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('/tmp/token-verify.json','utf8')); if(!j.result?.id) process.exit(1); process.stdout.write(j.result.id)")"
+          details_code="$(curl --silent --show-error --output /tmp/token-details.json --write-out '%{http_code}' \
+            "https://api.cloudflare.com/client/v4/user/tokens/${token_id}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+          echo "Token details HTTP status: ${details_code}"
+          if [ "$details_code" = "200" ]; then
+            node - <<'NODE'
+          const fs = require('fs');
+          const j = JSON.parse(fs.readFileSync('/tmp/token-details.json', 'utf8'));
+          const result = j.result ?? {};
+          console.log(JSON.stringify({
+            id: result.id,
+            name: result.name,
+            status: result.status,
+            policies: (result.policies ?? []).map((p) => ({
+              effect: p.effect,
+              permission_groups: (p.permission_groups ?? []).map((g) => g.name),
+              resources: p.resources
+            }))
+          }, null, 2));
+          NODE
+          else
+            cat /tmp/token-details.json
+            echo
             exit 1
           fi
