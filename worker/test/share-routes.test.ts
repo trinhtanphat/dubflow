@@ -87,7 +87,7 @@ describe('owner export share management', () => {
       expiresAt: '2026-09-13T00:00:00.000Z',
     });
     expect(body.share).toMatchObject({ id: 's1', projectId: 'p1', tokenHint: 'n_secret', status: 'active' });
-    expect(body.shareUrl).toBe('https://studio.test/api/shares/s1/media?token=plain_secret');
+    expect(body.shareUrl).toBe('https://yupvox.qs3d.site/api/shares/s1/media?token=plain_secret');
     expect(body.tokenHash).toBeUndefined();
     expect(JSON.stringify(body.share)).not.toContain('hash-secret');
   });
