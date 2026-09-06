@@ -24,7 +24,7 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     PORT=8080
 
 WORKDIR /app
-COPY containers/separator/server.mjs ./server.mjs
+COPY server.mjs ./server.mjs
 
 EXPOSE 8080
 CMD ["node", "server.mjs"]
