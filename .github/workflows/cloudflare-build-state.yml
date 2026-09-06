@@ -15,37 +15,25 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CURRENT_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
       LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      CURRENT_TAG: ed49a7dcf94c407aafa2bedf4311331f
+      LEGACY_TAG: cec78627dd174827ab210bc09108fb1c
     steps:
-      - name: Compare Worker bindings and D1 state across accounts
+      - name: Inspect Workers Builds triggers on both accounts
         shell: bash
         run: |
-          set -u
+          set -euo pipefail
           api='https://api.cloudflare.com/client/v4'
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
-          cfpost() { curl --silent --show-error --location "$1" -X POST -H "$auth" -H 'Content-Type: application/json' --data "$2"; }
 
-          inspect_account() {
-            local label="$1"
-            local account="$2"
-            echo "=== $label worker settings/bindings ==="
-            cfget "$api/accounts/$account/workers/scripts/dubflow/settings" | jq -c '{success,errors,result:{compatibility_date:.result.compatibility_date,bindings:[.result.bindings[]? | {name,type,namespace_id,id,bucket_name,dataset}]}}'
+          echo '=== CURRENT ACCOUNT BUILDS TRIGGERS ==='
+          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/builds/workers/$CURRENT_TAG/triggers" \
+            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,repo_name,provider_account_name,provider_type,build_command,deploy_command,root_directory,branch_includes,branch_excludes,build_token_name,build_token_uuid}]}'
 
-            echo "=== $label D1 databases ==="
-            dbs="$(cfget "$api/accounts/$account/d1/database?per_page=100")"
-            printf '%s' "$dbs" | jq -c '{success,errors,result:[.result[]? | {uuid,name,created_at,file_size,num_tables}]}'
+          echo '=== LEGACY ACCOUNT BUILDS TRIGGERS ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/workers/$LEGACY_TAG/triggers" \
+            | jq -c '{success,errors,result:[.result[]? | {trigger_uuid,trigger_name,repo_name,provider_account_name,provider_type,build_command,deploy_command,root_directory,branch_includes,branch_excludes,build_token_name,build_token_uuid}]}'
 
-            dbid="$(printf '%s' "$dbs" | jq -r '.result[]? | select((.name|ascii_downcase) == "dubflow-db" or (.name|ascii_downcase) == "dubflow") | .uuid' | head -n1)"
-            if [[ -z "$dbid" || "$dbid" == 'null' ]]; then
-              dbid="$(printf '%s' "$dbs" | jq -r '.result[0].uuid // empty')"
-            fi
-            echo "$label selected_db=$dbid"
-            if [[ -n "$dbid" ]]; then
-              payload='{"sql":"SELECT name FROM sqlite_master WHERE type=\"table\" ORDER BY name; SELECT COUNT(*) AS project_count FROM projects; SELECT COUNT(*) AS usage_count FROM usage_events;"}'
-              echo "=== $label D1 schema/data counts ==="
-              cfpost "$api/accounts/$account/d1/database/$dbid/query" "$payload" | jq -c '{success,errors,result}'
-            fi
-          }
-
-          inspect_account CURRENT "$CURRENT_ACCOUNT_ID"
-          inspect_account LEGACY "$LEGACY_ACCOUNT_ID"
+          echo '=== LEGACY RECENT BUILDS ==='
+          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/builds/workers/$LEGACY_TAG/builds" \
+            | jq -c '{success,errors,result:[.result[:10][]? | {build_uuid,status,build_outcome,created_on,stopped_on,build_trigger_metadata}]}'
