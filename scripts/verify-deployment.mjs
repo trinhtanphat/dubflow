@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
 export const READINESS_URL = 'https://yupvox.qs3d.site/api/ready';
-export const CURRENT_SCHEMA_REVISION = 10;
+export const CURRENT_SCHEMA_REVISION = 11;
 
 export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
   try {
