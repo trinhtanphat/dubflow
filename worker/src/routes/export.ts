@@ -17,7 +17,7 @@ import { enforceRateLimit } from '../security/rate-limit';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import type { VoiceCapabilities } from '../services/voice/types';
 
-export type ExportStore = Pick<ProjectExportRepository, 'create' | 'latest' | 'fail'>;
+export type ExportStore = Pick<ProjectExportRepository, 'create' | 'latest' | 'latestCompleted' | 'fail'>;
 
 export type ExportRouteDeps = {
   makeProjects?: (env: Env) => ProjectStore;
@@ -423,7 +423,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
-    const attempt = await makeExports(c.env).latest(projectId, userId, targetLanguage, output);
+    const attempt = await makeExports(c.env).latestCompleted(projectId, userId, targetLanguage, output);
     const objectKey = attempt ? completedMediaKey(attempt, output) : null;
     if (!objectKey) return c.json(errorBody('EXPORT_NOT_READY', 'Requested export is not completed.'), 409);
 
@@ -463,7 +463,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
     let objectKey: string | null = null;
     try {
-      const latest = await makeExports(c.env).latest(projectId, userId, 'vi', 'dubbed');
+      const latest = await makeExports(c.env).latestCompleted(projectId, userId, 'vi', 'dubbed');
       objectKey = latest ? completedMediaKey(latest, 'dubbed') : null;
     } catch {
       // Legacy fallback remains readable while old project-level export state is reconciled.
