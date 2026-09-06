@@ -1,4 +1,4 @@
-name: Deploy Cloudflare Ops
+name: Cloudflare Analytics Probe
 
 on:
   push:
@@ -10,34 +10,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: deploy-cloudflare-production
-  cancel-in-progress: false
-
 jobs:
-  deploy:
+  probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
     environment: production
     env:
       CLOUDFLARE_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      GOOGLE_CLOUD_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_CLOUD_TRANSLATE_API_KEY }}
-      DEEPGRAM_API_KEY: ${{ secrets.DEEPGRAM_API_KEY }}
-      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
-      ELEVENLABS_DEFAULT_VOICE_ID: ${{ secrets.ELEVENLABS_DEFAULT_VOICE_ID }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
       - name: Require Cloudflare token
         shell: bash
         run: |
@@ -46,28 +27,22 @@ jobs:
             exit 1
           fi
 
-      - name: Verify and deploy YupVox
-        run: npm run deploy
-
-      - name: Sync optional Google Translation secret
-        if: ${{ env.GOOGLE_CLOUD_TRANSLATE_API_KEY != '' }}
+      - name: Probe Analytics Engine SQL API
         shell: bash
-        run: printf '%s' "$GOOGLE_CLOUD_TRANSLATE_API_KEY" | npx wrangler secret put GOOGLE_CLOUD_TRANSLATE_API_KEY
-
-      - name: Sync optional Deepgram diarization secret
-        if: ${{ env.DEEPGRAM_API_KEY != '' }}
-        shell: bash
-        run: printf '%s' "$DEEPGRAM_API_KEY" | npx wrangler secret put DEEPGRAM_API_KEY
-
-      - name: Sync optional ElevenLabs API key
-        if: ${{ env.ELEVENLABS_API_KEY != '' }}
-        shell: bash
-        run: printf '%s' "$ELEVENLABS_API_KEY" | npx wrangler secret put ELEVENLABS_API_KEY
-
-      - name: Sync optional ElevenLabs default voice
-        if: ${{ env.ELEVENLABS_DEFAULT_VOICE_ID != '' }}
-        shell: bash
-        run: printf '%s' "$ELEVENLABS_DEFAULT_VOICE_ID" | npx wrangler secret put ELEVENLABS_DEFAULT_VOICE_ID
-
-      - name: Verify production readiness after secret sync
-        run: node scripts/verify-deployment.mjs
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          http_code="$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            --request POST \
+            "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/analytics_engine/sql" \
+            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header 'Content-Type: text/plain' \
+            --data 'SHOW TABLES')"
+          echo "Analytics Engine SQL HTTP status: ${http_code}"
+          cat "$response_file"
+          echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            exit 1
+          fi
