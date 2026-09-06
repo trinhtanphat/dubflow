@@ -80,7 +80,7 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
     if (rateLimited) return rateLimited;
 
     try {
-      const context = await contexts.getContext(projectId, userId);
+      const context = await contexts.getContext(projectId, userId, 'vi');
       if (!context) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
 
       const provider = input.mode === 'compare'
