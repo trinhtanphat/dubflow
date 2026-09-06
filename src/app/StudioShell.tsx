@@ -16,6 +16,15 @@ import {
 import type { Segment } from '../features/timeline/types';
 import { startExport, type CloudJob } from '../features/projects/jobApi';
 import { TranslationSettingsPanel } from '../features/translation/TranslationSettingsPanel';
+import { TargetLanguagesPanel, type StudioLanguage } from '../features/translation/TargetLanguagesPanel';
+import {
+  TranslationVariantConflictError,
+  getTranslationVariants,
+  patchTranslationVariant,
+  type TargetLanguage,
+  type TranslationVariantDto,
+} from '../features/translation/languageVariantsApi';
+import { BatchExportPanel } from '../features/export/BatchExportPanel';
 import type { TranslationMode } from '../features/translation/translationApi';
 import { retranslateEditorSegment } from '../features/transcript/editorPersistence';
 import { SegmentVersionConflictError, type CloudSegment } from '../features/transcript/segmentApi';
@@ -75,6 +84,13 @@ function toStudioSegment(segment: CloudSegment): Segment {
     sourceText: segment.sourceText,
     translatedText: segment.translatedText,
     version: segment.version,
+  };
+}
+
+export function composeTargetSegment(canonical: Segment, variant?: TranslationVariantDto | null): Segment {
+  return {
+    ...canonical,
+    translatedText: variant?.translation?.translatedText ?? canonical.translatedText,
   };
 }
 
@@ -250,6 +266,9 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const [editorError, setEditorError] = useState('');
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [currentLanguage, setCurrentLanguage] = useState<StudioLanguage>('vi');
+  const [selectedExportLanguages, setSelectedExportLanguages] = useState<TargetLanguage[]>(['vi']);
+  const [targetVariants, setTargetVariants] = useState<Record<string, TranslationVariantDto>>({});
   const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
   const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
   const previousSelectedSegmentId = useRef(state.selectedSegmentId);
@@ -258,6 +277,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   const mutationLocked = isStudioMutationLocked(editorBusy, Boolean(activeJob));
   const autosave = useSegmentAutosave({ state, dispatch });
   const selectedDraft = selectedSegment ? state.drafts[selectedSegment.id] : undefined;
+  const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
+  const selectedInspectorSegment = selectedSegment && targetLanguage
+    ? composeTargetSegment(selectedSegment, targetVariants[selectedSegment.id])
+    : selectedSegment;
+  const targetEditing = Boolean(targetLanguage && targetLanguage !== 'vi');
 
   const toggleMobilePanel = (panel: Exclude<MobilePanel, 'none'>) => {
     setMobilePanel((current) => current === panel ? 'none' : panel);
@@ -323,6 +347,21 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   }, [activeJob, dispatch]);
 
   useEffect(() => {
+    if (!cloudEditable || !targetLanguage) {
+      setTargetVariants({});
+      return;
+    }
+    let active = true;
+    getTranslationVariants(state.project.id, targetLanguage).then((variants) => {
+      if (!active) return;
+      setTargetVariants(Object.fromEntries(variants.map((variant) => [variant.segmentId, variant])));
+    }).catch((error) => {
+      if (active) setEditorError(errorMessage(error, 'Không thể tải bản dịch ngôn ngữ đích.'));
+    });
+    return () => { active = false; };
+  }, [cloudEditable, state.project.id, targetLanguage]);
+
+  useEffect(() => {
     const previousId = previousSelectedSegmentId.current;
     if (previousId && previousId !== state.selectedSegmentId) {
       void autosave.flush(previousId);
@@ -333,7 +372,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   useEffect(() => {
     setTranslationComparison(null);
     setEditorError('');
-  }, [state.selectedSegmentId]);
+  }, [state.selectedSegmentId, currentLanguage]);
 
   const restoreCloudProject = async () => {
     if (!cloudEditable) return;
@@ -356,7 +395,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
   });
 
   const retranslate = async (segmentId: string) => {
-    if (!cloudEditable || mutationLocked) return;
+    if (!cloudEditable || mutationLocked || targetEditing) return;
     const current = state.project.segments.find((segment) => segment.id === segmentId);
     if (!current) return;
     setEditorBusy(true);
@@ -376,12 +415,66 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
     }
   };
 
+  const editInspectorDraft = (segmentId: string, patch: SegmentFieldPatch) => {
+    if (!targetEditing || !targetLanguage) {
+      autosave.edit(segmentId, patch);
+      return;
+    }
+    const { translatedText, ...canonicalPatch } = patch;
+    if (Object.keys(canonicalPatch).length > 0) autosave.edit(segmentId, canonicalPatch);
+    if (translatedText === undefined) return;
+    setTargetVariants((current) => {
+      const existing = current[segmentId];
+      if (!existing?.translation) return current;
+      return {
+        ...current,
+        [segmentId]: { ...existing, translation: { ...existing.translation, translatedText } },
+      };
+    });
+  };
+
+  const flushInspectorDraft = async (segmentId: string) => {
+    if (targetEditing && targetLanguage) {
+      const variant = targetVariants[segmentId];
+      if (variant?.translation) {
+        setEditorBusy(true);
+        setEditorError('');
+        try {
+          const saved = await patchTranslationVariant(
+            state.project.id,
+            targetLanguage,
+            segmentId,
+            variant.translation.version,
+            variant.translation.translatedText,
+          );
+          setTargetVariants((current) => ({
+            ...current,
+            [segmentId]: { ...variant, translation: saved },
+          }));
+        } catch (error) {
+          if (error instanceof TranslationVariantConflictError) {
+            setTargetVariants((current) => ({
+              ...current,
+              [segmentId]: { ...variant, translation: error.canonical },
+            }));
+            setEditorError('Bản dịch ngôn ngữ này đã thay đổi ở nơi khác. Đã tải bản mới nhất.');
+          } else {
+            setEditorError(errorMessage(error, 'Không thể lưu bản dịch ngôn ngữ đích.'));
+          }
+        } finally {
+          setEditorBusy(false);
+        }
+      }
+    }
+    await autosave.flush(segmentId);
+  };
+
   const applyTranslation = async (text: string) => {
     if (!selectedSegment || !cloudEditable || mutationLocked) return;
     setEditorError('');
-    autosave.edit(selectedSegment.id, { translatedText: text });
+    editInspectorDraft(selectedSegment.id, { translatedText: text });
     setTranslationComparison(null);
-    await autosave.flush(selectedSegment.id);
+    await flushInspectorDraft(selectedSegment.id);
   };
 
   const cloudState = activeJob ? 'processing' : cloudError ? 'degraded' : 'ready';
@@ -523,11 +616,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         <SharePanel projectId={state.project.id} onClose={() => setShareOpen(false)} />
       ) : null}
 
-      <CommandPalette
-        open={commandPaletteOpen}
-        commands={studioCommands}
-        onClose={closeCommandPalette}
-      />
+      <CommandPalette open={commandPaletteOpen} commands={studioCommands} onClose={closeCommandPalette} />
 
       {cloudError && <div className="error-banner" role="alert">{cloudError}</div>}
       {editorError && <div className="error-banner editor-error-banner" role="alert">{editorError}</div>}
@@ -536,9 +625,29 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         <aside className="left-rail" aria-label="Nguồn media và nhân vật">
           <UploadPanel onProcessStarted={onProcessStarted} speakerSection={<SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />} />
           {cloudEditable && (
-            <section className="panel translation-settings-host">
-              <TranslationSettingsPanel projectId={state.project.id} />
-            </section>
+            <>
+              <section className="panel translation-settings-host">
+                <TargetLanguagesPanel
+                  projectId={state.project.id}
+                  currentLanguage={currentLanguage}
+                  onCurrentLanguageChange={setCurrentLanguage}
+                  selectedLanguages={selectedExportLanguages}
+                  onSelectedLanguagesChange={setSelectedExportLanguages}
+                />
+              </section>
+              <section className="panel translation-settings-host">
+                <TranslationSettingsPanel projectId={state.project.id} />
+              </section>
+              <section className="panel translation-settings-host">
+                <BatchExportPanel
+                  projectId={state.project.id}
+                  currentTargetLanguage={targetLanguage ?? 'vi'}
+                  enabledLanguages={selectedExportLanguages.length ? selectedExportLanguages : ['vi']}
+                  selectedLanguages={selectedExportLanguages}
+                  onSelectedLanguagesChange={setSelectedExportLanguages}
+                />
+              </section>
+            </>
           )}
         </aside>
 
@@ -563,17 +672,17 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         </section>
 
         <ScriptInspector
-          segment={selectedSegment}
+          segment={selectedInspectorSegment}
           speakers={state.project.speakers}
           lipSyncEnabled={state.lipSyncEnabled}
           dispatch={dispatch}
           cloudEditable={cloudEditable}
-          draft={selectedDraft}
-          onEditDraft={autosave.edit}
-          onFlushDraft={(segmentId) => { void autosave.flush(segmentId); }}
-          onRetryDraft={(segmentId) => { void autosave.retry(segmentId); }}
-          onDiscardConflict={autosave.discardConflict}
-          onReapplyConflict={(segmentId) => { void autosave.reapplyConflict(segmentId); }}
+          draft={targetEditing ? undefined : selectedDraft}
+          onEditDraft={editInspectorDraft}
+          onFlushDraft={(segmentId) => { void flushInspectorDraft(segmentId); }}
+          onRetryDraft={(segmentId) => { void flushInspectorDraft(segmentId); }}
+          onDiscardConflict={targetEditing ? undefined : autosave.discardConflict}
+          onReapplyConflict={targetEditing ? undefined : (segmentId) => { void autosave.reapplyConflict(segmentId); }}
           translationMode={translationMode}
           onTranslationModeChange={setTranslationMode}
           onRetranslate={retranslate}
@@ -584,12 +693,7 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
         />
       </main>
 
-      <button
-        type="button"
-        className="mobile-panel-backdrop"
-        aria-label="Đóng bảng phụ"
-        onClick={() => setMobilePanel('none')}
-      />
+      <button type="button" className="mobile-panel-backdrop" aria-label="Đóng bảng phụ" onClick={() => setMobilePanel('none')} />
 
       <footer className="capability-strip studio-capability-strip reference-feature-strip" aria-label="Năng lực hệ thống">
         <span><i className="capability-dot capability-dot--ready" />Dub mọi ngôn ngữ</span>
