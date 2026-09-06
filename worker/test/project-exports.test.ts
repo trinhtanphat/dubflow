@@ -36,7 +36,12 @@ class ExportStatement implements D1StatementLike {
     }
     if (/FROM project_exports e[\s\S]*ORDER BY e\.created_at DESC, e\.id DESC/i.test(this.sql)) {
       const [projectId, target, output, userId] = this.values as [string, string, string, string];
-      const row = [...this.db.rows].reverse().find((candidate) => candidate.projectId === projectId && candidate.targetLanguage === target && candidate.output === output && userId === this.db.project.user_id);
+      const completedOnly = /e\.status\s*=\s*'completed'/i.test(this.sql);
+      const row = [...this.db.rows].reverse().find((candidate) => candidate.projectId === projectId
+        && candidate.targetLanguage === target
+        && candidate.output === output
+        && userId === this.db.project.user_id
+        && (!completedOnly || candidate.status === 'completed'));
       if (!row) return null;
       return {
         id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output,
@@ -64,6 +69,29 @@ describe('project export repository', () => {
     const created = await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-7');
     expect(created).toMatchObject({ id: 'export-1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed', batchId: 'batch-7', status: 'pending' });
     expect(await repo.latest('p1', 'u1', 'ja', 'dubbed')).toMatchObject({ id: 'export-1', targetLanguage: 'ja', output: 'dubbed' });
+  });
+
+  it('finds the latest completed target attempt even when a newer attempt is not complete', async () => {
+    const db = new ExportDb();
+    db.rows.push(
+      {
+        id: 'export-completed', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
+        status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4', subtitleObjectKey: null,
+        errorCode: null, errorMessage: null,
+      },
+      {
+        id: 'export-pending', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
+        status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
+      },
+    );
+    const repo = new ProjectExportRepository(db);
+
+    expect(await repo.latest('p1', 'u1', 'vi', 'dubbed')).toMatchObject({ id: 'export-pending', status: 'pending' });
+    expect(await repo.latestCompleted('p1', 'u1', 'vi', 'dubbed')).toMatchObject({
+      id: 'export-completed',
+      status: 'completed',
+      exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4',
+    });
   });
 
   it('lists a batch without collapsing per-language attempts', async () => {
