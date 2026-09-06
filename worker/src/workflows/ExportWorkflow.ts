@@ -10,12 +10,17 @@ import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
 import { ContainerMediaProcessor } from '../services/media/container';
+import { ContainerStemSeparationProvider } from '../services/separation/container';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
   async run(event: WorkflowEvent<ExportWorkflowParams>, step: WorkflowStep) {
     const media = new ContainerMediaProcessor(this.env.FFMPEG_CONTAINER);
+    const separation = new ContainerStemSeparationProvider(
+      media,
+      Boolean(this.env.FFMPEG_CONTAINER && this.env.ELEVENLABS_API_KEY?.trim()),
+    );
     return runExportPipeline(
       event.payload,
       {
@@ -31,6 +36,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
           { defaultVoiceId: this.env.ELEVENLABS_DEFAULT_VOICE_ID },
         ),
         media,
+        separation,
         usage: new UsageRepository(this.env.DB),
         telemetry: createTelemetry(this.env),
       },
