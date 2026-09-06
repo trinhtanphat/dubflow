@@ -93,11 +93,17 @@ describe('project export repository', () => {
     });
   });
 
-  it('defaults omitted audio treatment to dubbed_only', async () => {
+  it('defaults omitted audio treatment and visual processing to compatibility-safe modes', async () => {
     const db = new ExportDb();
     const repo = new ProjectExportRepository(db, () => 'export-default');
     const created = await repo.create('p1', 'u1', 'vi', 'dubbed');
-    expect(created.audioMode).toBe('dubbed_only');
+    expect(created).toMatchObject({
+      audioMode: 'dubbed_only',
+      lipSyncRequested: false,
+      lipSyncProvider: null,
+      lipSyncStatus: 'not_requested',
+      lipSyncObjectKey: null,
+    });
   });
 
   it('finds the latest completed target attempt even when a newer attempt is not complete', async () => {
