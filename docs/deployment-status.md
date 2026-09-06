@@ -2,7 +2,7 @@
 
 Canonical production hostname: `yupvox.qs3d.site`
 
-Cloudflare account: `6c5207813df3d5b83b9508125e0e9e12`
+Cloudflare account: `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`
 
 Production deployment topology is intentionally simple: `main` is the only production source of truth. GitHub Actions is CI only. The old **manual-only** GitHub production deployment workflow has been removed. Cloudflare Workers Builds watches `main`; when `main` changes, Cloudflare automatically builds and deploys the Worker/Static Assets/FFmpeg Container from that commit. The repository-level rule is documented in `docs/DEPLOYMENT-POLICY.md`.
 
