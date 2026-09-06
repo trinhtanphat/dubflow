@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { UsageRecordInput } from '../src/db/usage';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
+const neutralContext = { revision: 1, style: 'neutral' as const, glossary: [] };
+
 describe('Phase 4A workflow stitching', () => {
   it('persists one overlap utterance, stitches its speaker, and meters all provider-processed seconds', async () => {
     const usageEvents: UsageRecordInput[] = [];
@@ -65,6 +67,7 @@ describe('Phase 4A workflow stitching', () => {
             projectId: 'p1',
             translatedText: '',
             translationEngine: 'workers-ai' as const,
+            translationContextRevision: null,
             translationStatus: 'pending' as const,
             voiceStatus: 'pending' as const,
             dubbedObjectKey: null,
@@ -74,9 +77,16 @@ describe('Phase 4A workflow stitching', () => {
         },
         async setTranslationResult() { return null; },
       },
-      translation: {
-        async translateBatch(items: { id: string; text: string }[]) {
-          return items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' }));
+      translationContext: {
+        async getContext() { return neutralContext; },
+      },
+      translationRouter: {
+        async translate(_mode: unknown, items: Array<{ id: string; text: string }>) {
+          return {
+            mode: 'workers-ai' as const,
+            primary: items.map((item) => ({ id: item.id, text: `vi:${item.text}`, provider: 'workers-ai' })),
+            contextRevision: null,
+          };
         },
       },
       usage: {
@@ -84,7 +94,6 @@ describe('Phase 4A workflow stitching', () => {
       },
       telemetry: { write() {} },
       asrProviderId: 'deepgram-nova-3',
-      translationProviderId: 'workers-ai',
     };
     const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 
