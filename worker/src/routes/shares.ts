@@ -100,11 +100,12 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     if (body.exportId !== undefined && (typeof body.exportId !== 'string' || !body.exportId.trim())) {
       return c.json(errorBody('EXPORT_ID_INVALID', 'Export id must be a non-empty string.'), 400);
     }
-    const exportId = typeof body.exportId === 'string' ? body.exportId.trim() : null;
+    const requestedExportId = typeof body.exportId === 'string' ? body.exportId.trim() : null;
 
+    let resolvedExportId = requestedExportId;
     let exportObjectKey: string;
-    if (exportId) {
-      const variant = await makeMultilang(c.env).getExport(projectId, exportId, userId);
+    if (requestedExportId) {
+      const variant = await makeMultilang(c.env).getExport(projectId, requestedExportId, userId);
       if (!variant) return c.json(errorBody('EXPORT_NOT_FOUND', 'Export not found.'), 404);
       if (variant.status !== 'completed' || !variant.objectKey) {
         return c.json(errorBody('EXPORT_NOT_READY', 'Selected export is not ready to share.'), 409);
@@ -115,6 +116,13 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
         return c.json(errorBody('EXPORT_NOT_READY', 'Final Vietnamese export is not ready to share.'), 409);
       }
       exportObjectKey = project.exportObjectKey;
+      const variants = await makeMultilang(c.env).listExports(projectId, userId);
+      const currentVietnamese = variants.find((variant) => (
+        variant.targetLanguage === 'vi'
+        && variant.status === 'completed'
+        && variant.objectKey === project.exportObjectKey
+      ));
+      resolvedExportId = currentVietnamese?.id ?? null;
     }
 
     const createdAt = now();
@@ -122,7 +130,7 @@ export function createProjectShareRoutes(deps: ProjectShareRouteDeps = {}) {
     const share = await makeShares(c.env).create({
       projectId,
       userId,
-      exportId,
+      exportId: resolvedExportId,
       tokenHash: secret.tokenHash,
       tokenHint: secret.tokenHint,
       exportObjectKey,
