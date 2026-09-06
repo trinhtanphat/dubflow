@@ -1,0 +1,42 @@
+name: Bootstrap public-account Workers Builds prerequisites
+
+on:
+  push:
+    branches:
+      - ops/bootstrap-public-account-builds
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      GITHUB_ACCOUNT_ID: '89531707'
+      GITHUB_ACCOUNT_NAME: trinhtanphat
+      GITHUB_REPO_ID: '1357840238'
+      GITHUB_REPO_NAME: dubflow
+    steps:
+      - name: Create or refresh GitHub repository connection only
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          payload="$(jq -nc \
+            --arg provider_type github \
+            --arg provider_account_id "$GITHUB_ACCOUNT_ID" \
+            --arg provider_account_name "$GITHUB_ACCOUNT_NAME" \
+            --arg repo_id "$GITHUB_REPO_ID" \
+            --arg repo_name "$GITHUB_REPO_NAME" \
+            '{provider_type:$provider_type,provider_account_id:$provider_account_id,provider_account_name:$provider_account_name,repo_id:$repo_id,repo_name:$repo_name}')"
+          body="$(mktemp)"
+          status="$(curl --silent --show-error --location \
+            --output "$body" --write-out '%{http_code}' \
+            "$api/accounts/$ACCOUNT_ID/builds/repos/connections" \
+            -X PUT -H "$auth" -H 'Content-Type: application/json' --data "$payload" || printf '000')"
+          echo "repo_connection_http=$status"
+          jq -c '{success,errors,messages,result:{repo_connection_uuid:.result.repo_connection_uuid,repo_id:.result.repo_id,repo_name:.result.repo_name,provider_type:.result.provider_type,provider_account_id:.result.provider_account_id,provider_account_name:.result.provider_account_name}}' "$body" || cat "$body"
+          jq -e '.success == true and (.result.repo_connection_uuid | type == "string")' "$body" >/dev/null
