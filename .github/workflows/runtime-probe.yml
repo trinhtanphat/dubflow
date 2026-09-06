@@ -14,40 +14,60 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe live production API errors
+      - name: Compare baseline and cache-busted production API responses
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const endpoints = [
-            'https://yupvox.qs3d.site/api/ready',
-            'https://yupvox.qs3d.site/api/projects',
-            'https://yupvox.qs3d.site/api/usage',
-          ];
+          const base = 'https://yupvox.qs3d.site';
+          const paths = ['/api/ready', '/api/projects', '/api/usage'];
+          const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
           let failed = false;
-          for (const url of endpoints) {
-            const response = await fetch(url, {
-              headers: { accept: 'application/json', 'cache-control': 'no-cache' },
-            });
-            const text = await response.text();
+
+          function safeBody(text) {
             let rendered = text;
             try {
               const body = JSON.parse(text);
-              if (Array.isArray(body)) {
-                rendered = `array(length=${body.length})`;
-              } else if (body && typeof body === 'object') {
+              if (Array.isArray(body)) return `array(length=${body.length})`;
+              if (body && typeof body === 'object') {
                 const allowed = {};
-                for (const key of ['ready', 'service', 'database', 'code', 'error', 'message']) {
+                for (const key of ['ready', 'service', 'database', 'code', 'error', 'message', 'creditBalance', 'totals', 'providers']) {
                   if (key in body) allowed[key] = body[key];
                 }
                 rendered = JSON.stringify(allowed);
               }
             } catch {
-              rendered = text.slice(0, 1000);
+              rendered = text.slice(0, 700);
             }
-            rendered = rendered.replace(/[\r\n]+/g, ' ').slice(0, 1000);
-            console.log(`${new URL(url).pathname}: status=${response.status} content-type=${response.headers.get('content-type') ?? ''} body=${rendered}`);
-            if (response.status >= 500) failed = true;
+            return rendered.replace(/[\r\n]+/g, ' ').slice(0, 1000);
+          }
+
+          async function hit(path, mode) {
+            const url = mode === 'bust' ? `${base}${path}?runtime_probe=${encodeURIComponent(nonce)}` : `${base}${path}`;
+            const response = await fetch(url, {
+              headers: {
+                accept: 'application/json',
+                'cache-control': mode === 'bust' ? 'no-cache, no-store, max-age=0' : 'no-cache',
+                pragma: 'no-cache',
+              },
+            });
+            const text = await response.text();
+            const headers = {
+              cache: response.headers.get('cf-cache-status') ?? '',
+              age: response.headers.get('age') ?? '',
+              requestId: response.headers.get('x-request-id') ?? '',
+              ray: response.headers.get('cf-ray') ?? '',
+              server: response.headers.get('server') ?? '',
+              contentType: response.headers.get('content-type') ?? '',
+            };
+            console.log(`${mode} ${path}: status=${response.status} headers=${JSON.stringify(headers)} body=${safeBody(text)}`);
+            return response.status;
+          }
+
+          for (const path of paths) {
+            const normal = await hit(path, 'normal');
+            const bust = await hit(path, 'bust');
+            if (normal >= 500 || bust >= 500) failed = true;
           }
           if (failed) process.exit(1);
           NODE
