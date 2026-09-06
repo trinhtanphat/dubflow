@@ -16,6 +16,7 @@ class MemoryProjectStore implements ProjectStore {
       sourceLanguage: input.sourceLanguage,
       targetLanguage: input.targetLanguage,
       targetLanguagesRevision: 1,
+      sourceRevision: 1,
       status: 'draft',
     };
     this.projects.unshift(project);
@@ -33,6 +34,7 @@ class MemoryProjectStore implements ProjectStore {
   async setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void> {
     const project = this.projects.find((candidate) => candidate.id === id && candidate.userId === userId);
     if (!project) return;
+    if (project.sourceObjectKey && project.sourceObjectKey !== objectKey) project.sourceRevision += 1;
     project.sourceObjectKey = objectKey;
     project.sizeBytes = sizeBytes;
     project.status = 'ready';
@@ -70,6 +72,7 @@ describe('project routes', () => {
     const created = await createdResponse.json() as Project;
     expect(created.targetLanguage).toBe('vi');
     expect(created.targetLanguagesRevision).toBe(1);
+    expect(created.sourceRevision).toBe(1);
 
     const listResponse = await app.request('/api/projects');
     expect(await listResponse.json()).toEqual([created]);

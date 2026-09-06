@@ -6,7 +6,7 @@ import { UploadService } from '../src/services/uploads';
 
 class MemoryProjectStore implements ProjectStore {
   project: Project = {
-    id: 'project-1', userId: 'dev-user', title: 'Episode', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, status: 'draft',
+    id: 'project-1', userId: 'dev-user', title: 'Episode', sourceLanguage: 'zh', targetLanguage: 'vi', targetLanguagesRevision: 1, sourceRevision: 1, status: 'draft',
   };
   saved?: { key: string; size: number };
   async create(): Promise<Project> { return this.project; }
@@ -16,6 +16,7 @@ class MemoryProjectStore implements ProjectStore {
   }
   async setSourceObject(_id: string, _userId: string, objectKey: string, sizeBytes: number) {
     this.saved = { key: objectKey, size: sizeBytes };
+    if (this.project.sourceObjectKey && this.project.sourceObjectKey !== objectKey) this.project.sourceRevision += 1;
     this.project.sourceObjectKey = objectKey;
     this.project.sizeBytes = sizeBytes;
     this.project.status = 'ready';

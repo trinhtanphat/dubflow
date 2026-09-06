@@ -19,8 +19,8 @@ class ExportStatement implements D1StatementLike {
   async run(): Promise<D1RunResultLike> {
     this.db.calls.push({ sql: this.sql, values: this.values });
     if (/INSERT INTO project_exports/i.test(this.sql)) {
-      const [id, projectId, targetLanguage, output, batchId] = this.values as [string, string, ProjectExport['targetLanguage'], ProjectExport['output'], string | null];
-      this.db.rows.push({ id, projectId, targetLanguage, output, batchId, status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null });
+      const [id, projectId, targetLanguage, output, batchId, mixMode] = this.values as [string, string, ProjectExport['targetLanguage'], ProjectExport['output'], string | null, ProjectExport['mixMode']];
+      this.db.rows.push({ id, projectId, targetLanguage, output, batchId, mixMode, status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null });
       return { meta: { changes: 1 } };
     }
     if (/UPDATE project_exports[\s\S]*status = 'invalidated'/i.test(this.sql)) {
@@ -45,7 +45,7 @@ class ExportStatement implements D1StatementLike {
       if (!row) return null;
       return {
         id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output,
-        batch_id: row.batchId, status: row.status, export_object_key: row.exportObjectKey,
+        batch_id: row.batchId, mix_mode: row.mixMode, status: row.status, export_object_key: row.exportObjectKey,
         subtitle_object_key: row.subtitleObjectKey, error_code: row.errorCode, error_message: row.errorMessage,
       } as T;
     }
@@ -55,7 +55,7 @@ class ExportStatement implements D1StatementLike {
     if (/FROM project_exports e[\s\S]*batch_id = \?/i.test(this.sql)) {
       const [projectId, batchId, userId] = this.values as [string, string, string];
       const rows = this.db.rows.filter((row) => row.projectId === projectId && row.batchId === batchId && userId === this.db.project.user_id)
-        .map((row) => ({ id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output, batch_id: row.batchId, status: row.status, export_object_key: row.exportObjectKey, subtitle_object_key: row.subtitleObjectKey, error_code: row.errorCode, error_message: row.errorMessage }));
+        .map((row) => ({ id: row.id, project_id: row.projectId, target_language: row.targetLanguage, output: row.output, batch_id: row.batchId, mix_mode: row.mixMode, status: row.status, export_object_key: row.exportObjectKey, subtitle_object_key: row.subtitleObjectKey, error_code: row.errorCode, error_message: row.errorMessage }));
       return { results: rows as T[] };
     }
     return { results: [] };
@@ -67,8 +67,8 @@ describe('project export repository', () => {
     const db = new ExportDb();
     const repo = new ProjectExportRepository(db, () => 'export-1');
     const created = await repo.create('p1', 'u1', 'ja', 'dubbed', 'batch-7');
-    expect(created).toMatchObject({ id: 'export-1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed', batchId: 'batch-7', status: 'pending' });
-    expect(await repo.latest('p1', 'u1', 'ja', 'dubbed')).toMatchObject({ id: 'export-1', targetLanguage: 'ja', output: 'dubbed' });
+    expect(created).toMatchObject({ id: 'export-1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed', batchId: 'batch-7', mixMode: 'dubbed_only', status: 'pending' });
+    expect(await repo.latest('p1', 'u1', 'ja', 'dubbed')).toMatchObject({ id: 'export-1', targetLanguage: 'ja', output: 'dubbed', mixMode: 'dubbed_only' });
   });
 
   it('finds the latest completed target attempt even when a newer attempt is not complete', async () => {
@@ -76,12 +76,12 @@ describe('project export repository', () => {
     db.rows.push(
       {
         id: 'export-completed', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
-        status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4', subtitleObjectKey: null,
+        mixMode: 'dubbed_only', status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4', subtitleObjectKey: null,
         errorCode: null, errorMessage: null,
       },
       {
         id: 'export-pending', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
-        status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
+        mixMode: 'dubbed_only', status: 'pending', exportObjectKey: null, subtitleObjectKey: null, errorCode: null, errorMessage: null,
       },
     );
     const repo = new ProjectExportRepository(db);
