@@ -1,4 +1,5 @@
 import type { SourceLanguage } from '../../domain/project';
+import type { TargetLanguage } from '../../domain/target-language';
 import { isTranslationContextActive, type TranslationContext } from './context';
 import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
@@ -43,7 +44,7 @@ export class TranslationRouter {
     requestedMode: TranslationMode | undefined,
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationRouteResult> {
     const mode = resolveMode(requestedMode, context);
