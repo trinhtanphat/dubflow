@@ -1,9 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import migration from '../../migrations/0006_export_shares.sql?raw';
 import { ShareRepository, type ExportShare } from '../src/db/shares';
 import { createShareToken, hashShareToken } from '../src/security/share-token';
-
-const migration = readFileSync(new URL('../../migrations/0006_export_shares.sql', import.meta.url), 'utf8');
 
 type Row = {
   id: string;
@@ -32,13 +30,19 @@ function row(overrides: Partial<Row> = {}): Row {
   };
 }
 
+function base64UrlByteLength(value: string): number {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+  return atob(padded).length;
+}
+
 describe('share token cryptography', () => {
   it('generates at least 256 bits of base64url entropy and hashes deterministically', async () => {
     const first = await createShareToken();
     const second = await createShareToken();
 
     expect(first.token).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(Buffer.from(first.token, 'base64url').byteLength).toBeGreaterThanOrEqual(32);
+    expect(base64UrlByteLength(first.token)).toBeGreaterThanOrEqual(32);
     expect(first.token).not.toBe(second.token);
     expect(first.tokenHint).toBe(first.token.slice(-8));
     expect(first.tokenHash).toMatch(/^[0-9a-f]{64}$/);
