@@ -1,4 +1,5 @@
 const MAX_EXPORT_CLIPS = 4096;
+const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
 
 function projectPrefix(projectId) {
   return `projects/${projectId}/`;
@@ -6,6 +7,16 @@ function projectPrefix(projectId) {
 
 function validProjectId(projectId) {
   return typeof projectId === 'string' && /^[A-Za-z0-9._-]{1,160}$/.test(projectId);
+}
+
+function validateTargetOptions(input) {
+  const hasTarget = input.targetLanguage !== undefined || input.exportId !== undefined;
+  if (!hasTarget) return null;
+  if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
+  if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
+    throw new Error('Invalid exportId.');
+  }
+  return { targetLanguage: input.targetLanguage, exportId: input.exportId };
 }
 
 export function validateRenderExportInput(input) {
@@ -17,14 +28,22 @@ export function validateRenderExportInput(input) {
     throw new Error(`clips must contain between 1 and ${MAX_EXPORT_CLIPS} items.`);
   }
 
+  const options = validateTargetOptions(input);
   const seen = new Set();
   for (const clip of input.clips) {
+    const legacyPrefix = `${projectPrefix(input.projectId)}dubbed/`;
+    const targetPrefix = options ? `${projectPrefix(input.projectId)}voices/${options.targetLanguage}/` : null;
+    const validObject = typeof clip?.objectKey === 'string' && (
+      options
+        ? clip.objectKey.startsWith(targetPrefix) || (options.targetLanguage === 'vi' && clip.objectKey.startsWith(legacyPrefix))
+        : clip.objectKey.startsWith(legacyPrefix)
+    );
     if (
       !clip ||
       typeof clip.segmentId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(clip.segmentId) ||
       !Number.isInteger(clip.startMs) || clip.startMs < 0 ||
       !Number.isInteger(clip.endMs) || clip.endMs <= clip.startMs ||
-      typeof clip.objectKey !== 'string' || !clip.objectKey.startsWith(`${projectPrefix(input.projectId)}dubbed/`)
+      !validObject
     ) {
       throw new Error('Invalid or cross-project dubbed clip.');
     }

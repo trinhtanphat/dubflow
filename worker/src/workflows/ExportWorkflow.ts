@@ -4,6 +4,8 @@ import type { Env } from '../env';
 import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
+import { SegmentTranslationRepository } from '../db/segment-translations';
+import { ProjectExportRepository } from '../db/project-exports';
 import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
@@ -20,6 +22,8 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         projects: new ProjectRepository(this.env.DB),
         jobs: new JobRepository(this.env.DB),
         segments: new SegmentRepository(this.env.DB),
+        translations: new SegmentTranslationRepository(this.env.DB),
+        exports: new ProjectExportRepository(this.env.DB),
         speakers: new SpeakerRepository(this.env.DB),
         bucket: this.env.MEDIA,
         voice: new ElevenLabsVoiceProvider(

@@ -6,6 +6,34 @@ import { createExportRoutes } from '../src/routes/export';
 const allowExport = { async limit() { return { success: true }; } };
 const analytics = { writeDataPoint() {} };
 
+function phase4cExportDeps(calls?: string[]) {
+  return {
+    makeLanguages: () => ({
+      async getConfig() {
+        return { revision: 0, languages: [{ targetLanguage: 'vi' as const }] };
+      },
+    }) as never,
+    makeSegments: () => ({
+      async list() { return [{ id: 'segment-1' }]; },
+    }) as never,
+    makeVariants: () => ({
+      async list() {
+        return [{ segmentId: 'segment-1', translationStatus: 'completed', translatedText: 'Xin chào' }];
+      },
+    }) as never,
+    makeExports: () => ({
+      async create() {
+        calls?.push('export:create');
+        return { id: 'export-vi-1' };
+      },
+      async latest() { return null; },
+      async fail(_projectId: string, _exportId: string, _userId: string, code: string) {
+        calls?.push(`export:fail:${code}`);
+      },
+    }) as never,
+  };
+}
+
 describe('export route', () => {
   it('locks the project before creating the Workflow instance for an owned review-ready project', async () => {
     const calls: string[] = [];
@@ -31,6 +59,7 @@ describe('export route', () => {
     app.route('/api/projects', createExportRoutes({
       makeProjects: () => projects as never,
       makeJobs: () => jobs as never,
+      ...phase4cExportDeps(calls),
     }));
     const env = {
       ANALYTICS: analytics,
@@ -45,11 +74,19 @@ describe('export route', () => {
     const response = await app.request('/api/projects/project-1/export', { method: 'POST' }, env);
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ jobId: 'job-export-1', workflowId: 'workflow-export-1', status: 'queued' });
-    expect(workflowCalls).toEqual([{ params: { projectId: 'project-1', userId: 'dev-user', jobId: 'job-export-1' } }]);
-    expect(calls).toEqual(['job:create', 'project:processing', 'workflow:create']);
+    expect(workflowCalls).toEqual([{ params: {
+      projectId: 'project-1',
+      userId: 'dev-user',
+      jobId: 'job-export-1',
+      exportId: 'export-vi-1',
+      targetLanguage: 'vi',
+      output: 'dubbed',
+      requestId: undefined,
+    } }]);
+    expect(calls).toEqual(['export:create', 'job:create', 'project:processing', 'workflow:create']);
   });
 
-  it('restores needs_review and fails the durable job when Workflow start fails after locking', async () => {
+  it('restores needs_review and fails the durable job/export attempt when Workflow start fails after locking', async () => {
     const calls: string[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.route('/api/projects', createExportRoutes({
@@ -61,6 +98,7 @@ describe('export route', () => {
         async create() { calls.push('job:create'); return { id: 'j1' }; },
         async fail(_id: string, code: string) { calls.push(`job:fail:${code}`); },
       }) as never,
+      ...phase4cExportDeps(calls),
     }));
     const env = {
       ANALYTICS: analytics,
@@ -73,10 +111,12 @@ describe('export route', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'EXPORT_WORKFLOW_START_FAILED' });
     expect(calls).toEqual([
+      'export:create',
       'job:create',
       'project:processing',
       'workflow:create',
       'job:fail:EXPORT_WORKFLOW_START_FAILED',
+      'export:fail:EXPORT_WORKFLOW_START_FAILED',
       'project:needs_review',
     ]);
   });

@@ -147,7 +147,9 @@ async function renderExport(input) {
     });
     await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
 
-    const exportObjectKey = `projects/${input.projectId}/export/dubbed.mp4`;
+    const exportObjectKey = input.targetLanguage && input.exportId
+      ? `projects/${input.projectId}/exports/${input.targetLanguage}/${input.exportId}.mp4`
+      : `projects/${input.projectId}/export/dubbed.mp4`;
     await uploadFile(exportObjectKey, output, 'video/mp4');
     return { exportObjectKey };
   });
