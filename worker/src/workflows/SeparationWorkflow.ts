@@ -11,10 +11,16 @@ import { runSeparationPipeline, type SeparationWorkflowParams } from './separati
 
 export class SeparationWorkflow extends WorkflowEntrypoint<Env, SeparationWorkflowParams> {
   async run(event: WorkflowEvent<SeparationWorkflowParams>, step: WorkflowStep) {
+    const projects = new ProjectRepository(this.env.DB);
     return runSeparationPipeline(
       event.payload,
       {
-        projects: new ProjectRepository(this.env.DB),
+        projects: {
+          async getByIdForUser(projectId: string, userId: string) {
+            const project = await projects.getByIdForUser(projectId, userId);
+            return project ? { ...project, sourceObjectKey: project.sourceObjectKey ?? null } : null;
+          },
+        },
         jobs: new JobRepository(this.env.DB),
         separations: new AudioSeparationRepository(this.env.DB),
         provider: createSeparationProvider(this.env),

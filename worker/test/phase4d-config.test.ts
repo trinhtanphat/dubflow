@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// The worker build intentionally excludes Node typings; this source-inspection test runs under Vitest/Node.
+// @ts-ignore -- node:fs is provided by the Vitest runtime, not the Worker runtime.
 import { readFileSync } from 'node:fs';
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');

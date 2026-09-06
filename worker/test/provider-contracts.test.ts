@@ -48,7 +48,7 @@ const rateLimit = {
   },
 } satisfies Env['RATE_LIMIT_PROCESS'];
 
-const ffmpegContainer = {
+const container = {
   getByName(_name: string) {
     return {
       async fetch(_request: Request) {
@@ -76,6 +76,12 @@ const languageTranslationWorkflow = {
   },
 } satisfies Env['LANGUAGE_TRANSLATION_WORKFLOW'];
 
+const separationWorkflow = {
+  async create(_input: { id?: string; params?: unknown }) {
+    return { id: 'separation-workflow-1' };
+  },
+} satisfies Env['SEPARATION_WORKFLOW'];
+
 describe('Cloudflare provider contracts', () => {
   it('accepts portable AI, R2, Analytics Engine, rate limits, Container and Workflow bindings plus provider secrets', () => {
     const env = {
@@ -91,10 +97,13 @@ describe('Cloudflare provider contracts', () => {
       RATE_LIMIT_UPLOAD: rateLimit,
       RATE_LIMIT_VOICE_CLONE: rateLimit,
       RATE_LIMIT_BATCH_EXPORT: rateLimit,
-      FFMPEG_CONTAINER: ffmpegContainer,
+      RATE_LIMIT_SEPARATION: rateLimit,
+      FFMPEG_CONTAINER: container,
+      SEPARATOR_CONTAINER: container,
       DUBBING_WORKFLOW: dubbingWorkflow,
       EXPORT_WORKFLOW: exportWorkflow,
       LANGUAGE_TRANSLATION_WORKFLOW: languageTranslationWorkflow,
+      SEPARATION_WORKFLOW: separationWorkflow,
       GOOGLE_CLOUD_TRANSLATE_API_KEY: 'secret',
       ELEVENLABS_API_KEY: 'voice-secret',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice-id',
@@ -110,10 +119,13 @@ describe('Cloudflare provider contracts', () => {
     expect(env.RATE_LIMIT_UPLOAD).toBe(rateLimit);
     expect(env.RATE_LIMIT_VOICE_CLONE).toBe(rateLimit);
     expect(env.RATE_LIMIT_BATCH_EXPORT).toBe(rateLimit);
-    expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
+    expect(env.RATE_LIMIT_SEPARATION).toBe(rateLimit);
+    expect(env.FFMPEG_CONTAINER).toBe(container);
+    expect(env.SEPARATOR_CONTAINER).toBe(container);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
     expect(env.LANGUAGE_TRANSLATION_WORKFLOW).toBe(languageTranslationWorkflow);
+    expect(env.SEPARATION_WORKFLOW).toBe(separationWorkflow);
     expect(env.GOOGLE_CLOUD_TRANSLATE_API_KEY).toBe('secret');
   });
 });
