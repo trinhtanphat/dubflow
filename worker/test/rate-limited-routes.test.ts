@@ -122,6 +122,40 @@ describe('Phase 3C expensive route admission', () => {
     expect(calls).toEqual(['project:get', 'project:get', 'limit:dev-user:export']);
   });
 
+  it('uses the dedicated batch-export limiter after target validation and before durable fan-out', async () => {
+    const calls: string[] = [];
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/projects', createExportRoutes({
+      makeProjects: () => ({
+        async getByIdForUser() {
+          calls.push('project:get');
+          return { id: 'p1', userId: 'dev-user', status: 'needs_review', sourceObjectKey: 'projects/p1/source/a.mp4' };
+        },
+        async setStatus() { calls.push('project:set'); },
+      }) as never,
+      makeJobs: () => ({
+        async create() { calls.push('job:create'); return { id: 'j1' }; },
+        async fail() { calls.push('job:fail'); },
+      }) as never,
+      ...phase4cExportValidationDeps(),
+    }));
+    const env = {
+      ANALYTICS: analytics(),
+      RATE_LIMIT_BATCH_EXPORT: rejectedLimiter(calls),
+      EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); return { id: 'w1' }; } },
+    } as unknown as Env;
+
+    const response = await app.request('/api/projects/p1/exports/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetLanguages: ['vi'], output: 'subtitles' }),
+    }, env);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(calls).toEqual(['project:get', 'limit:dev-user:batch-export']);
+  });
+
   it('rejects upload session after authorization and validation but before multipart creation', async () => {
     const calls: string[] = [];
     const service = {
