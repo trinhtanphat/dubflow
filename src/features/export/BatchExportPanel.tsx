@@ -1,7 +1,12 @@
 import type { VoiceCapabilities } from '../voice/voiceApi';
 import type { TargetLanguage } from '../translation/languageVariantsApi';
 import { LANGUAGE_LABELS } from '../translation/TargetLanguagesPanel';
-import type { ExportLaunchDto, ExportOutput } from './batchExportApi';
+import type {
+  DubbedAudioMode,
+  ExportCapabilitiesDto,
+  ExportLaunchDto,
+  ExportOutput,
+} from './batchExportApi';
 import './batch-export.css';
 
 export function dubbedAvailability(
@@ -14,16 +19,36 @@ export function dubbedAvailability(
   return { allowed: true, reason: '' };
 }
 
+export function separatedBackgroundAvailability(
+  capabilities: ExportCapabilitiesDto | null,
+): { allowed: boolean; reason: string } {
+  const separation = capabilities?.separation;
+  if (!separation) return { allowed: false, reason: 'Separated background chưa khả dụng.' };
+  if (
+    separation.configured !== true
+    || separation.qualification !== 'qualified'
+    || separation.backgroundStem !== true
+    || typeof separation.provider !== 'string'
+    || separation.provider.trim() === ''
+  ) {
+    return { allowed: false, reason: 'Separated background chưa được xác nhận (unavailable/unqualified).' };
+  }
+  return { allowed: true, reason: '' };
+}
+
 type Props = {
   currentTargetLanguage: TargetLanguage;
   enabledLanguages: TargetLanguage[];
   selectedLanguages: TargetLanguage[];
   output: ExportOutput;
+  audioMode: DubbedAudioMode;
+  exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
   busy: boolean;
   results: ExportLaunchDto[];
   error: string;
   onOutputChange: (output: ExportOutput) => void;
+  onAudioModeChange: (audioMode: DubbedAudioMode) => void;
   onToggleLanguage: (language: TargetLanguage) => void;
   onExportCurrent: () => void;
   onBatchExport: () => void;
@@ -39,19 +64,27 @@ export function BatchExportPanelView({
   enabledLanguages,
   selectedLanguages,
   output,
+  audioMode,
+  exportCapabilities,
   voiceCapabilities,
   busy,
   results,
   error,
   onOutputChange,
+  onAudioModeChange,
   onToggleLanguage,
   onExportCurrent,
   onBatchExport,
   onRetryFailed,
 }: Props) {
   const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
-  const currentBlocked = output === 'dubbed' && !voice.allowed;
-  const selectedBlocked = output === 'dubbed' && selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed);
+  const separated = separatedBackgroundAvailability(exportCapabilities);
+  const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
+  const currentBlocked = output === 'dubbed' && (!voice.allowed || treatmentBlocked);
+  const selectedBlocked = output === 'dubbed' && (
+    treatmentBlocked
+    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
+  );
   const allSucceeded = results.length > 0 && results.every((result) => result.status === 'queued');
 
   return (
@@ -63,6 +96,23 @@ export function BatchExportPanelView({
           <option value="subtitles">Subtitles (.srt)</option>
         </select>
       </header>
+      {output === 'dubbed' && (
+        <div className="batch-export__audio-treatment">
+          <label>
+            <span>Xử lý âm thanh</span>
+            <select
+              aria-label="Xử lý âm thanh"
+              value={audioMode}
+              onChange={(event) => onAudioModeChange(event.currentTarget.value as DubbedAudioMode)}
+            >
+              <option value="dubbed_only">Dubbed voice only</option>
+              <option value="duck_original">Keep original ambience (duck dialogue)</option>
+              <option value="separated_background" disabled={!separated.allowed}>Separated background stem</option>
+            </select>
+          </label>
+          {!separated.allowed && <p className="batch-export__capability">{separated.reason}</p>}
+        </div>
+      )}
       <div className="batch-export__languages">
         {enabledLanguages.map((language) => (
           <label key={language}>
@@ -72,6 +122,7 @@ export function BatchExportPanelView({
         ))}
       </div>
       {output === 'dubbed' && !voice.allowed && <p className="batch-export__guard">{voice.reason}</p>}
+      {treatmentBlocked && <p className="batch-export__guard">{separated.reason}</p>}
       <div className="batch-export__actions">
         <button type="button" className="secondary-button" data-testid="export-current-language" disabled={busy || currentBlocked} onClick={onExportCurrent}>
           Export current language
