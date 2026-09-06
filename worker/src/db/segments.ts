@@ -33,6 +33,19 @@ type SegmentRow = {
   translation_status: string; voice_status: string; dubbed_object_key?: string | null; version: number; split_parent_id?: string | null;
 };
 
+type SegmentTranslationVariantRow = {
+  segment_id: string;
+  project_id: string;
+  target_language: 'vi' | 'en' | 'zh' | 'ja' | 'ko';
+  translated_text: string;
+  translation_engine: string;
+  translation_status: string;
+  translation_context_revision: number | null;
+  voice_status: string;
+  dubbed_object_key: string | null;
+  version: number;
+};
+
 function fromRow(row: SegmentRow): Segment {
   return {
     id: row.id, projectId: row.project_id, speakerId: row.speaker_id, startMs: row.start_ms, endMs: row.end_ms,
@@ -106,6 +119,14 @@ function normalizeContextRevision(contextRevision: number | null | undefined): n
   return contextRevision;
 }
 
+function joinSplitVariantText(left: string, right: string): string {
+  const first = left.trim();
+  const second = right.trim();
+  if (!first) return second;
+  if (!second) return first;
+  return `${first} ${second}`;
+}
+
 export class SegmentRepository implements SegmentStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
@@ -124,6 +145,17 @@ export class SegmentRepository implements SegmentStore {
   private async getAuthorizedProject(projectId: string, userId: string): Promise<AuthorizedProject | null> {
     return this.db.prepare(`SELECT id, duration_ms, status FROM projects WHERE id = ? AND user_id = ? LIMIT 1`)
       .bind(projectId, userId).first<AuthorizedProject>();
+  }
+
+  private async listTranslationVariants(projectId: string, segmentId: string): Promise<SegmentTranslationVariantRow[]> {
+    const result = await this.db.prepare(
+      `SELECT segment_id, project_id, target_language, translated_text, translation_engine,
+              translation_status, translation_context_revision, voice_status, dubbed_object_key, version
+       FROM segment_translations
+       WHERE project_id = ? AND segment_id = ?
+       ORDER BY target_language`,
+    ).bind(projectId, segmentId).all<SegmentTranslationVariantRow>();
+    return result.results ?? [];
   }
 
   private async assertEditorMutationAllowed(projectId: string, userId: string): Promise<AuthorizedProject> {
@@ -147,6 +179,64 @@ export class SegmentRepository implements SegmentStore {
       SET export_object_key = NULL, updated_at = datetime('now')
       WHERE id = ? AND user_id = ?`)
       .bind(projectId, userId);
+  }
+
+  private invalidateAllVariantTranslationsStatement(projectId: string, segmentId: string) {
+    return this.db.prepare(`UPDATE segment_translations
+      SET translation_status = 'pending', voice_status = 'pending', dubbed_object_key = NULL,
+          version = version + 1, updated_at = datetime('now')
+      WHERE project_id = ? AND segment_id = ?`)
+      .bind(projectId, segmentId);
+  }
+
+  private invalidateVariantVoicesStatement(projectId: string, segmentId: string) {
+    return this.db.prepare(`UPDATE segment_translations
+      SET voice_status = 'pending', dubbed_object_key = NULL, updated_at = datetime('now')
+      WHERE project_id = ? AND segment_id = ?`)
+      .bind(projectId, segmentId);
+  }
+
+  private invalidateAllTargetExportsStatement(projectId: string) {
+    return this.db.prepare(`UPDATE project_exports
+      SET status = 'invalidated', updated_at = datetime('now')
+      WHERE project_id = ? AND status IN ('pending','exporting','completed','failed')`)
+      .bind(projectId);
+  }
+
+  private invalidateDubbedTargetExportsStatement(projectId: string) {
+    return this.db.prepare(`UPDATE project_exports
+      SET status = 'invalidated', updated_at = datetime('now')
+      WHERE project_id = ? AND output = 'dubbed'
+        AND status IN ('pending','exporting','completed','failed')`)
+      .bind(projectId);
+  }
+
+  private invalidateTargetExportsStatement(projectId: string, targetLanguage: string) {
+    return this.db.prepare(`UPDATE project_exports
+      SET status = 'invalidated', updated_at = datetime('now')
+      WHERE project_id = ? AND target_language = ?
+        AND status IN ('pending','exporting','completed','failed')`)
+      .bind(projectId, targetLanguage);
+  }
+
+  private syncVietnameseVariantStatement(
+    projectId: string,
+    segmentId: string,
+    translatedText: string,
+    engine: 'workers-ai' | 'google',
+    contextRevision: number | null,
+  ) {
+    return this.db.prepare(`INSERT INTO segment_translations (
+        segment_id, project_id, target_language, translated_text, translation_engine,
+        translation_context_revision, translation_status, voice_status, dubbed_object_key, version
+      ) VALUES (?, ?, ?, ?, ?, ?, 'completed', 'pending', NULL, 1)
+      ON CONFLICT(segment_id, target_language) DO UPDATE SET
+        translated_text = excluded.translated_text,
+        translation_engine = excluded.translation_engine,
+        translation_context_revision = excluded.translation_context_revision,
+        translation_status = 'completed', voice_status = 'pending', dubbed_object_key = NULL,
+        version = segment_translations.version + 1, updated_at = datetime('now')`)
+      .bind(segmentId, projectId, 'vi', translatedText, engine, contextRevision);
   }
 
   private async invalidatePublishedExport(projectId: string, userId: string): Promise<void> {
@@ -203,12 +293,14 @@ export class SegmentRepository implements SegmentStore {
       startMs: patch.startMs ?? current.startMs,
       endMs: patch.endMs ?? current.endMs,
     };
+    const sourceChanged = next.sourceText !== current.sourceText;
+    const translatedChanged = next.translatedText !== current.translatedText;
+    const speakerChanged = next.speakerId !== current.speakerId;
     const timingChanged = next.startMs !== current.startMs || next.endMs !== current.endMs;
-    const textOrSpeakerChanged = next.translatedText !== current.translatedText || next.speakerId !== current.speakerId;
     if (timingChanged) {
       await this.assertLegalTiming(projectId, userId, next.startMs, next.endMs, [segmentId]);
     }
-    const invalidatesVoice = timingChanged || textOrSpeakerChanged;
+    const invalidatesVoice = sourceChanged || translatedChanged || speakerChanged || timingChanged;
     const voiceStatus = invalidatesVoice ? 'pending' : current.voiceStatus;
     const dubbedObjectKey = invalidatesVoice ? null : current.dubbedObjectKey;
     const result = await this.db.prepare(`UPDATE segments
@@ -234,6 +326,36 @@ export class SegmentRepository implements SegmentStore {
       if (!canonical) return null;
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+
+    const variants = invalidatesVoice || sourceChanged
+      ? await this.listTranslationVariants(projectId, segmentId)
+      : [];
+    if (variants.length > 0) {
+      if (sourceChanged) {
+        await this.db.prepare(`UPDATE segments SET translation_status = 'pending'
+          WHERE id = ? AND project_id = ?
+            AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
+          .bind(segmentId, projectId, userId).run();
+        await this.invalidateAllVariantTranslationsStatement(projectId, segmentId).run();
+        await this.invalidateAllTargetExportsStatement(projectId).run();
+      } else {
+        if (timingChanged || speakerChanged) {
+          await this.invalidateVariantVoicesStatement(projectId, segmentId).run();
+          await this.invalidateDubbedTargetExportsStatement(projectId).run();
+        }
+        if (translatedChanged) {
+          await this.syncVietnameseVariantStatement(
+            projectId,
+            segmentId,
+            next.translatedText,
+            current.translationEngine === 'google' ? 'google' : 'workers-ai',
+            current.translationContextRevision,
+          ).run();
+          await this.invalidateTargetExportsStatement(projectId, 'vi').run();
+        }
+      }
+    }
+
     if (invalidatesVoice) await this.invalidatePublishedExport(projectId, userId);
     const canonical = await this.get(projectId, segmentId, userId);
     if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after update.');
@@ -297,6 +419,30 @@ export class SegmentRepository implements SegmentStore {
       version: 1,
       splitParentId: current.id,
     };
+    const variants = await this.listTranslationVariants(projectId, segmentId);
+    const variantStatements = variants.flatMap((variant) => {
+      const split = splitTextAtRatio(variant.translated_text, ratio);
+      return [
+        this.db.prepare(`UPDATE segment_translations
+          SET translated_text = ?, voice_status = 'pending', dubbed_object_key = NULL,
+              version = version + 1, updated_at = datetime('now')
+          WHERE project_id = ? AND segment_id = ? AND target_language = ?`)
+          .bind(split.left, projectId, segmentId, variant.target_language),
+        this.db.prepare(`INSERT INTO segment_translations (
+          segment_id, project_id, target_language, translated_text, translation_engine,
+          translation_status, translation_context_revision, voice_status, dubbed_object_key, version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, 1)`)
+          .bind(
+            rightId,
+            projectId,
+            variant.target_language,
+            split.right,
+            variant.translation_engine,
+            variant.translation_status,
+            variant.translation_context_revision,
+          ),
+      ];
+    });
 
     const results = await this.db.batch([
       this.db.prepare(`UPDATE segments
@@ -330,11 +476,13 @@ export class SegmentRepository implements SegmentStore {
           userId,
           expectedVersion + 1,
         ),
+      ...variantStatements,
       this.invalidationStatement(projectId, userId),
     ]) as D1RunResultLike[];
     if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+    if (variants.length > 0) await this.invalidateAllTargetExportsStatement(projectId).run();
     return { left, right };
   }
 
@@ -372,6 +520,26 @@ export class SegmentRepository implements SegmentStore {
       dubbedObjectKey: null,
       version: expectedVersion + 1,
     };
+    const parentVariants = await this.listTranslationVariants(projectId, segmentId);
+    const childVariants = await this.listTranslationVariants(projectId, childSegmentId);
+    const childrenByTarget = new Map(childVariants.map((variant) => [variant.target_language, variant]));
+    const variantStatements = parentVariants.map((variant) => {
+      const childVariant = childrenByTarget.get(variant.target_language);
+      const restoredText = childVariant
+        ? joinSplitVariantText(variant.translated_text, childVariant.translated_text)
+        : variant.translated_text;
+      return this.db.prepare(`UPDATE segment_translations
+        SET translated_text = ?, translation_status = 'pending', voice_status = 'pending', dubbed_object_key = NULL,
+            version = version + 1, updated_at = datetime('now')
+        WHERE project_id = ? AND segment_id = ? AND target_language = ?`)
+        .bind(restoredText, projectId, segmentId, variant.target_language);
+    });
+    if (childVariants.length > 0) {
+      variantStatements.push(
+        this.db.prepare(`DELETE FROM segment_translations WHERE project_id = ? AND segment_id = ?`)
+          .bind(projectId, childSegmentId),
+      );
+    }
 
     const results = await this.db.batch([
       this.db.prepare(`UPDATE segments
@@ -413,10 +581,14 @@ export class SegmentRepository implements SegmentStore {
           userId,
           expectedVersion + 1,
         ),
+      ...variantStatements,
       this.invalidationStatement(projectId, userId),
     ]) as D1RunResultLike[];
     if (affectedRows(results[0] ?? {}) !== 1 || affectedRows(results[1] ?? {}) !== 1) {
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
+    }
+    if (parentVariants.length > 0 || childVariants.length > 0) {
+      await this.invalidateAllTargetExportsStatement(projectId).run();
     }
     return restored;
   }
@@ -448,6 +620,17 @@ export class SegmentRepository implements SegmentStore {
       if (!canonical) return null;
       throw new SegmentPersistenceError('SEGMENT_VERSION_CONFLICT', 'Segment changed elsewhere.');
     }
+    const variants = await this.listTranslationVariants(projectId, segmentId);
+    if (variants.length > 0) {
+      await this.syncVietnameseVariantStatement(
+        projectId,
+        segmentId,
+        translatedText,
+        engine,
+        normalizedContextRevision,
+      ).run();
+      await this.invalidateTargetExportsStatement(projectId, 'vi').run();
+    }
     await this.invalidatePublishedExport(projectId, userId);
     const canonical = await this.get(projectId, segmentId, userId);
     if (!canonical) throw new SegmentPersistenceError('SEGMENT_NOT_FOUND', 'Segment not found after translation update.');
@@ -462,6 +645,13 @@ export class SegmentRepository implements SegmentStore {
     await this.db.prepare(`UPDATE segments SET dubbed_object_key = ?, voice_status = 'completed', version = version + 1
       WHERE id = ? AND project_id = ? AND EXISTS (SELECT 1 FROM projects p WHERE p.id = project_id AND p.user_id = ?)`)
       .bind(objectKey, segmentId, projectId, userId).run();
+    const variants = await this.listTranslationVariants(projectId, segmentId);
+    if (variants.some((variant) => variant.target_language === 'vi')) {
+      await this.db.prepare(`UPDATE segment_translations
+        SET dubbed_object_key = ?, voice_status = 'completed', updated_at = datetime('now')
+        WHERE project_id = ? AND segment_id = ? AND target_language = 'vi'`)
+        .bind(objectKey, projectId, segmentId).run();
+    }
   }
 
   async replaceFromAsr(projectId: string, userId: string, rawSegments: PersistedAsrSegment[]): Promise<Segment[]> {
@@ -493,6 +683,13 @@ export class SegmentRepository implements SegmentStore {
           translation_engine, translation_context_revision, translation_status, voice_status, dubbed_object_key, version
         ) VALUES (?, ?, ?, ?, ?, ?, '', 'workers-ai', NULL, 'pending', 'pending', NULL, 1)`,
       ).bind(segment.id, projectId, segment.speakerId ?? null, segment.startMs, segment.endMs, segment.sourceText)),
+      ...segments.map((segment) => this.db.prepare(
+        `INSERT INTO segment_translations (
+          segment_id, project_id, target_language, translated_text, translation_engine,
+          translation_context_revision, translation_status, voice_status, dubbed_object_key, version
+        ) VALUES (?, ?, 'vi', '', 'workers-ai', NULL, 'pending', 'pending', NULL, 1)`,
+      ).bind(segment.id, projectId)),
+      this.invalidateAllTargetExportsStatement(projectId),
       this.clearExportStatement(projectId, userId),
     ];
     await this.db.batch(statements);
