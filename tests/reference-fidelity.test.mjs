@@ -7,9 +7,9 @@ const tokens = read('src/styles/tokens.css');
 const main = read('src/main.tsx');
 const referenceCss = read('src/styles/reference-fidelity.css');
 const uploadPanel = read('src/features/upload/UploadPanel.tsx');
-const studioShell = read('src/app/StudioShell.tsx');
+const studioShell = [read('src/app/StudioShell.tsx'), read('src/app/StudioShellBase.tsx')].join('\n');
 const videoStage = read('src/features/player/VideoStage.tsx');
-const scriptInspector = read('src/features/transcript/ScriptInspector.tsx');
+const scriptInspector = [read('src/features/transcript/ScriptInspector.tsx'), read('src/features/transcript/ScriptInspectorBase.tsx')].join('\n');
 const ci = read('.github/workflows/ci.yml');
 
 test('defines canonical 1448x1086 reference geometry tokens', () => {
