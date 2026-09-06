@@ -52,6 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_segment_dubs_project_target
 CREATE TABLE IF NOT EXISTS project_exports (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  batch_id TEXT NOT NULL,
   target_language TEXT NOT NULL CHECK (target_language IN ('vi','en','ja','ko','zh')),
   status TEXT NOT NULL CHECK (status IN ('queued','running','failed','completed','cancelled')),
   object_key TEXT,
@@ -66,6 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_project_exports_project_target_created
   ON project_exports(project_id, target_language, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_project_exports_job
   ON project_exports(job_id);
+CREATE INDEX IF NOT EXISTS idx_project_exports_batch_status
+  ON project_exports(project_id, batch_id, status);
 
 ALTER TABLE export_shares ADD COLUMN export_id TEXT REFERENCES project_exports(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_export_shares_export_id ON export_shares(export_id);
