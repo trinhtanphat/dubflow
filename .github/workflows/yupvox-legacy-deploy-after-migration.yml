@@ -1,0 +1,107 @@
+name: Deploy migrated legacy YupVox production
+
+on:
+  push:
+    branches:
+      - repair/yupvox-legacy-deploy-after-migration
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-and-qualify:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
+      LEGACY_DB_ID: cc35f9f0-3964-42be-a286-dfa85e03b81d
+      TARGET_SHA: 4b36730c27fd940c7eb97975f72380fb3a785525
+    steps:
+      - name: Checkout exact qualified main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Prepare legacy production config
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('wrangler.jsonc', 'utf8'));
+          config.account_id = process.env.LEGACY_ACCOUNT_ID;
+          delete config.containers;
+          delete config.durable_objects;
+          delete config.routes;
+          fs.writeFileSync('.wrangler-legacy-production.json', JSON.stringify(config, null, 2) + '\n');
+          NODE
+
+      - name: Verify legacy D1 is migrated and data-preserving
+        shell: bash
+        run: |
+          set -euo pipefail
+          api='https://api.cloudflare.com/client/v4'
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          payload='{"sql":"SELECT COUNT(*) AS project_count FROM projects; SELECT name AS latest_migration FROM d1_migrations ORDER BY id DESC LIMIT 1; SELECT COUNT(*) AS has_target_languages_revision FROM pragma_table_info(\"projects\") WHERE name=\"target_languages_revision\"; SELECT COUNT(*) AS has_export_object_key FROM pragma_table_info(\"projects\") WHERE name=\"export_object_key\"; SELECT COUNT(*) AS has_usage_phase FROM pragma_table_info(\"usage_events\") WHERE name=\"phase\"; SELECT COUNT(*) AS has_project_exports FROM sqlite_master WHERE type=\"table\" AND name=\"project_exports\";"}'
+          response="$(curl -fsS "$api/accounts/$LEGACY_ACCOUNT_ID/d1/database/$LEGACY_DB_ID/query" -X POST -H "$auth" -H 'Content-Type: application/json' --data "$payload")"
+          printf '%s' "$response" | jq -c '{success,errors,result}'
+          printf '%s' "$response" | jq -e '.success == true' >/dev/null
+          test "$(printf '%s' "$response" | jq -r '.result[0].results[0].project_count')" = '4'
+          test "$(printf '%s' "$response" | jq -r '.result[1].results[0].latest_migration')" = '0010_multilanguage_variants.sql'
+          test "$(printf '%s' "$response" | jq -r '.result[2].results[0].has_target_languages_revision')" = '1'
+          test "$(printf '%s' "$response" | jq -r '.result[3].results[0].has_export_object_key')" = '1'
+          test "$(printf '%s' "$response" | jq -r '.result[4].results[0].has_usage_phase')" = '1'
+          test "$(printf '%s' "$response" | jq -r '.result[5].results[0].has_project_exports')" = '1'
+
+      - name: Build exact main source
+        run: npm run build
+
+      - name: Deploy exact main source to legacy Worker service
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config .wrangler-legacy-production.json
+
+      - name: Qualify public YupVox production
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://yupvox.qs3d.site'
+          project1='ba343bcf-4e42-4267-a67f-aee491be3dac'
+          project2='c0f85801-ee27-476f-84ff-500509d52700'
+          probe() {
+            curl --silent --show-error --location --output "$2" --write-out '%{http_code}' --max-time 20 "$1" || printf '000'
+          }
+          for attempt in $(seq 1 30); do
+            ready_file="$(mktemp)"
+            projects_file="$(mktemp)"
+            usage_file="$(mktemp)"
+            sink="$(mktemp)"
+            ready="$(probe "$base/api/ready" "$ready_file")"
+            projects="$(probe "$base/api/projects" "$projects_file")"
+            usage="$(probe "$base/api/usage" "$usage_file")"
+            p1="$(probe "$base/api/projects/$project1" "$sink")"
+            p2="$(probe "$base/api/projects/$project2" "$sink")"
+            schema10='no'
+            grep -Eq '"schemaRevision"[[:space:]]*:[[:space:]]*10' "$ready_file" && schema10='yes' || true
+            project_count="$(jq 'if type=="array" then length else -1 end' "$projects_file" 2>/dev/null || echo -1)"
+            echo "attempt=$attempt ready=$ready schema10=$schema10 projects=$projects count=$project_count usage=$usage p1=$p1 p2=$p2"
+            if [[ "$ready" == '200' && "$schema10" == 'yes' && "$projects" == '200' && "$usage" == '200' && "$project_count" == '4' && "$p1" == '200' && "$p2" == '200' ]]; then
+              echo 'PUBLIC_PRODUCTION_QUALIFIED'
+              echo "ready_body=$(cat "$ready_file")"
+              echo "usage_body=$(cat "$usage_file")"
+              exit 0
+            fi
+            rm -f "$ready_file" "$projects_file" "$usage_file" "$sink"
+            sleep 10
+          done
+          echo 'Public YupVox production failed qualification.' >&2
+          exit 1
