@@ -168,7 +168,7 @@ describe('anonymous shared export media', () => {
     const response = await app.request(url, {}, {} as Env);
 
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ code: 'SHARE_NOT_FOUND', message: 'Share not found.' });
+    expect(await response.json()).toEqual({ error: true, code: 'SHARE_NOT_FOUND', message: 'Share not found.' });
   });
 
   it('maps a missing durable R2 object to the same non-enumerating share 404', async () => {
@@ -179,6 +179,6 @@ describe('anonymous shared export media', () => {
       {} as Env,
     );
     expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ code: 'SHARE_NOT_FOUND', message: 'Share not found.' });
+    expect(await response.json()).toEqual({ error: true, code: 'SHARE_NOT_FOUND', message: 'Share not found.' });
   });
 });
