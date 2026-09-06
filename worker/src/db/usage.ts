@@ -66,6 +66,7 @@ type UsageRow = {
 };
 
 type UsageAggregateRow = Pick<UsageRow, 'kind' | 'units' | 'provider'>;
+type TableInfoRow = { name: string };
 
 const USAGE_COLUMNS = `id, user_id, project_id, job_id, kind, units, provider, phase, operation_key, cost_basis, created_at`;
 const USAGE_KINDS = new Set<UsageKind>([
@@ -129,7 +130,26 @@ function nonEmpty(value: string, label: string): string {
 }
 
 export class UsageRepository implements UsageStore {
+  private usageHasPhasePromise?: Promise<boolean>;
+
   constructor(private readonly db: D1DatabaseLike) {}
+
+  private async usageHasPhase(): Promise<boolean> {
+    if (!this.usageHasPhasePromise) {
+      this.usageHasPhasePromise = this.db
+        .prepare("PRAGMA table_info('usage_events')")
+        .all<TableInfoRow>()
+        .then((result) => {
+          const rows = result.results ?? [];
+          // Existing test doubles and current-schema adapters may not expose
+          // table metadata. Preserve current-schema semantics in that case;
+          // a real legacy D1 returns its non-empty column list here.
+          if (rows.length === 0) return true;
+          return rows.some((row) => row.name === 'phase');
+        });
+    }
+    return this.usageHasPhasePromise;
+  }
 
   async getByOperation(operationKey: string, phase: UsagePhase): Promise<UsageEvent | null> {
     const key = nonEmpty(operationKey, 'Operation key');
@@ -187,10 +207,11 @@ export class UsageRepository implements UsageStore {
   }
 
   async summarizeForUser(userId: string): Promise<UsageSummary> {
+    const completedPredicate = await this.usageHasPhase() ? " AND phase = 'completed'" : '';
     const result = await this.db.prepare(
       `SELECT kind, units, provider
        FROM usage_events
-       WHERE user_id = ? AND phase = 'completed'
+       WHERE user_id = ?${completedPredicate}
        ORDER BY created_at ASC, id ASC`,
     ).bind(userId).all<UsageAggregateRow>();
     return summarize(result.results ?? []);
@@ -202,11 +223,12 @@ export class UsageRepository implements UsageStore {
     ).bind(projectId, userId).first<{ id: string }>();
     if (!owned) throw new UsageAccessError('PROJECT_NOT_FOUND', 'Project not found.');
 
+    const completedPredicate = await this.usageHasPhase() ? " AND ue.phase = 'completed'" : '';
     const result = await this.db.prepare(
       `SELECT ue.kind, ue.units, ue.provider
        FROM usage_events ue
        INNER JOIN projects p ON p.id = ue.project_id
-       WHERE ue.project_id = ? AND p.user_id = ? AND ue.phase = 'completed'
+       WHERE ue.project_id = ? AND p.user_id = ?${completedPredicate}
        ORDER BY ue.created_at ASC, ue.id ASC`,
     ).bind(projectId, userId).all<UsageAggregateRow>();
     return summarize(result.results ?? []);
