@@ -48,12 +48,25 @@ function assertSourceRevision(sourceRevision: string): void {
   }
 }
 
-function assertRenderOptions(options: RenderExportOptions): void {
+function assertBackgroundObject(projectId: string, objectKey: string): void {
+  const prefix = `${projectPrefix(projectId)}stems/`;
+  const suffix = '/background.wav';
+  if (!objectKey.startsWith(prefix) || !objectKey.endsWith(suffix)) {
+    throw new MediaProcessorError('MEDIA_OBJECT_KEY_INVALID', 'Background stem object key is not canonical for the project.');
+  }
+  const sourceRevision = objectKey.slice(prefix.length, -suffix.length);
+  assertSourceRevision(sourceRevision);
+}
+
+function assertRenderOptions(projectId: string, options: RenderExportOptions): void {
   if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(options.targetLanguage)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export target language is invalid.');
   }
   if (!/^[A-Za-z0-9._-]{1,200}$/.test(options.exportId)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export id is invalid.');
+  }
+  if (options.backgroundObjectKey !== undefined) {
+    assertBackgroundObject(projectId, options.backgroundObjectKey);
   }
 }
 
@@ -185,7 +198,7 @@ export class ContainerMediaProcessor implements MediaProcessor {
     if (!Array.isArray(clips) || clips.length === 0) {
       throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'At least one dubbed clip is required for export.');
     }
-    if (options) assertRenderOptions(options);
+    if (options) assertRenderOptions(projectId, options);
     const validated = clips.map((clip) => assertExportClip(projectId, clip, options));
     const result = await this.call(projectId, '/render-export', {
       projectId,
