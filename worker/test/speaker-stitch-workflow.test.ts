@@ -27,8 +27,20 @@ describe('Phase 4A workflow stitching', () => {
         async probe() { return { durationMs: 360_000 }; },
         async extractAudioChunks() {
           return [
-            { objectKey: 'projects/p1/audio/000.wav', offsetMs: 0, durationMs: 300_000 },
-            { objectKey: 'projects/p1/audio/001.wav', offsetMs: 292_000, durationMs: 68_000 },
+            {
+              objectKey: 'projects/p1/audio/000.wav',
+              offsetMs: 0,
+              durationMs: 300_000,
+              overlapBeforeMs: 0,
+              overlapAfterMs: 15_000,
+            },
+            {
+              objectKey: 'projects/p1/audio/001.wav',
+              offsetMs: 285_000,
+              durationMs: 75_000,
+              overlapBeforeMs: 15_000,
+              overlapAfterMs: 0,
+            },
           ];
         },
       },
@@ -53,13 +65,14 @@ describe('Phase 4A workflow stitching', () => {
           return {
             text: 'boundary later',
             segments: [
-              { startMs: 2_050, endMs: 4_050, text: 'boundary line', speakerIndex: 3 },
-              { startMs: 5_000, endMs: 6_000, text: 'later', speakerIndex: 3 },
+              { startMs: 9_050, endMs: 11_050, text: 'boundary line', speakerIndex: 3 },
+              { startMs: 12_000, endMs: 13_000, text: 'later', speakerIndex: 3 },
             ],
           };
         },
       },
       segments: {
+        async list() { return []; },
         async replaceFromAsr(_projectId: string, _userId: string, input: typeof persistedInput) {
           persistedInput = input;
           return input.map((segment) => ({
@@ -107,6 +120,6 @@ describe('Phase 4A workflow stitching', () => {
     expect(usageEvents
       .filter((event) => event.kind === 'asr_audio_second' && event.phase === 'completed')
       .map((event) => event.units))
-      .toEqual([300, 68]);
+      .toEqual([300, 75]);
   });
 });
