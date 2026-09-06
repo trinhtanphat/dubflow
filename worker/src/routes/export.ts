@@ -3,9 +3,10 @@ import type { Env } from '../env';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { JobRepository, type JobStore } from '../db/jobs';
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
+import { errorBody } from '../http/json';
+import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
-import { errorBody } from '../http/json';
 import { parseByteRange } from '../services/media';
 
 export type ExportRouteDeps = {
@@ -32,7 +33,7 @@ function readableBucket(env: Env): R2ReadableBucketLike {
 }
 
 export function createExportRoutes(deps: ExportRouteDeps = {}) {
-  const routes = new Hono<{ Bindings: Env }>();
+  const routes = new Hono<WorkerHonoEnv>();
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeJobs = deps.makeJobs ?? ((env: Env) => new JobRepository(env.DB));
   const makeBucket = deps.makeBucket ?? readableBucket;
@@ -60,7 +61,9 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       const job = await jobs.create(projectId, 'export');
       await projects.setStatus(projectId, userId, 'processing');
       try {
-        const instance = await c.env.EXPORT_WORKFLOW.create({ params: { projectId, userId, jobId: job.id } });
+        const instance = await c.env.EXPORT_WORKFLOW.create({
+          params: { projectId, userId, jobId: job.id, requestId: c.get('requestId') },
+        });
         return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
