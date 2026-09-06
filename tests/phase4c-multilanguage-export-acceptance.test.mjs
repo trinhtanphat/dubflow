@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-const migration = read('migrations/0009_multilanguage_variants.sql');
+const migration = read('migrations/0010_multilanguage_variants.sql');
 const router = read('worker/src/services/translation/router.ts');
 const languagePipeline = read('worker/src/workflows/languageTranslationPipeline.ts');
 const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
