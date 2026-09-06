@@ -5,7 +5,7 @@ import fs from 'node:fs';
 const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
-const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
+const productionAccountId = '50afb4fd3c4c7a1f3e1bdb7f22d4af7f';
 
 test('deployment config contains no fake resource placeholder', () => {
   const d1 = config.d1_databases?.find((item) => item.binding === 'DB');
@@ -26,7 +26,7 @@ test('production custom domain stays pinned to yupvox.qs3d.site', () => {
   assert.deepEqual(config.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
 });
 
-test('production deploy targets the Cloudflare account that owns qs3d.site', () => {
+test('production deploy targets the Cloudflare account that owns the live yupvox domain and persisted projects', () => {
   assert.equal(config.account_id, productionAccountId);
 });
 
