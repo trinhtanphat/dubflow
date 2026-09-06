@@ -64,6 +64,18 @@ A GREEN Phase 4C source/CI run and Wrangler dry-run do not prove real multi-lang
 
 Merging Phase 4C or later fixes to `main` triggers Cloudflare Workers Builds automatically. There is no separate GitHub production deploy action. Runtime qualification remains fail-closed on real Cloudflare/provider/media evidence even though deployment is automatic.
 
+## Phase 4D hybrid audio treatment qualification
+
+Phase 4D is **source/CI qualification only** for the exact dubbed-audio modes `dubbed_only`, `duck_original`, and `separated_background`. Omitted mode remains backward-compatible `dubbed_only`. `duck_original` is deterministic FFmpeg gain automation: original dialogue windows are attenuated by exactly **-18 dB** with an **80 ms** lead and **120 ms** tail, then mixed with dubbed clips. It is not AI dialogue separation and does not create dialogue-separation provider usage.
+
+Migration `0011_phase4d_audio_separation.sql` advances readiness to schema revision **11**, persists project `source_generation`, export `audio_mode`, and owner-scoped `project_audio_stems`. A completed current-generation background stem is reusable across target languages. Source replacement increments generation and invalidates stale stem generations so a previous source cannot be reused silently.
+
+True `separated_background` is fail-closed. The production Workflow intentionally wires `UnavailableDialogueSeparationProvider`; the Studio capability control disables separated-background selection unless a provider reports `configured=true`, `qualification='qualified'`, `backgroundStem=true`, and a non-empty provider identity. There is no silent downgrade to ducking or dubbed-only output. When a future qualified provider actually performs separation, `dialogue_separation_second` is recorded idempotently by project/source-generation/provider; durable stem reuse does not charge the same provider operation again.
+
+A GREEN Phase 4D source CI, build, migration guard, FFmpeg contract test, Studio test, or Wrangler dry-run does not prove real separated-background production behavior. Production runtime remains **UNQUALIFIED** for separated background until a provider-specific qualification lane and a real deployed authorized media fixture prove provider execution, durable stem persistence/reuse, final rendering, retrieval, and cancellation/failure boundaries.
+
+Phase 4D does not add a production deployment path. GitHub Actions remains CI only; after merge to `main`, Cloudflare Workers Builds remains the only production deployment lane.
+
 ## Studio reference qualification
 
 Studio CI continues to capture the canonical desktop/reference viewports from the exact tested SHA. Reference screenshots qualify presentation, not real provider/media runtime behavior. Empty-media states remain truthful rather than fabricating uploaded footage.
@@ -72,4 +84,4 @@ Studio CI continues to capture the canonical desktop/reference viewports from th
 
 A GREEN source CI and Wrangler dry-run qualify repository source/configuration only. Production deployment is automatic through Cloudflare Workers Builds whenever `main` changes; GitHub Actions remains CI only and must not deploy production.
 
-Final runtime qualification still requires the deployed application and real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, and for Phase 4C at least two distinct supported target languages through translation, TTS, render, retrieval and concrete export sharing. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
+Final runtime qualification still requires the deployed application and real supported media/provider fixtures: Deepgram for diarization, configured contextual translation for style/glossary behavior, ElevenLabs/FFmpeg for final export, an authorized IVC sample for cloning, for Phase 4C at least two distinct supported target languages through translation/TTS/render/retrieval/sharing, and for Phase 4D a separately qualified dialogue-separation provider before `separated_background` can be called production-qualified. Until those live fixtures succeed, runtime status remains **UNQUALIFIED** rather than PASS.
