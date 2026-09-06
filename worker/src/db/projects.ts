@@ -23,6 +23,9 @@ export type Project = {
   exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
+  streamVideoUid?: string | null;
+  streamSourceObjectKey?: string | null;
+  streamReadyAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -34,6 +37,8 @@ export interface ProjectStore {
   setSourceObject(id: string, userId: string, objectKey: string, sizeBytes: number): Promise<void>;
   setExportObject(id: string, userId: string, objectKey: string): Promise<void>;
   setStatus(id: string, userId: string, status: ProjectStatus, durationMs?: number): Promise<void>;
+  setStreamProvenance(id: string, userId: string, sourceObjectKey: string, videoUid: string, readyAt?: string | null): Promise<void>;
+  clearStreamProvenance(id: string, userId: string): Promise<void>;
 }
 
 export type D1RunResultLike = {
@@ -66,6 +71,9 @@ type ProjectRow = {
   export_object_key?: string | null;
   duration_ms?: number | null;
   size_bytes?: number | null;
+  stream_video_uid?: string | null;
+  stream_source_object_key?: string | null;
+  stream_ready_at?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -86,12 +94,15 @@ function fromRow(row: ProjectRow): Project {
     exportObjectKey: row.export_object_key ?? null,
     durationMs: row.duration_ms,
     sizeBytes: row.size_bytes,
+    streamVideoUid: row.stream_video_uid ?? null,
+    streamSourceObjectKey: row.stream_source_object_key ?? null,
+    streamReadyAt: row.stream_ready_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-const CURRENT_PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, source_generation, status, source_object_key, export_object_key, duration_ms, size_bytes, created_at, updated_at`;
+const CURRENT_PROJECT_COLUMNS = `id, user_id, title, source_language, target_language, target_languages_revision, source_generation, status, source_object_key, export_object_key, duration_ms, size_bytes, stream_video_uid, stream_source_object_key, stream_ready_at, created_at, updated_at`;
 
 export class ProjectRepository implements ProjectStore {
   private projectColumnsPromise?: Promise<Set<string>>;
@@ -121,8 +132,17 @@ export class ProjectRepository implements ProjectStore {
     const exportObjectKey = columns.has('export_object_key')
       ? 'export_object_key'
       : 'NULL AS export_object_key';
+    const streamVideoUid = columns.has('stream_video_uid')
+      ? 'stream_video_uid'
+      : 'NULL AS stream_video_uid';
+    const streamSourceObjectKey = columns.has('stream_source_object_key')
+      ? 'stream_source_object_key'
+      : 'NULL AS stream_source_object_key';
+    const streamReadyAt = columns.has('stream_ready_at')
+      ? 'stream_ready_at'
+      : 'NULL AS stream_ready_at';
 
-    return `id, user_id, title, source_language, target_language, ${targetLanguagesRevision}, ${sourceGeneration}, status, source_object_key, ${exportObjectKey}, duration_ms, size_bytes, created_at, updated_at`;
+    return `id, user_id, title, source_language, target_language, ${targetLanguagesRevision}, ${sourceGeneration}, status, source_object_key, ${exportObjectKey}, duration_ms, size_bytes, ${streamVideoUid}, ${streamSourceObjectKey}, ${streamReadyAt}, created_at, updated_at`;
   }
 
   private async ensureDevelopmentUser(userId: string) {
@@ -148,6 +168,9 @@ export class ProjectRepository implements ProjectStore {
       targetLanguagesRevision: 1,
       sourceGeneration: 1,
       status: 'draft',
+      streamVideoUid: null,
+      streamSourceObjectKey: null,
+      streamReadyAt: null,
     };
   }
 
@@ -174,14 +197,17 @@ export class ProjectRepository implements ProjectStore {
              WHEN source_object_key IS NULL OR source_object_key = ? THEN source_generation
              ELSE source_generation + 1
            END,
+           stream_video_uid = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_video_uid ELSE NULL END,
+           stream_source_object_key = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_source_object_key ELSE NULL END,
+           stream_ready_at = CASE WHEN source_object_key IS NULL OR source_object_key = ? THEN stream_ready_at ELSE NULL END,
            source_object_key = ?, size_bytes = ?, status = 'ready', updated_at = datetime('now')
        WHERE id = ? AND user_id = ?`,
-    ).bind(objectKey, objectKey, sizeBytes, id, userId).run();
+    ).bind(objectKey, objectKey, objectKey, objectKey, objectKey, sizeBytes, id, userId).run();
   }
 
   async setExportObject(id: string, userId: string, objectKey: string): Promise<void> {
     const prefix = `projects/${id}/export/`;
-    if (!objectKey.startsWith(prefix)) {
+    if (!objectKey.startsWith(prefix) && !objectKey.startsWith(`projects/${id}/exports/`)) {
       throw new Error('Export object key must belong to the project export prefix.');
     }
     await this.db.prepare(
@@ -202,5 +228,31 @@ export class ProjectRepository implements ProjectStore {
     await this.db.prepare(
       `UPDATE projects SET status = ?, duration_ms = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?`,
     ).bind(status, Math.round(durationMs), id, userId).run();
+  }
+
+  async setStreamProvenance(
+    id: string,
+    userId: string,
+    sourceObjectKey: string,
+    videoUid: string,
+    readyAt: string | null = null,
+  ): Promise<void> {
+    if (!sourceObjectKey.startsWith(`projects/${id}/`)) {
+      throw new Error('Stream source object key must belong to the project.');
+    }
+    if (!videoUid.trim()) throw new Error('Stream video uid is required.');
+    await this.db.prepare(
+      `UPDATE projects
+       SET stream_video_uid = ?, stream_source_object_key = ?, stream_ready_at = ?, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+    ).bind(videoUid, sourceObjectKey, readyAt, id, userId).run();
+  }
+
+  async clearStreamProvenance(id: string, userId: string): Promise<void> {
+    await this.db.prepare(
+      `UPDATE projects
+       SET stream_video_uid = NULL, stream_source_object_key = NULL, stream_ready_at = NULL, updated_at = datetime('now')
+       WHERE id = ? AND user_id = ?`,
+    ).bind(id, userId).run();
   }
 }
