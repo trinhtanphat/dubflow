@@ -20,6 +20,7 @@ const context: TranslationContext = {
     {
       id: 'g1',
       projectId: 'project-1',
+      targetLanguage: 'vi',
       sourceTerm: 'SECRET_GLOSSARY_TOKEN',
       preferredTranslation: 'Bí mật',
       note: 'Keep product terminology stable',
