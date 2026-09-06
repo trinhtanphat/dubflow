@@ -20,7 +20,7 @@ const shareTokenSource = read('worker/src/security/share-token.ts');
 const shareStoreSource = read('worker/src/db/shares.ts');
 const shareApiSource = read('src/features/sharing/shareApi.ts');
 const sharePanelSource = read('src/features/sharing/SharePanel.tsx');
-const studioShellSource = read('src/app/StudioShell.tsx');
+const studioShellSource = [read('src/app/StudioShell.tsx'), read('src/app/StudioShellBase.tsx')].join('\n');
 const deploymentStatus = read('docs/deployment-status.md');
 
 function assertInOrder(source, labels) {
