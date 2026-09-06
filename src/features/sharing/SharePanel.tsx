@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
 import { createShare, listShares, revokeShare, type ExportShare } from './shareApi';
 
+export const DEFAULT_SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const SHARE_TTL_OPTIONS = [
+  { seconds: 60 * 60, label: '1 giờ' },
+  { seconds: 24 * 60 * 60, label: '24 giờ' },
+  { seconds: DEFAULT_SHARE_TTL_SECONDS, label: '7 ngày' },
+  { seconds: 30 * 24 * 60 * 60, label: '30 ngày' },
+] as const;
+
 export type SharePanelViewProps = {
   shares: ExportShare[];
   createdShareUrl: string;
   loading: boolean;
   busy: boolean;
   error: string;
+  expiresInSeconds?: number;
+  onExpiresInSecondsChange?(seconds: number): void;
   onCreate(): void;
   onCopy(): void;
   onRevoke(shareId: string): void;
@@ -40,6 +50,8 @@ export function SharePanelView({
   loading,
   busy,
   error,
+  expiresInSeconds = DEFAULT_SHARE_TTL_SECONDS,
+  onExpiresInSecondsChange,
   onCreate,
   onCopy,
   onRevoke,
@@ -73,10 +85,21 @@ export function SharePanelView({
       {error ? <p className="share-panel__error" role="alert">{error}</p> : null}
 
       <div className="share-panel__actions">
+        <label className="share-panel__ttl">
+          <span>Thời hạn liên kết</span>
+          <select
+            value={expiresInSeconds}
+            disabled={busy}
+            onChange={(event) => onExpiresInSecondsChange?.(Number(event.target.value))}
+          >
+            {SHARE_TTL_OPTIONS.map((option) => (
+              <option key={option.seconds} value={option.seconds}>{option.label}</option>
+            ))}
+          </select>
+        </label>
         <button type="button" disabled={busy} onClick={onCreate}>
           {busy ? 'Đang xử lý…' : 'Tạo liên kết mới'}
         </button>
-        <span>Mặc định hết hạn sau 7 ngày.</span>
       </div>
 
       <div className="share-panel__list" aria-live="polite">
@@ -111,6 +134,7 @@ function message(error: unknown, fallback: string): string {
 export function SharePanel({ projectId, onClose }: SharePanelProps) {
   const [shares, setShares] = useState<ExportShare[]>([]);
   const [createdShareUrl, setCreatedShareUrl] = useState('');
+  const [expiresInSeconds, setExpiresInSeconds] = useState(DEFAULT_SHARE_TTL_SECONDS);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -139,7 +163,7 @@ export function SharePanel({ projectId, onClose }: SharePanelProps) {
     setBusy(true);
     setError('');
     try {
-      const result = await createShare(projectId, 7 * 24 * 60 * 60);
+      const result = await createShare(projectId, expiresInSeconds);
       setCreatedShareUrl(result.shareUrl);
       setShares((current) => [result.share, ...current.filter((share) => share.id !== result.share.id)]);
     } catch (reason) {
@@ -179,6 +203,8 @@ export function SharePanel({ projectId, onClose }: SharePanelProps) {
       loading={loading}
       busy={busy}
       error={error}
+      expiresInSeconds={expiresInSeconds}
+      onExpiresInSecondsChange={setExpiresInSeconds}
       onCreate={() => { void create(); }}
       onCopy={() => { void copy(); }}
       onRevoke={(shareId) => { void revoke(shareId); }}
