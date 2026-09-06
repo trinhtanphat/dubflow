@@ -36,8 +36,8 @@ test('main reconciliation preserves the single Workers Builds production lane', 
   assert.doesNotMatch(ci, /wrangler\s+deploy(?!\s+--dry-run)/i);
 });
 
-test('main reconciliation keeps the production account while retaining the language workflow', () => {
-  assert.equal(wrangler.account_id, '6c5207813df3d5b83b9508125e0e9e12');
+test('main reconciliation keeps the public-domain production account while retaining the language workflow', () => {
+  assert.equal(wrangler.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
   assert.ok(wrangler.workflows?.some((entry) => entry.binding === 'LANGUAGE_TRANSLATION_WORKFLOW' && entry.class_name === 'LanguageTranslationWorkflow'));
 });
 
