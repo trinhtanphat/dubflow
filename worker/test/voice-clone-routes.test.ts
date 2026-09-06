@@ -79,6 +79,30 @@ describe('voice clone route contracts', () => {
     await expect(response.json()).resolves.toMatchObject({ code: 'INVALID_JSON' });
   });
 
+  it('persists the validated sample content type into R2 HTTP metadata', async () => {
+    const putCalls: Array<{ key: string; options: unknown }> = [];
+    const routes = createVoiceCloneRoutes(() => baseStore());
+    const env = {
+      MEDIA: {
+        async put(key: string, _value: unknown, options?: unknown) {
+          putCalls.push({ key, options });
+          return { key, size: 3 };
+        },
+      },
+    } as Env;
+    const response = await routes.fetch(new Request('https://yupvox.test/project-1/voice-clones/clone-1/sample', {
+      method: 'POST',
+      headers: { 'content-type': 'audio/mpeg' },
+      body: new Uint8Array([1, 2, 3]),
+    }), env);
+
+    expect(response.status).toBe(200);
+    expect(putCalls).toEqual([{
+      key: 'projects/project-1/voice-clones/clone-1/sample/current',
+      options: { httpMetadata: { contentType: 'audio/mpeg' } },
+    }]);
+  });
+
   it('does not mark a local-only clone deleted when temporary sample cleanup fails', async () => {
     const markDeleted = vi.fn(async () => ({ ...clone, status: 'deleted' } as VoiceClone));
     const markFailed = vi.fn(async (_projectId: string, _cloneId: string, _userId: string, errorCode: string) => ({
