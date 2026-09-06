@@ -12,6 +12,7 @@ describe('usage API', () => {
         asrAudioSeconds: 90,
         translationCharacters: 1200,
         ttsAudioSeconds: 35.5,
+        stemSeparationAudioSeconds: 0,
         renderSeconds: 150,
       },
       providers: {
@@ -19,6 +20,7 @@ describe('usage API', () => {
           asrAudioSeconds: 0,
           translationCharacters: 0,
           ttsAudioSeconds: 35.5,
+          stemSeparationAudioSeconds: 0,
           renderSeconds: 0,
         },
       },
