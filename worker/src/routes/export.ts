@@ -424,7 +424,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   routes.post('/:id/exports/batch', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
-    let payload: { targetLanguages?: unknown; output?: unknown };
+    let payload: { targetLanguages?: unknown; output?: unknown; mixMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -432,6 +432,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
+    const mixMode = parseMixMode(payload.mixMode);
+    if (!mixMode) {
+      return c.json(errorBody('EXPORT_MIX_MODE_INVALID', 'Mix mode must be dubbed_only or preserve_background.'), 400);
+    }
     if (!Array.isArray(payload.targetLanguages) || payload.targetLanguages.length === 0) {
       return c.json(errorBody('EXPORT_TARGETS_INVALID', 'At least one target language is required.'), 400);
     }
@@ -443,11 +447,18 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       return c.json(errorBody('EXPORT_TARGETS_INVALID', 'Batch target languages must be unique.'), 400);
     }
 
-    const validated: TargetLanguage[] = [];
+    const validated: ValidatedTarget[] = [];
     for (const target of targets) {
       const result = await validateTarget(c.env, projectId, userId, target, output);
       if ('code' in result) return c.json(errorBody(result.code, result.message), result.status);
-      validated.push(result.targetLanguage);
+      validated.push(result);
+    }
+
+    if (output === 'dubbed' && mixMode === 'preserve_background') {
+      const separationError = await validatePreserveBackground(c.env, projectId, userId, validated[0]!.project);
+      if (separationError) {
+        return c.json(errorBody(separationError.code, separationError.message), separationError.status);
+      }
     }
 
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
@@ -460,11 +471,12 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         c.env,
         projectId,
         userId,
-        target,
+        target.targetLanguage,
         output,
         batchId,
         c.get('requestId'),
         false,
+        mixMode,
       ));
     }
     return c.json({ batchId, exports: results }, 202);
