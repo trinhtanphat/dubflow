@@ -105,13 +105,15 @@ function harness(options: { voiceLanguages?: string[] | 'unknown'; failWorkflowT
     },
     async fail() {},
   };
-  const env = {
-    RATE_LIMIT_EXPORT: {
-      async limit() {
-        calls.rateLimits += 1;
-        return { success: true };
-      },
+  const allowedLimiter = {
+    async limit() {
+      calls.rateLimits += 1;
+      return { success: true };
     },
+  };
+  const env = {
+    RATE_LIMIT_EXPORT: allowedLimiter,
+    RATE_LIMIT_BATCH_EXPORT: allowedLimiter,
     ANALYTICS: { writeDataPoint() {} },
     EXPORT_WORKFLOW: {
       async create(input: { params?: any }) {
