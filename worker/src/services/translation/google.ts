@@ -1,6 +1,7 @@
+import { TARGET_LANGUAGES, type TargetLanguage } from '../../domain/language';
 import type { SourceLanguage } from '../../domain/project';
 import { isTranslationContextActive, type TranslationContext } from './context';
-import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
+import type { TranslationItem, TranslationProvider, TranslationProviderCapabilities, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
 
 const GOOGLE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
@@ -19,20 +20,20 @@ function decodeHtmlEntities(value: string): string {
 }
 
 export class GoogleCloudTranslationProvider implements TranslationProvider {
-  readonly capabilities: { contextual: false; available: boolean };
+  readonly capabilities: TranslationProviderCapabilities;
 
   constructor(
     private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
   ) {
-    this.capabilities = { contextual: false, available: Boolean(apiKey.trim()) };
+    this.capabilities = { contextual: false, available: Boolean(apiKey.trim()), targets: TARGET_LANGUAGES };
   }
 
   async translateBatch(
     items: TranslationItem[],
     source: SourceLanguage,
-    target: 'vi',
+    target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
     if (context && isTranslationContextActive(context)) {
@@ -44,7 +45,9 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
     if (!this.apiKey.trim()) {
       throw new TranslationProviderError('GOOGLE_TRANSLATE_SECRET_MISSING', 'Google Cloud Translation API key is not configured.');
     }
-    if (target !== 'vi') throw new TranslationProviderError('TRANSLATION_TARGET_UNSUPPORTED', 'Vietnamese is the only supported target.');
+    if (!(TARGET_LANGUAGES as readonly string[]).includes(target)) {
+      throw new TranslationProviderError('TRANSLATION_TARGET_UNSUPPORTED', `Unsupported translation target ${String(target)}.`);
+    }
     const sourceCode = GOOGLE_SOURCE[source];
     if (!sourceCode) throw new TranslationProviderError('TRANSLATION_SOURCE_UNRESOLVED', 'Resolve auto-detected source language before translation.');
 
@@ -58,7 +61,7 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
       response = await this.fetchImpl(`${GOOGLE_ENDPOINT}?key=${encodeURIComponent(this.apiKey)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ q: nonEmpty.map((item) => item.text), source: sourceCode, target: 'vi', format: 'text' }),
+        body: JSON.stringify({ q: nonEmpty.map((item) => item.text), source: sourceCode, target, format: 'text' }),
         signal: controller.signal,
       });
     } catch (error) {
