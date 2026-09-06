@@ -55,6 +55,7 @@ export interface MultilangStore {
   setExportRunning(projectId: string, exportId: string, userId: string): Promise<void>;
   completeExport(projectId: string, exportId: string, userId: string, objectKey: string): Promise<void>;
   failExport(projectId: string, exportId: string, userId: string, errorCode: string): Promise<void>;
+  cancelExport(projectId: string, exportId: string, userId: string, errorCode: string): Promise<void>;
   invalidateExportsForTarget(projectId: string, userId: string, targetLanguage: TargetLanguage): Promise<void>;
 }
 
@@ -252,6 +253,12 @@ export class MultilangRepository implements MultilangStore {
   async failExport(projectId: string, exportId: string, userId: string, errorCode: string): Promise<void> {
     if (!(await this.ownsProject(projectId, userId))) return;
     await this.db.prepare("UPDATE project_exports SET status='failed', error_code=?, updated_at=datetime('now') WHERE project_id=? AND id=?")
+      .bind(errorCode, projectId, exportId).run();
+  }
+
+  async cancelExport(projectId: string, exportId: string, userId: string, errorCode: string): Promise<void> {
+    if (!(await this.ownsProject(projectId, userId))) return;
+    await this.db.prepare("UPDATE project_exports SET status='cancelled', object_key=NULL, error_code=?, updated_at=datetime('now') WHERE project_id=? AND id=?")
       .bind(errorCode, projectId, exportId).run();
   }
 
