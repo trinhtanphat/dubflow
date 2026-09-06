@@ -31,8 +31,16 @@ test('Phase 4C translation provider contracts accept the bounded target-language
   for (const marker of ["vi: 'vietnamese'", "en: 'english'", "ja: 'japanese'", "ko: 'korean'", "zh: 'chinese'"]) {
     assert.match(map, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
-  assert.match(workers, /target_lang:\s*workersAITargetLanguage\(target\)/);
+  assert.match(workers, /target_lang:\s*targetLang/);
+  assert.match(workers, /workersAITargetLanguage\(target\)/);
   assert.doesNotMatch(workers, /Vietnamese is the only supported target/);
+});
+
+test('Phase 4C ElevenLabs TTS accepts only the same bounded target-language authority', async () => {
+  const elevenlabs = await read('worker/src/services/voice/elevenlabs.ts');
+  assert.match(elevenlabs, /isTargetLanguage\(input\.language\)/);
+  assert.match(elevenlabs, /SUPPORTED_TARGET_LANGUAGES/);
+  assert.doesNotMatch(elevenlabs, /currently qualified for Vietnamese dubbing only/);
 });
 
 test('Phase 4C adds an isolated batch-export limiter without replacing existing lanes', async () => {
