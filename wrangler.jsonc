@@ -49,6 +49,11 @@
       "class_name": "DubbingWorkflow"
     },
     {
+      "binding": "LANGUAGE_TRANSLATION_WORKFLOW",
+      "name": "dubflow-language-translation",
+      "class_name": "LanguageTranslationWorkflow"
+    },
+    {
       "binding": "EXPORT_WORKFLOW",
       "name": "dubflow-export",
       "class_name": "ExportWorkflow"

@@ -39,6 +39,7 @@ export interface Env {
   RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
+  LANGUAGE_TRANSLATION_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
   CONTEXT_TRANSLATION_MODEL?: string;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
