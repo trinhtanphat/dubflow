@@ -15,34 +15,37 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CURRENT_ACCOUNT_ID: 6c5207813df3d5b83b9508125e0e9e12
       LEGACY_ACCOUNT_ID: 50afb4fd3c4c7a1f3e1bdb7f22d4af7f
-      TARGET_SHA: 4b36730c27fd940c7eb97975f72380fb3a785525
     steps:
-      - name: Compare current Worker endpoint with legacy custom domain
+      - name: Compare Worker bindings and D1 state across accounts
         shell: bash
         run: |
           set -u
           api='https://api.cloudflare.com/client/v4'
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           cfget() { curl --silent --show-error --location "$1" -H "$auth"; }
-          probe_base() {
-            local base="$1"
-            echo "=== $base ==="
-            for path in /api/ready /api/projects /api/usage; do
-              body="$(mktemp)"
-              code="$(curl --silent --show-error --location --output "$body" --write-out '%{http_code}' --max-time 20 "$base$path" || printf '000')"
-              echo "$path status=$code body=$(cat "$body")"
-              rm -f "$body"
-            done
+          cfpost() { curl --silent --show-error --location "$1" -X POST -H "$auth" -H 'Content-Type: application/json' --data "$2"; }
+
+          inspect_account() {
+            local label="$1"
+            local account="$2"
+            echo "=== $label worker settings/bindings ==="
+            cfget "$api/accounts/$account/workers/scripts/dubflow/settings" | jq -c '{success,errors,result:{compatibility_date:.result.compatibility_date,bindings:[.result.bindings[]? | {name,type,namespace_id,id,bucket_name,dataset}]}}'
+
+            echo "=== $label D1 databases ==="
+            dbs="$(cfget "$api/accounts/$account/d1/database?per_page=100")"
+            printf '%s' "$dbs" | jq -c '{success,errors,result:[.result[]? | {uuid,name,created_at,file_size,num_tables}]}'
+
+            dbid="$(printf '%s' "$dbs" | jq -r '.result[]? | select((.name|ascii_downcase) == "dubflow-db" or (.name|ascii_downcase) == "dubflow") | .uuid' | head -n1)"
+            if [[ -z "$dbid" || "$dbid" == 'null' ]]; then
+              dbid="$(printf '%s' "$dbs" | jq -r '.result[0].uuid // empty')"
+            fi
+            echo "$label selected_db=$dbid"
+            if [[ -n "$dbid" ]]; then
+              payload='{"sql":"SELECT name FROM sqlite_master WHERE type=\"table\" ORDER BY name; SELECT COUNT(*) AS project_count FROM projects; SELECT COUNT(*) AS usage_count FROM usage_events;"}'
+              echo "=== $label D1 schema/data counts ==="
+              cfpost "$api/accounts/$account/d1/database/$dbid/query" "$payload" | jq -c '{success,errors,result}'
+            fi
           }
 
-          echo '=== CURRENT ACCOUNT custom domain ==='
-          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/domains?hostname=yupvox.qs3d.site" | jq -c '{success,errors,result}'
-          echo '=== LEGACY ACCOUNT custom domain ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/domains?hostname=yupvox.qs3d.site" | jq -c '{success,errors,result}'
-          echo '=== CURRENT ACCOUNT latest deployment ==='
-          cfget "$api/accounts/$CURRENT_ACCOUNT_ID/workers/scripts/dubflow/deployments" | jq -c '{success,errors,latest:(.result.deployments[0] // null)}'
-          echo '=== LEGACY ACCOUNT latest deployment ==='
-          cfget "$api/accounts/$LEGACY_ACCOUNT_ID/workers/scripts/dubflow/deployments" | jq -c '{success,errors,latest:(.result.deployments[0] // null)}'
-
-          probe_base 'https://dubflow.hikvision.workers.dev'
-          probe_base 'https://yupvox.qs3d.site'
+          inspect_account CURRENT "$CURRENT_ACCOUNT_ID"
+          inspect_account LEGACY "$LEGACY_ACCOUNT_ID"
