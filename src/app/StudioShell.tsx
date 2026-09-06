@@ -15,8 +15,9 @@ import {
   ProjectLanguagesConflictError,
   TranslationVariantConflictError,
   type ProjectLanguageConfigDto,
+  type SegmentTranslationDto,
   type TargetLanguage,
-  type TranslationSegmentDto,
+  type TranslationVariantDto,
 } from '../features/translation/languageVariantsApi';
 import {
   TargetLanguagesPanelView,
@@ -61,10 +62,10 @@ function mergeEnabledDraft(config: ProjectLanguageConfigDto, enabled: TargetLang
 }
 
 function replaceVariant(
-  rows: TranslationSegmentDto[],
+  rows: TranslationVariantDto[],
   segmentId: string,
-  translation: TranslationSegmentDto['translation'],
-): TranslationSegmentDto[] {
+  translation: SegmentTranslationDto,
+): TranslationVariantDto[] {
   return rows.map((row) => row.segmentId === segmentId ? { ...row, translation } : row);
 }
 
@@ -75,7 +76,7 @@ export function StudioShell(props: Props) {
   const [enabledDraft, setEnabledDraft] = useState<TargetLanguage[]>(['vi']);
   const [currentLanguage, setCurrentLanguage] = useState<StudioLanguage>('vi');
   const [selectedLanguages, setSelectedLanguages] = useState<TargetLanguage[]>(['vi']);
-  const [targetSegments, setTargetSegments] = useState<TranslationSegmentDto[]>([]);
+  const [targetSegments, setTargetSegments] = useState<TranslationVariantDto[]>([]);
   const [targetDrafts, setTargetDrafts] = useState<Record<string, string>>({});
   const [targetConflict, setTargetConflict] = useState('');
   const [languageError, setLanguageError] = useState('');
@@ -113,7 +114,7 @@ export function StudioShell(props: Props) {
     }
     let active = true;
     getTranslationVariants(projectId, currentLanguage).then((result) => {
-      if (active) setTargetSegments(result.segments);
+      if (active) setTargetSegments(result);
     }).catch((error) => {
       if (active) setLanguageError(message(error, 'Không thể tải bản dịch ngôn ngữ đã chọn.'));
     });
@@ -159,7 +160,7 @@ export function StudioShell(props: Props) {
     }
     try {
       const result = await patchTranslationVariant(projectId, targetLanguage, segmentId, row.translation.version, text);
-      setTargetSegments((current) => replaceVariant(current, segmentId, result.translation));
+      setTargetSegments((current) => replaceVariant(current, segmentId, result));
       setTargetDrafts((current) => {
         const next = { ...current };
         delete next[`${targetLanguage}:${segmentId}`];
