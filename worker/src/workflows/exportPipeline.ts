@@ -313,7 +313,7 @@ async function prepareBackgroundStem(
   const durable = await step.do('check canonical stem pair', async () => hasCanonicalStemPair(deps, pair));
 
   if (completed && !durable) {
-    throw new Error('Completed stem separation usage exists without a durable stem pair.');
+    throw new Error('Completed stem separation usage without a durable stem pair.');
   }
 
   if (durable) {
