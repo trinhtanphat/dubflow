@@ -51,6 +51,13 @@
   padding: 0 7px;
   font-size: 9px;
 }
+.batch-export__audio-treatment { display: grid; gap: 4px; }
+.batch-export__audio-treatment label { display: grid; gap: 4px; }
+.batch-export__audio-treatment label > span,
+.batch-export__capability { color: var(--muted); font-size: 8px; }
+.batch-export__audio-treatment select { width: 100%; }
+.batch-export__audio-treatment option:disabled { color: var(--muted); }
+.batch-export__capability { margin: 0; line-height: 1.35; }
 .target-languages__grid,
 .batch-export__languages,
 .batch-export__results { display: grid; gap: 5px; }
