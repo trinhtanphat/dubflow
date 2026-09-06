@@ -5,11 +5,13 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const migrations = readdirSync(new URL('../migrations/', import.meta.url)).filter((name) => /^\d{4}_.*\.sql$/.test(name));
 const policy = read('docs/DEPLOYMENT-POLICY.md');
+const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
 const wrangler = JSON.parse(read('wrangler.jsonc'));
 const app = read('worker/src/app.ts');
 const shares = read('worker/src/db/shares.ts');
 const shareRoutes = read('worker/src/routes/shares.ts');
+const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
 
 const hasMigration = (name) => migrations.includes(name);
 
@@ -53,4 +55,13 @@ test('main reconciliation preserves concrete export sharing on canonical project
   assert.match(shareRoutes, /ProjectExportRepository|ProjectExportStore/);
   assert.doesNotMatch(shareRoutes, /MultilangRepository|MultilangStore/);
   assert.match(shareRoutes, /EXPORT_NOT_READY/);
+});
+
+test('deployment status documents the canonical target artifact paths and retained batch admission lane', () => {
+  assert.match(exportPipeline, /projects\/\$\{projectId\}\/voices\/\$\{targetLanguage\}/);
+  assert.match(deploymentStatus, /projects\/\{projectId\}\/voices\/\{targetLanguage\}/);
+  assert.match(deploymentStatus, /projects\/\{projectId\}\/subtitles\/\{targetLanguage\}\/\{exportId\}\.srt/);
+  assert.match(deploymentStatus, /projects\/\{projectId\}\/exports\/\{targetLanguage\}\/\{exportId\}\.mp4/);
+  assert.doesNotMatch(deploymentStatus, /projects\/\{projectId\}\/dubbed\/\{targetLanguage\}/);
+  assert.match(deploymentStatus, /RATE_LIMIT_BATCH_EXPORT/);
 });
