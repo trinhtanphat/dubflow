@@ -65,11 +65,22 @@ function makeApp() {
   return app;
 }
 
-function envFor(db: FakeDb) {
+function envFor(db: FakeDb, options: { allowed?: boolean; calls?: string[] } = {}) {
+  const calls = options.calls ?? [];
   return {
     DB: db,
     AI: {
-      async run() { return { translated_text: 'provider-result' }; },
+      async run() {
+        calls.push('provider:workers-ai');
+        return { translated_text: 'provider-result' };
+      },
+    },
+    ANALYTICS: { writeDataPoint() {} },
+    RATE_LIMIT_TRANSLATE: {
+      async limit({ key }: { key: string }) {
+        calls.push(`limit:${key}`);
+        return { success: options.allowed ?? true };
+      },
     },
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'test-key',
   } as any;
@@ -92,6 +103,22 @@ describe('revision-aware retranslation route', () => {
       segment: { id: 's1', version: 2, translatedText: 'server-new' },
     });
     expect(db.segment.translated_text).toBe('server-new');
+  });
+
+  it('rejects a valid retranslation after validation but before provider work', async () => {
+    const db = new FakeDb();
+    const calls: string[] = [];
+    const response = await makeApp().request('/api/projects/p1/segments/s1/retranslate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedVersion: 2, mode: 'workers-ai' }),
+    }, envFor(db, { allowed: false, calls }));
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.json()).toMatchObject({ code: 'RATE_LIMITED' });
+    expect(calls).toEqual(['limit:dev-user:translate']);
+    expect(db.translationWrites).toBe(0);
   });
 
   it('compare mode never persists either provider result', async () => {
