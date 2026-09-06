@@ -8,6 +8,7 @@ import {
 
 const MAX_BOUNDARY_DELTA_MS = 1500;
 const MIN_TEMPORAL_INTERSECTION_RATIO = 0.5;
+const MIN_SPEAKER_MATCH_DURATION_MS = 750;
 
 type SpeakerKey = string;
 
@@ -16,16 +17,28 @@ type DuplicateCandidate = {
   right: NormalizedAsrSegment;
 };
 
+type SpeakerScore = {
+  matchCount: number;
+  matchedDurationMs: number;
+};
+
+type SpeakerScores = Map<SpeakerKey, Map<SpeakerKey, SpeakerScore>>;
+
 function normalizeTranscriptText(value: string): string {
   return value
     .normalize('NFKC')
     .trim()
-    .replace(/\s+/g, ' ')
-    .toLocaleLowerCase('und');
+    .toLocaleLowerCase('en-US')
+    .replace(/\s+/gu, ' ')
+    .replace(/[\p{P}\p{S}]+/gu, '');
+}
+
+function temporalIntersectionMs(left: NormalizedAsrSegment, right: NormalizedAsrSegment): number {
+  return Math.max(0, Math.min(left.endMs, right.endMs) - Math.max(left.startMs, right.startMs));
 }
 
 function temporalIntersectionRatio(left: NormalizedAsrSegment, right: NormalizedAsrSegment): number {
-  const intersection = Math.max(0, Math.min(left.endMs, right.endMs) - Math.max(left.startMs, right.startMs));
+  const intersection = temporalIntersectionMs(left, right);
   const shorter = Math.min(left.endMs - left.startMs, right.endMs - right.startMs);
   return shorter > 0 ? intersection / shorter : 0;
 }
@@ -53,6 +66,47 @@ function addCandidate(map: Map<string, Set<string>>, from: string, to: string): 
 function onlyValue(values: Set<string> | undefined): string | undefined {
   if (!values || values.size !== 1) return undefined;
   return values.values().next().value as string | undefined;
+}
+
+function addSpeakerScore(scores: SpeakerScores, from: SpeakerKey, to: SpeakerKey, durationMs: number): void {
+  const candidates = scores.get(from) ?? new Map<SpeakerKey, SpeakerScore>();
+  const current = candidates.get(to) ?? { matchCount: 0, matchedDurationMs: 0 };
+  candidates.set(to, {
+    matchCount: current.matchCount + 1,
+    matchedDurationMs: current.matchedDurationMs + durationMs,
+  });
+  scores.set(from, candidates);
+}
+
+function compareNumericScore(left: SpeakerScore, right: SpeakerScore): number {
+  return left.matchCount - right.matchCount || left.matchedDurationMs - right.matchedDurationMs;
+}
+
+function uniqueBest(candidates: Map<SpeakerKey, SpeakerScore> | undefined): SpeakerKey | undefined {
+  if (!candidates) return undefined;
+  let bestKey: SpeakerKey | undefined;
+  let bestScore: SpeakerScore | undefined;
+  let tied = false;
+
+  for (const [key, score] of candidates) {
+    if (score.matchCount < 1 || score.matchedDurationMs < MIN_SPEAKER_MATCH_DURATION_MS) continue;
+    if (!bestScore) {
+      bestKey = key;
+      bestScore = score;
+      tied = false;
+      continue;
+    }
+    const comparison = compareNumericScore(score, bestScore);
+    if (comparison > 0) {
+      bestKey = key;
+      bestScore = score;
+      tied = false;
+    } else if (comparison === 0) {
+      tied = true;
+    }
+  }
+
+  return tied ? undefined : bestKey;
 }
 
 class SpeakerUnion {
@@ -129,8 +183,11 @@ export function stitchAsrChunks(chunks: AsrChunkForNormalization[]): NormalizedA
   }
 
   const duplicateLaterIds = new Set<string>();
-  const forwardSpeakerCandidates = new Map<SpeakerKey, Set<SpeakerKey>>();
-  const reverseSpeakerCandidates = new Map<SpeakerKey, Set<SpeakerKey>>();
+  const union = new SpeakerUnion();
+  for (const segment of normalized) {
+    const key = speakerKey(segment);
+    if (key !== undefined) union.add(key);
+  }
 
   for (let index = 0; index + 1 < orderedChunks.length; index += 1) {
     const leftChunk = orderedChunks[index];
@@ -139,28 +196,25 @@ export function stitchAsrChunks(chunks: AsrChunkForNormalization[]): NormalizedA
       segmentsByChunk.get(leftChunk.chunkId) ?? [],
       segmentsByChunk.get(rightChunk.chunkId) ?? [],
     );
+    const forwardScores: SpeakerScores = new Map();
+    const reverseScores: SpeakerScores = new Map();
 
     for (const { left, right } of pairs) {
       duplicateLaterIds.add(right.id);
       const leftSpeaker = speakerKey(left);
       const rightSpeaker = speakerKey(right);
       if (leftSpeaker === undefined || rightSpeaker === undefined) continue;
-      addCandidate(forwardSpeakerCandidates, leftSpeaker, rightSpeaker);
-      addCandidate(reverseSpeakerCandidates, rightSpeaker, leftSpeaker);
+      const matchedDurationMs = temporalIntersectionMs(left, right);
+      addSpeakerScore(forwardScores, leftSpeaker, rightSpeaker, matchedDurationMs);
+      addSpeakerScore(reverseScores, rightSpeaker, leftSpeaker, matchedDurationMs);
     }
-  }
 
-  const union = new SpeakerUnion();
-  for (const segment of normalized) {
-    const key = speakerKey(segment);
-    if (key !== undefined) union.add(key);
-  }
-
-  for (const [leftSpeaker, candidates] of forwardSpeakerCandidates) {
-    const rightSpeaker = onlyValue(candidates);
-    if (!rightSpeaker) continue;
-    if (onlyValue(reverseSpeakerCandidates.get(rightSpeaker)) !== leftSpeaker) continue;
-    union.union(leftSpeaker, rightSpeaker);
+    for (const leftSpeaker of forwardScores.keys()) {
+      const rightSpeaker = uniqueBest(forwardScores.get(leftSpeaker));
+      if (!rightSpeaker) continue;
+      if (uniqueBest(reverseScores.get(rightSpeaker)) !== leftSpeaker) continue;
+      union.union(leftSpeaker, rightSpeaker);
+    }
   }
 
   const membersByRoot = new Map<SpeakerKey, SpeakerKey[]>();
