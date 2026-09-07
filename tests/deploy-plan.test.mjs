@@ -54,3 +54,20 @@ test('Workers Builds build phase is remote-mutation free and leaves migrations t
   assert.doesNotMatch(pkg.scripts.build, /wrangler\s+d1\s+migrations\s+apply/i);
   assert.equal(pkg.scripts.build, 'tsc -b && vite build');
 });
+
+test('gateway Workers Builds deploy preserves the checked-in custom domain and keep-vars contract', async () => {
+  const scriptUrl = new URL('../scripts/cloudflare-gateway-workers-build-deploy.mjs', import.meta.url);
+  assert.equal(
+    fs.existsSync(scriptUrl),
+    true,
+    'gateway Workers Builds must use a repository-owned deploy script instead of inline config mutation',
+  );
+
+  const { gatewayWorkersBuildDeploymentPlan } = await import(scriptUrl.href);
+  assert.deepEqual(gatewayWorkersBuildDeploymentPlan(), [
+    ['npx', ['wrangler', 'deploy', '--config', 'wrangler.gateway.jsonc']],
+  ]);
+
+  const script = fs.readFileSync(scriptUrl, 'utf8');
+  assert.doesNotMatch(script, /delete\s+.*routes|workers_dev\s*=\s*true/i);
+});
