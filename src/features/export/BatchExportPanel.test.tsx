@@ -27,31 +27,33 @@ const partial = [
   },
 ];
 
+function baseProps() {
+  return {
+    currentTargetLanguage: 'ja' as const,
+    enabledLanguages: [...enabledLanguages],
+    selectedLanguages: ['vi', 'ja'] as const,
+    output: 'dubbed' as const,
+    voiceCapabilities: {
+      configured: true,
+      languages: ['vi', 'ja'] as const,
+      cloning: true,
+      preview: true,
+      cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: true },
+    },
+    busy: false,
+    results: partial,
+    error: '',
+    onOutputChange: vi.fn(),
+    onToggleLanguage: vi.fn(),
+    onExportCurrent: vi.fn(),
+    onBatchExport: vi.fn(),
+    onRetryFailed: vi.fn(),
+  };
+}
+
 describe('Phase 4C batch export studio controls', () => {
   it('keeps partial batch results and exposes retry only for failed targets', () => {
-    const html = renderToStaticMarkup(
-      <BatchExportPanelView
-        currentTargetLanguage="ja"
-        enabledLanguages={[...enabledLanguages]}
-        selectedLanguages={['vi', 'ja']}
-        output="dubbed"
-        voiceCapabilities={{
-          configured: true,
-          languages: ['vi', 'ja'],
-          cloning: true,
-          preview: true,
-          cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
-        }}
-        busy={false}
-        results={partial}
-        error=""
-        onOutputChange={vi.fn()}
-        onToggleLanguage={vi.fn()}
-        onExportCurrent={vi.fn()}
-        onBatchExport={vi.fn()}
-        onRetryFailed={vi.fn()}
-      />,
-    );
+    const html = renderToStaticMarkup(<BatchExportPanelView {...baseProps()} selectedLanguages={['vi', 'ja']} />);
 
     expect(html).toContain('Export current language');
     expect(html).toContain('Batch export selected languages');
@@ -86,7 +88,7 @@ describe('Phase 4C batch export studio controls', () => {
 
     const html = renderToStaticMarkup(
       <BatchExportPanelView
-        currentTargetLanguage="ja"
+        {...baseProps()}
         enabledLanguages={['ja']}
         selectedLanguages={['ja']}
         output="subtitles"
@@ -97,17 +99,52 @@ describe('Phase 4C batch export studio controls', () => {
           preview: false,
           cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: false },
         }}
-        busy={false}
         results={[]}
-        error=""
-        onOutputChange={vi.fn()}
-        onToggleLanguage={vi.fn()}
-        onExportCurrent={vi.fn()}
-        onBatchExport={vi.fn()}
-        onRetryFailed={vi.fn()}
       />,
     );
     expect(html).toContain('value="subtitles" selected=""');
     expect(html).not.toContain('disabled="" data-testid="export-current-language"');
+  });
+
+  it('shows explicit background preparation controls without starting expensive work implicitly', () => {
+    const html = renderToStaticMarkup(<BatchExportPanelView {...baseProps()} />);
+
+    expect(html).toContain('Dubbed voices only');
+    expect(html).toContain('Preserve music &amp; ambience');
+    expect(html).toContain('Prepare background');
+    expect(html).toContain('Not prepared');
+    expect(html).toContain('Unqualified');
+  });
+
+  it('allows preserve mode only for a qualified completed separation', () => {
+    const props = {
+      ...baseProps(),
+      mixMode: 'preserve_background',
+      separationState: {
+        status: 'completed',
+        qualified: true,
+        separation: {
+          id: 'sep-1',
+          status: 'completed',
+          sourceRevision: 2,
+          provider: 'demucs',
+          modelId: 'htdemucs',
+          jobId: 'job-sep',
+          errorCode: null,
+          errorMessage: null,
+          createdAt: '2026-09-07T00:00:00Z',
+          completedAt: '2026-09-07T00:01:00Z',
+        },
+      },
+      separationBusy: false,
+      separationError: '',
+      onMixModeChange: vi.fn(),
+      onPrepareBackground: vi.fn(),
+    } as any;
+    const html = renderToStaticMarkup(<BatchExportPanelView {...props} />);
+
+    expect(html).toContain('Ready');
+    expect(html).toContain('value="preserve_background" checked=""');
+    expect(html).not.toContain('Unqualified');
   });
 });
