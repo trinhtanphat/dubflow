@@ -233,4 +233,41 @@ describe('Phase 4D batch export studio controls', () => {
     expect(html).not.toContain('aria-label="Xử lý âm thanh"');
     expect(html).not.toContain('disabled="" data-testid="export-current-language"');
   });
+
+  it('admits only Vietnamese through local Piper when the server voice provider is unconfigured', () => {
+    const unconfigured = {
+      configured: false,
+      languages: 'unknown' as const,
+      cloning: false,
+      preview: false,
+      cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: false },
+    };
+
+    expect(dubbedAvailability(unconfigured, 'vi', true).allowed).toBe(true);
+    expect(dubbedAvailability(unconfigured, 'ja', true)).toMatchObject({ allowed: false });
+    expect(dubbedAvailability(unconfigured, 'vi', false)).toMatchObject({ allowed: false });
+
+    const html = renderToStaticMarkup(
+      <BatchExportPanelView
+        currentTargetLanguage="vi"
+        enabledLanguages={['vi', 'ja']}
+        selectedLanguages={['vi']}
+        output="dubbed"
+        audioMode="dubbed_only"
+        exportCapabilities={unavailableSeparation}
+        voiceCapabilities={unconfigured}
+        localVietnameseVoiceAvailable
+        busy={false}
+        results={[]}
+        error=""
+        onOutputChange={vi.fn()}
+        onAudioModeChange={vi.fn()}
+        onToggleLanguage={vi.fn()}
+        onExportCurrent={vi.fn()}
+        onBatchExport={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />,
+    );
+    expect(html).not.toContain('disabled="" data-testid="export-current-language"');
+  });
 });
