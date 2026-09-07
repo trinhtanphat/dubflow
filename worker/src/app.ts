@@ -8,6 +8,7 @@ import { createVoiceRoutes } from './routes/voice';
 import { createVoiceCloneRoutes } from './routes/voice-clones';
 import { createProcessRoutes } from './routes/process';
 import { createExportRoutes } from './routes/export';
+import { createSeparationRoutes } from './routes/separation';
 import { createVisualExportMediaRoutes } from './routes/visual-export-media';
 import { createSegmentRoutes } from './routes/segments';
 import { createSpeakerRoutes } from './routes/speakers';
@@ -20,9 +21,12 @@ import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
 import { createProviderMediaRoutes } from './routes/provider-media';
+import { createDialogueSeparationProvider } from './services/separation/config';
 
 const app = new Hono<WorkerHonoEnv>();
-const exportRoutes = createExportRoutes();
+const exportRoutes = createExportRoutes({
+  makeSeparation: (env) => createDialogueSeparationProvider(env),
+});
 const languageRoutes = createLanguageRoutes();
 const translationVariantRoutes = createTranslationVariantRoutes();
 
@@ -37,6 +41,7 @@ app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
 app.route('/api/projects', createVisualExportMediaRoutes());
 app.route('/api/projects', exportRoutes);
+app.route('/api/projects', createSeparationRoutes());
 app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());

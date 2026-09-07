@@ -84,6 +84,25 @@ export class AudioStemRepository {
     return row ? fromRow(row) : null;
   }
 
+  async latest(
+    projectId: string,
+    userId: string,
+    sourceGeneration: number,
+    kind: AudioStemKind,
+    provider: string,
+  ): Promise<AudioStem | null> {
+    const row = await this.db.prepare(
+      `SELECT ${COLUMNS}
+       FROM project_audio_stems s
+       JOIN projects p ON p.id = s.project_id
+       WHERE s.project_id = ? AND s.source_generation = ? AND s.kind = ? AND s.provider = ?
+         AND p.user_id = ?
+       ORDER BY s.created_at DESC, s.id DESC
+       LIMIT 1`,
+    ).bind(projectId, sourceGeneration, kind, provider, userId).first<AudioStemRow>();
+    return row ? fromRow(row) : null;
+  }
+
   async latestCompleted(
     projectId: string,
     userId: string,

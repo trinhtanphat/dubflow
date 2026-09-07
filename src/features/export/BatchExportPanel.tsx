@@ -12,6 +12,7 @@ import {
   type LipSyncStatus,
   type VisualMode,
 } from './batchExportApi';
+import type { SeparationStateDto } from './separationApi';
 import './batch-export.css';
 
 export function dubbedAvailability(
@@ -37,6 +38,31 @@ export function separatedBackgroundAvailability(
     || separation.provider.trim() === ''
   ) {
     return { allowed: false, reason: 'Separated background chưa được xác nhận (unavailable/unqualified).' };
+  }
+  return { allowed: true, reason: '' };
+}
+
+function lifecycleLabel(state: SeparationStateDto | null | undefined): string {
+  if (!state) return 'Not prepared';
+  if (state.status === 'not_prepared') return 'Not prepared';
+  if (state.status === 'processing') return 'Processing';
+  if (state.status === 'ready') return 'Ready';
+  if (state.status === 'failed') return 'Failed';
+  return 'Stale';
+}
+
+function preparedBackgroundAvailability(
+  capabilities: ExportCapabilitiesDto | null,
+  state: SeparationStateDto | null | undefined,
+): { allowed: boolean; reason: string } {
+  const capability = separatedBackgroundAvailability(capabilities);
+  if (!capability.allowed) return capability;
+  // Preserve the pre-prepare component contract for isolated callers/tests. Studio always
+  // provides explicit durable state and therefore uses the stricter admission below.
+  if (state === undefined) return capability;
+  if (!state?.qualified) return { allowed: false, reason: 'Background separation is Unqualified.' };
+  if (state.status !== 'ready' || state.stem?.status !== 'completed') {
+    return { allowed: false, reason: `Background stem is ${lifecycleLabel(state)}. Prepare background before export.` };
   }
   return { allowed: true, reason: '' };
 }
@@ -81,6 +107,8 @@ type Props = {
   visualMode?: VisualMode;
   exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
+  separationState?: SeparationStateDto | null;
+  separationBusy?: boolean;
   busy: boolean;
   results: ExportLaunchDto[];
   attempts?: Partial<Record<TargetLanguage, AttemptView>>;
@@ -89,6 +117,7 @@ type Props = {
   onAudioModeChange: (audioMode: DubbedAudioMode) => void;
   onVisualModeChange?: (visualMode: VisualMode) => void;
   onToggleLanguage: (language: TargetLanguage) => void;
+  onPrepareSeparation?: () => void;
   onExportCurrent: () => void;
   onBatchExport: () => void;
   onRetryFailed: (language: TargetLanguage) => void;
@@ -135,6 +164,8 @@ export function BatchExportPanelView({
   visualMode = 'standard',
   exportCapabilities,
   voiceCapabilities,
+  separationState,
+  separationBusy = false,
   busy,
   results,
   attempts = {},
@@ -143,12 +174,13 @@ export function BatchExportPanelView({
   onAudioModeChange,
   onVisualModeChange = () => {},
   onToggleLanguage,
+  onPrepareSeparation = () => undefined,
   onExportCurrent,
   onBatchExport,
   onRetryFailed,
 }: Props) {
   const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
-  const separated = separatedBackgroundAvailability(exportCapabilities);
+  const separated = preparedBackgroundAvailability(exportCapabilities, separationState);
   const visual = visualLipSyncAvailability(exportCapabilities);
   const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
   const visualBlocked = output === 'dubbed' && visualMode === 'lip_sync' && !visual.allowed;
@@ -159,6 +191,9 @@ export function BatchExportPanelView({
     || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
   );
   const allSucceeded = results.length > 0 && results.every((result) => isCompleted(result, attempts[result.targetLanguage]));
+  const preparing = separationState?.status === 'processing';
+  const canPrepare = separationState?.qualified === true && !preparing;
+  const prepareLabel = separationState?.status === 'failed' ? 'Retry background' : 'Prepare background';
 
   return (
     <section className="batch-export" data-testid="batch-export-panel" aria-label="Batch export">
@@ -184,7 +219,27 @@ export function BatchExportPanelView({
                 <option value="separated_background" disabled={!separated.allowed}>Separated background stem</option>
               </select>
             </label>
+            {separationState !== undefined && (
+              <div className="batch-export__separation" aria-live="polite">
+                <div>
+                  <strong>Prepare background</strong>
+                  <span>{lifecycleLabel(separationState)}</span>
+                  {separationState && !separationState.qualified && <span>Unqualified</span>}
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={separationBusy || !canPrepare}
+                  onClick={onPrepareSeparation}
+                >
+                  {separationBusy || preparing ? 'Processing' : prepareLabel}
+                </button>
+              </div>
+            )}
             {!separated.allowed && <p className="batch-export__capability">{separated.reason}</p>}
+            <span className="batch-export__lifecycle-key" hidden>
+              Not prepared Processing Ready Failed Stale Unqualified
+            </span>
           </div>
           <div className="batch-export__visual-treatment">
             <label>

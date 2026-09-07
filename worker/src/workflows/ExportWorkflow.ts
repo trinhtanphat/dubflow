@@ -14,7 +14,7 @@ import { createTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
 import { SyncLabsLipSyncProvider } from '../services/lipsync/sync-labs';
 import { ContainerMediaProcessor } from '../services/media/container';
-import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
+import { createDialogueSeparationProvider } from '../services/separation/config';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
@@ -31,7 +31,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         exports: new ProjectExportRepository(this.env.DB),
         speakers: new SpeakerRepository(this.env.DB),
         stems: new AudioStemRepository(this.env.DB),
-        separation: new UnavailableDialogueSeparationProvider(),
+        separation: createDialogueSeparationProvider(this.env),
         providerMediaGrants: new ProviderMediaGrantRepository(this.env.DB),
         lipSync: new SyncLabsLipSyncProvider({ apiKey: this.env.SYNC_API_KEY }),
         makeProviderMediaToken: createProviderMediaToken,
