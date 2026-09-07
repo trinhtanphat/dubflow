@@ -32,6 +32,7 @@ const pkg = JSON.parse(packageSource || '{}');
 
 test('browser Piper preload is pinned, lazy, version-safe, and zero-cost', () => {
   assert.equal(pkg.dependencies?.['@mintplex-labs/piper-tts-web'], '1.0.5');
+  assert.equal(pkg.dependencies?.['onnxruntime-web'], '1.18.0');
   assert.match(browserPiperSource, /import\(['"]@mintplex-labs\/piper-tts-web['"]\)/);
   assert.match(browserPiperSource, /vi_VN-vais1000-medium/);
   assert.match(pcmSource, /24_000|24000/);
