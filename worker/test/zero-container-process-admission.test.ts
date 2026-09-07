@@ -14,58 +14,73 @@ function projectFixture() {
   };
 }
 
-describe('zero-container process admission', () => {
-  it('fails before job creation when the Stream binding is unavailable', async () => {
+function appWithJobGuard(onCreate: () => void) {
+  const project = projectFixture();
+  const app = new Hono<{ Bindings: Env }>();
+  app.route('/api/projects', createProcessRoutes({
+    makeProjects: () => ({
+      async getByIdForUser() { return project; },
+      async setStatus() {},
+    }) as never,
+    makeJobs: () => ({
+      async create() { onCreate(); throw new Error('job must not be created'); },
+    }) as never,
+  }));
+  return app;
+}
+
+describe('R2-only process admission', () => {
+  it('fails before job creation when the MEDIA R2 binding is unavailable', async () => {
     let created = false;
-    const project = projectFixture();
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createProcessRoutes({
-      makeProjects: () => ({
-        async getByIdForUser() { return project; },
-        async setStatus() {},
-      }) as never,
-      makeJobs: () => ({
-        async create() { created = true; throw new Error('job must not be created'); },
-      }) as never,
-    }));
+    const app = appWithJobGuard(() => { created = true; });
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
-      STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
+      MEDIA_SOURCE_SIGNING_SECRET: 'source-secret',
       PUBLIC_ORIGIN: 'https://yupvox.qs3d.site',
       DUBBING_WORKFLOW: { async create() { return { id: 'workflow-1' }; } },
     } as unknown as Env;
 
     const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: true, code: 'STREAM_BINDING_UNAVAILABLE' });
+    expect(await response.json()).toMatchObject({ error: true, code: 'MEDIA_SOURCE_UNAVAILABLE' });
     expect(created).toBe(false);
   });
 
-  it('fails before job creation when the signed Stream source origin is unavailable', async () => {
+  it('fails before job creation when the signed R2 source origin is unavailable', async () => {
     let created = false;
-    const project = projectFixture();
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createProcessRoutes({
-      makeProjects: () => ({
-        async getByIdForUser() { return project; },
-        async setStatus() {},
-      }) as never,
-      makeJobs: () => ({
-        async create() { created = true; throw new Error('job must not be created'); },
-      }) as never,
-    }));
+    const app = appWithJobGuard(() => { created = true; });
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
-      STREAM: {},
-      STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
+      MEDIA: {},
+      MEDIA_SOURCE_SIGNING_SECRET: 'source-secret',
       DUBBING_WORKFLOW: { async create() { return { id: 'workflow-1' }; } },
     } as unknown as Env;
 
     const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: true, code: 'STREAM_SOURCE_ORIGIN_UNAVAILABLE' });
+    expect(await response.json()).toMatchObject({ error: true, code: 'MEDIA_SOURCE_ORIGIN_UNAVAILABLE' });
     expect(created).toBe(false);
+  });
+
+  it('accepts the temporary legacy signing-secret alias while canonical secret rolls out', async () => {
+    const project = projectFixture();
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/projects', createProcessRoutes({
+      makeProjects: () => ({ async getByIdForUser() { return project; }, async setStatus() {} }) as never,
+      makeJobs: () => ({ async create() { return { id: 'job-1' }; } }) as never,
+    }));
+    const env = {
+      ANALYTICS: analytics,
+      RATE_LIMIT_PROCESS: allowProcess,
+      MEDIA: {},
+      STREAM_SOURCE_SIGNING_SECRET: 'legacy-source-secret',
+      PUBLIC_ORIGIN: 'https://yupvox.qs3d.site',
+      DUBBING_WORKFLOW: { async create() { return { id: 'workflow-1' }; } },
+    } as unknown as Env;
+
+    const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
+    expect(response.status).toBe(202);
   });
 });
