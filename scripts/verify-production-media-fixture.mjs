@@ -61,6 +61,15 @@ function assertReady(body) {
   }
 }
 
+function sanitizeVoiceCapability(body) {
+  return {
+    provider: typeof body?.provider === 'string' ? body.provider : null,
+    configured: body?.configured === true,
+    cloning: body?.cloning === true,
+    preview: body?.preview === true,
+  };
+}
+
 function assertVoiceCapability(body) {
   if (
     typeof body?.provider !== 'string'
@@ -97,6 +106,8 @@ export async function runProductionMediaFixture({
   assertReady(readiness.body);
 
   const voiceCapability = await request(fetchImpl, `${origin}/api/voice/capabilities`);
+  const safeVoiceCapability = sanitizeVoiceCapability(voiceCapability.body);
+  console.log(`Production voice capability ${JSON.stringify(safeVoiceCapability)}`);
   assertVoiceCapability(voiceCapability.body);
 
   const title = `prod-r2-fixture-${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
