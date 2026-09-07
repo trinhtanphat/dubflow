@@ -6,6 +6,18 @@ function workflowStep() {
   return { do: vi.fn(async (_name: string, callback: () => Promise<unknown>) => callback()) };
 }
 
+function durableWorkflowStep() {
+  return {
+    do: vi.fn(async (_name: string, callback: () => Promise<unknown>) => {
+      const result = await callback();
+      if (result instanceof Response) {
+        throw new TypeError('Workflow step returned a non-serializable Response.');
+      }
+      return result;
+    }),
+  };
+}
+
 function harness(options: { providerFails?: boolean; completedLipSync?: boolean } = {}) {
   const usage = new Map<string, any>();
   const usageEvents: any[] = [];
@@ -128,6 +140,13 @@ describe('Phase 4E durable visual lip-sync export orchestration', () => {
     expect(h.deps.lipSync.render).not.toHaveBeenCalled();
     expect(h.deps.providerMediaGrants.create).not.toHaveBeenCalled();
     expect(h.deps.media.extractExportAudio).not.toHaveBeenCalled();
+  });
+
+  it('keeps provider download results serializable across durable Workflow step boundaries', async () => {
+    const h = harness();
+    await runExportPipeline(lipSyncParams as never, h.deps, durableWorkflowStep() as never);
+    expect(h.deps.fetchImpl).toHaveBeenCalledTimes(1);
+    expect(h.deps.bucket.put).toHaveBeenCalledTimes(1);
   });
 
   it('starts visual processing only after the normal dubbed artifact exists and publishes canonical R2 output', async () => {
