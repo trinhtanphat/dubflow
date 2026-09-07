@@ -41,12 +41,33 @@ function assertProjectObject(projectId: string, objectKey: string, folder?: stri
   }
 }
 
-function assertRenderOptions(options: RenderExportOptions): void {
+function assertRenderOptions(projectId: string, options: RenderExportOptions): void {
   if (!['vi', 'en', 'zh', 'ja', 'ko'].includes(options.targetLanguage)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export target language is invalid.');
   }
   if (!/^[A-Za-z0-9._-]{1,200}$/.test(options.exportId)) {
     throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export id is invalid.');
+  }
+
+  const mixMode = options.mixMode ?? 'dubbed_only';
+  if (mixMode !== 'dubbed_only' && mixMode !== 'preserve_background') {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Export mix mode is invalid.');
+  }
+
+  if (mixMode === 'preserve_background') {
+    if (typeof options.backgroundObjectKey !== 'string' || options.backgroundObjectKey.length === 0) {
+      throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Preserve-background export requires a durable background object.');
+    }
+    const backgroundPrefix = `${projectPrefix(projectId)}separation/`;
+    if (
+      !options.backgroundObjectKey.startsWith(backgroundPrefix) ||
+      options.backgroundObjectKey.includes('..') ||
+      !options.backgroundObjectKey.endsWith('/background.wav')
+    ) {
+      throw new MediaProcessorError('MEDIA_OBJECT_KEY_INVALID', 'Background audio must belong to the project separation namespace.');
+    }
+  } else if (options.backgroundObjectKey !== undefined) {
+    throw new MediaProcessorError('MEDIA_EXPORT_OPTIONS_INVALID', 'Background audio is only valid for preserve_background exports.');
   }
 }
 
@@ -136,7 +157,7 @@ export class ContainerMediaProcessor implements MediaProcessor {
     if (!Array.isArray(clips) || clips.length === 0) {
       throw new MediaProcessorError('MEDIA_EXPORT_CLIP_INVALID', 'At least one dubbed clip is required for export.');
     }
-    if (options) assertRenderOptions(options);
+    if (options) assertRenderOptions(projectId, options);
     const validated = clips.map((clip) => assertExportClip(projectId, clip, options));
     const result = await this.call(projectId, '/render-export', {
       projectId,
