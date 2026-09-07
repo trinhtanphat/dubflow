@@ -25,6 +25,13 @@ export function createProjectsRoutes(
     }
   });
 
+  routes.put('/:id/client-inference/vi', async (c) => {
+    return c.json(
+      errorBody('LOCAL_INFERENCE_COMMIT_UNAVAILABLE', 'Browser-local inference commit is not available yet.'),
+      503,
+    );
+  });
+
   routes.get('/', async (c) => {
     const projects = await makeStore(c.env).listByUser(getCurrentUserId());
     return c.json(projects);
