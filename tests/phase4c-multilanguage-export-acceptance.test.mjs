@@ -7,7 +7,11 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const migration = read('migrations/0010_multilanguage_variants.sql');
 const router = read('worker/src/services/translation/router.ts');
 const languagePipeline = read('worker/src/workflows/languageTranslationPipeline.ts');
-const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
+const exportPipeline = [
+  read('worker/src/workflows/exportPipeline.ts'),
+  read('worker/src/workflows/legacyExportPipeline.ts'),
+  read('worker/src/workflows/zeroContainerExportPipeline.ts'),
+].join('\n');
 const exportRoute = read('worker/src/routes/export.ts');
 const studio = read('src/app/StudioShell.tsx');
 const packageJson = read('package.json');
