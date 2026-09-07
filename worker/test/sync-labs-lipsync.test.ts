@@ -34,6 +34,7 @@ describe('Sync Labs visual lip-sync provider', () => {
     if (!loaded) return;
 
     const fetchImpl = vi.fn();
+    // Qualification may hand the key to this provider; billing consent must remain a separate gate.
     const provider = new loaded.SyncLabsLipSyncProvider({
       apiKey: 'secret-key',
       fetchImpl,
