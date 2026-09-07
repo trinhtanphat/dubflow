@@ -23,6 +23,7 @@ const verifyDeployment = read('scripts/verify-deployment.mjs');
 const studio = read('src/features/export/BatchExportPanel.tsx');
 const api = read('src/features/export/batchExportApi.ts');
 const wrangler = read('wrangler.jsonc');
+const productionConfigGenerator = read('scripts/cloudflare-workers-build-config.mjs');
 const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
 const pkg = JSON.parse(read('package.json'));
@@ -95,5 +96,9 @@ test('Phase 4E keeps GitHub CI-only and no Container runtime', () => {
   assert.equal(config.containers, undefined);
   assert.equal(config.durable_objects, undefined);
   assert.equal(config.exports, undefined);
+  assert.match(productionConfigGenerator, /delete\s+source\.containers/);
+  assert.match(productionConfigGenerator, /delete\s+source\.durable_objects/);
+  assert.match(productionConfigGenerator, /delete\s+source\.exports/);
+  assert.match(productionConfigGenerator, /delete\s+source\.routes/);
   assert.match(pkg.scripts['verify:deploy-config'], /phase4e-lipsync-acceptance\.test\.mjs/);
 });
