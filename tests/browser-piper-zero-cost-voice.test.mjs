@@ -47,6 +47,13 @@ test('browser Piper stays lazy and converts to the backend PCM contract', () => 
   assert.match(apiSource, /X-DubFlow-Translation-Version/);
 });
 
+test('browser Piper initializes one reusable inference session before declaring ready', () => {
+  assert.match(workerSource, /TtsSession\.create\s*\(/);
+  assert.match(workerSource, /let\s+session\s*:/);
+  assert.match(workerSource, /session\.predict\s*\(/);
+  assert.doesNotMatch(workerSource, /tts\.download\s*\(/);
+});
+
 test('browser Piper worker bundle uses ES modules so Vite can code-split Piper runtime dependencies', () => {
   assert.match(viteConfigSource, /worker\s*:\s*\{[\s\S]*?format\s*:\s*['"]es['"]/);
 });
