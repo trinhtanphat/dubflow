@@ -125,13 +125,14 @@ describe('UsageRepository', () => {
         ttsAudioSeconds: 3.125,
         renderSeconds: 142.375,
         dialogueSeparationSeconds: 10,
+        lipSyncVideoSeconds: 0,
       },
       providers: {
-        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 0 },
-        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 0 },
-        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, renderSeconds: 0, dialogueSeparationSeconds: 0 },
-        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 142.375, dialogueSeparationSeconds: 0 },
-        'qualified-provider': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 10 },
+        'deepgram-nova-3': { asrAudioSeconds: 75.125, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 0, lipSyncVideoSeconds: 0 },
+        'workers-ai': { asrAudioSeconds: 0, translationCharacters: 17, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 0, lipSyncVideoSeconds: 0 },
+        elevenlabs: { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 3.125, renderSeconds: 0, dialogueSeparationSeconds: 0, lipSyncVideoSeconds: 0 },
+        'ffmpeg-container': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 142.375, dialogueSeparationSeconds: 0, lipSyncVideoSeconds: 0 },
+        'qualified-provider': { asrAudioSeconds: 0, translationCharacters: 0, ttsAudioSeconds: 0, renderSeconds: 0, dialogueSeparationSeconds: 10, lipSyncVideoSeconds: 0 },
       },
     });
   });
