@@ -4,15 +4,29 @@ import { AsrError } from './types';
 
 export const WORKERS_AI_ASR_MODEL = '@cf/openai/whisper-large-v3-turbo';
 
+const BASE64_CHUNK_BYTES = 0x6000; // 24 KiB and divisible by 3, so chunks concatenate safely.
+
 type RawSegment = { start?: number; end?: number; text?: string };
 type RawResponse = { text?: string; segments?: RawSegment[] };
+
+function arrayBufferToBase64(audio: ArrayBuffer): string {
+  const bytes = new Uint8Array(audio);
+  const encodedChunks: string[] = [];
+
+  for (let offset = 0; offset < bytes.byteLength; offset += BASE64_CHUNK_BYTES) {
+    const chunk = bytes.subarray(offset, Math.min(bytes.byteLength, offset + BASE64_CHUNK_BYTES));
+    encodedChunks.push(btoa(String.fromCharCode(...chunk)));
+  }
+
+  return encodedChunks.join('');
+}
 
 export class WorkersAIAsrProvider implements AsrProvider {
   constructor(private readonly ai: AiBinding) {}
 
   async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
     const input: Record<string, unknown> = {
-      audio,
+      audio: arrayBufferToBase64(audio),
       task: 'transcribe',
       vad_filter: true,
     };
