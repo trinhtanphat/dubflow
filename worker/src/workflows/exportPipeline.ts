@@ -1,3 +1,5 @@
+import { separationObjectPrefix } from '../db/audio-separation';
+import type { DubbedMixMode } from '../db/project-exports';
 import type { ProjectStatus } from '../db/projects';
 import type { DubbingJob, JobStore } from '../db/jobs';
 import type { UsageStore } from '../db/usage';
@@ -7,6 +9,7 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import type { RenderExportOptions } from '../services/media/types';
+import type { SeparationCapabilities } from '../services/separation/types';
 import { serializeSrt } from '../services/subtitles/srt';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 
@@ -17,6 +20,7 @@ export type ExportWorkflowParams = {
   exportId: string;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  mixMode?: DubbedMixMode;
   requestId?: string;
 };
 
@@ -43,6 +47,7 @@ export interface ExportWorkflowStepLike {
 type ExportProject = {
   id: string;
   sourceObjectKey?: string | null;
+  sourceRevision?: number;
   durationMs?: number | null;
 };
 
@@ -94,6 +99,14 @@ type ExportJobs = {
 
 type ExportUsage = Pick<UsageStore, 'record' | 'getByOperation'>;
 
+type ExportSeparation = {
+  sourceRevision: number;
+  provider: string;
+  modelDigest: string;
+  status: string;
+  backgroundObjectKey: string | null;
+};
+
 export type ExportPipelineDeps = {
   projects: {
     getByIdForUser(projectId: string, userId: string): Promise<ExportProject | null>;
@@ -124,6 +137,16 @@ export type ExportPipelineDeps = {
     ): Promise<void>;
     fail(projectId: string, exportId: string, userId: string, code: string, message: string): Promise<void>;
   };
+  separations?: {
+    getCurrent(
+      projectId: string,
+      userId: string,
+      sourceRevision: number,
+      provider: string,
+      modelDigest: string,
+    ): Promise<ExportSeparation | null>;
+  };
+  separationCapabilities?: SeparationCapabilities;
   speakers?: {
     list(projectId: string, userId: string): Promise<ExportSpeaker[]>;
   };
@@ -155,22 +178,44 @@ type NormalizedExportParams = {
   exportId: string | null;
   targetLanguage: TargetLanguage;
   output: ExportOutput;
+  mixMode: DubbedMixMode;
 };
+
+type SeparationExportErrorCode =
+  | 'SEPARATION_UNAVAILABLE'
+  | 'SEPARATION_NOT_READY'
+  | 'SEPARATION_SOURCE_STALE'
+  | 'SEPARATION_ARTIFACT_MISSING'
+  | 'SEPARATION_RESPONSE_INVALID';
+
+class ExportPipelineError extends Error {
+  constructor(public readonly code: SeparationExportErrorCode, message: string) {
+    super(message);
+    this.name = 'ExportPipelineError';
+  }
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown export failure.';
 }
 
+function errorCode(error: unknown): string {
+  return error instanceof ExportPipelineError ? error.code : 'EXPORT_FAILED';
+}
+
 function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParams {
   const candidate = params as Partial<ExportWorkflowParams> & LegacyExportWorkflowParams;
-  const modernFieldPresent = candidate.exportId !== undefined || candidate.targetLanguage !== undefined || candidate.output !== undefined;
+  const modernFieldPresent = candidate.exportId !== undefined || candidate.targetLanguage !== undefined
+    || candidate.output !== undefined || candidate.mixMode !== undefined;
   if (!modernFieldPresent) {
-    return { ...params, modern: false, exportId: null, targetLanguage: 'vi', output: 'dubbed' };
+    return { ...params, modern: false, exportId: null, targetLanguage: 'vi', output: 'dubbed', mixMode: 'dubbed_only' };
   }
+  const mixMode = candidate.mixMode ?? 'dubbed_only';
   if (
     typeof candidate.exportId !== 'string' || !candidate.exportId.trim() ||
     !isTargetLanguage(candidate.targetLanguage) ||
-    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles')
+    (candidate.output !== 'dubbed' && candidate.output !== 'subtitles') ||
+    (mixMode !== 'dubbed_only' && mixMode !== 'preserve_background')
   ) {
     throw new Error('Export workflow parameters are invalid.');
   }
@@ -183,6 +228,7 @@ function normalizeParams(params: RunExportWorkflowParams): NormalizedExportParam
     exportId: candidate.exportId,
     targetLanguage: candidate.targetLanguage,
     output: candidate.output,
+    mixMode,
   };
 }
 
@@ -267,6 +313,73 @@ function legacyWorkItems(segments: ExportSegment[]): ExportWorkItem[] {
     dubbedObjectKey: segment.dubbedObjectKey ?? null,
     version: Number.isInteger(segment.version) && Number(segment.version) > 0 ? Number(segment.version) : 1,
   }));
+}
+
+async function resolvePreserveBackground(
+  params: NormalizedExportParams,
+  initialProject: ExportProject,
+  deps: ExportPipelineDeps,
+  step: ExportWorkflowStepLike,
+): Promise<{ project: ExportProject; backgroundObjectKey: string } | null> {
+  if (params.mixMode !== 'preserve_background') return null;
+  if (!params.modern || params.output !== 'dubbed') {
+    throw new ExportPipelineError('SEPARATION_UNAVAILABLE', 'Background preservation is only available for modern dubbed exports.');
+  }
+  const capabilities = deps.separationCapabilities;
+  if (!deps.separations || !capabilities?.configured || !capabilities.qualified) {
+    throw new ExportPipelineError('SEPARATION_UNAVAILABLE', 'Background preservation is not available for this runtime.');
+  }
+  if (!Number.isInteger(initialProject.sourceRevision) || Number(initialProject.sourceRevision) < 1) {
+    throw new ExportPipelineError('SEPARATION_SOURCE_STALE', 'The export source revision cannot be matched to a prepared background.');
+  }
+
+  const currentProject = await step.do('reload export project before preserve render', async () =>
+    deps.projects.getByIdForUser(params.projectId, params.userId),
+  );
+  if (!currentProject || !currentProject.sourceObjectKey) {
+    throw new ExportPipelineError('SEPARATION_SOURCE_STALE', 'The project source changed before background-preserving render.');
+  }
+  if (
+    currentProject.sourceRevision !== initialProject.sourceRevision ||
+    currentProject.sourceObjectKey !== initialProject.sourceObjectKey
+  ) {
+    throw new ExportPipelineError('SEPARATION_SOURCE_STALE', 'The project source changed after this export started.');
+  }
+  const sourceRevision = Number(currentProject.sourceRevision);
+  const separation = await step.do('revalidate preserve-background separation', async () =>
+    deps.separations!.getCurrent(
+      params.projectId,
+      params.userId,
+      sourceRevision,
+      capabilities.provider,
+      capabilities.modelDigest,
+    ),
+  );
+  if (!separation) {
+    throw new ExportPipelineError('SEPARATION_UNAVAILABLE', 'The prepared background is no longer available for this source.');
+  }
+  if (separation.sourceRevision !== sourceRevision) {
+    throw new ExportPipelineError('SEPARATION_SOURCE_STALE', 'The prepared background belongs to a different source revision.');
+  }
+  if (separation.status !== 'completed') {
+    throw new ExportPipelineError('SEPARATION_NOT_READY', 'Background audio separation is not completed.');
+  }
+  if (!separation.backgroundObjectKey) {
+    throw new ExportPipelineError('SEPARATION_ARTIFACT_MISSING', 'The completed separation has no durable background artifact.');
+  }
+  if (separation.provider !== capabilities.provider || separation.modelDigest !== capabilities.modelDigest) {
+    throw new ExportPipelineError('SEPARATION_RESPONSE_INVALID', 'The separation provider/model identity changed before render.');
+  }
+  const expectedBackground = `${separationObjectPrefix(
+    params.projectId,
+    sourceRevision,
+    capabilities.provider,
+    capabilities.modelDigest,
+  )}background.wav`;
+  if (separation.backgroundObjectKey !== expectedBackground) {
+    throw new ExportPipelineError('SEPARATION_RESPONSE_INVALID', 'The prepared background artifact is outside the canonical project identity.');
+  }
+  return { project: currentProject, backgroundObjectKey: separation.backgroundObjectKey };
 }
 
 export async function runExportPipeline(
@@ -435,9 +548,11 @@ export async function runExportPipeline(
     }
 
     await step.do('check cancellation before export render', ensureActive);
+    const preserve = await resolvePreserveBackground(params, project, deps, step);
+    const renderProject = preserve?.project ?? project;
     await step.do('mark render stage', async () => deps.jobs.setProgress(params!.jobId, 0.72, 'rendering_export'));
 
-    const renderSeconds = Number(project.durationMs) / 1000;
+    const renderSeconds = Number(renderProject.durationMs) / 1000;
     if (!Number.isFinite(renderSeconds) || renderSeconds <= 0) throw new Error('Project duration is missing or invalid for render metering.');
     const renderProvider = 'ffmpeg-container';
     const renderItem = params.modern ? `${params.targetLanguage}:final` : 'final';
@@ -453,8 +568,15 @@ export async function runExportPipeline(
         operationKey: renderKey,
       };
       await deps.usage.record({ ...common, phase: 'started' });
-      const options = params!.modern
-        ? { targetLanguage: params!.targetLanguage, exportId: params!.exportId! }
+      const options: RenderExportOptions | undefined = params!.modern
+        ? preserve
+          ? {
+              targetLanguage: params!.targetLanguage,
+              exportId: params!.exportId!,
+              mixMode: 'preserve_background',
+              backgroundObjectKey: preserve.backgroundObjectKey,
+            }
+          : { targetLanguage: params!.targetLanguage, exportId: params!.exportId! }
         : undefined;
       const result = await withProviderTelemetry(deps.telemetry, {
         requestId: params!.requestId,
@@ -465,8 +587,8 @@ export async function runExportPipeline(
         provider: renderProvider,
         errorCode: 'MEDIA_RENDER_FAILED',
       }, () => options
-        ? deps.media.renderExport(params!.projectId, project.sourceObjectKey!, clips, options)
-        : deps.media.renderExport(params!.projectId, project.sourceObjectKey!, clips));
+        ? deps.media.renderExport(params!.projectId, renderProject.sourceObjectKey!, clips, options)
+        : deps.media.renderExport(params!.projectId, renderProject.sourceObjectKey!, clips));
       const expected = params!.modern
         ? `projects/${params!.projectId}/exports/${params!.targetLanguage}/${params!.exportId}.mp4`
         : null;
@@ -505,6 +627,7 @@ export async function runExportPipeline(
       exportId: null,
       targetLanguage: 'vi' as const,
       output: 'dubbed' as const,
+      mixMode: 'dubbed_only' as const,
     };
     if (isJobCancelledError(error)) {
       if (!effective.modern) {
@@ -518,10 +641,11 @@ export async function runExportPipeline(
     }
 
     const message = errorMessage(error);
+    const code = errorCode(error);
     try {
-      await deps.jobs.fail(effective.jobId, 'EXPORT_FAILED', message);
+      await deps.jobs.fail(effective.jobId, code, message);
       if (effective.modern && effective.exportId && deps.exports) {
-        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, 'EXPORT_FAILED', message);
+        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, code, message);
       } else {
         await deps.projects.setStatus(effective.projectId, effective.userId, 'needs_review');
       }
