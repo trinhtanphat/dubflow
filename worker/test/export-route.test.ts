@@ -82,6 +82,7 @@ describe('export route', () => {
       targetLanguage: 'vi',
       output: 'dubbed',
       audioMode: 'dubbed_only',
+      visualMode: 'standard',
       requestId: undefined,
     } }]);
     expect(calls).toEqual(['export:create', 'job:create', 'project:processing', 'workflow:create']);
