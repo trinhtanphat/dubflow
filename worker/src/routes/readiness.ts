@@ -44,6 +44,12 @@ type ReadinessSchemaRow = {
   provider_media_grants_table: number;
 };
 
+type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+type CloudflareApiEnvelope = {
+  success?: boolean;
+};
+
 const CURRENT_SCHEMA_REVISION = 13 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
@@ -68,16 +74,43 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   );
 }
 
-function mediaStatus(config?: MediaReadinessConfig): { stream: 'ready' | 'unavailable' } | undefined {
-  if (!config) return undefined;
-  const ready = Boolean(
-    config.stream &&
+function completeMediaConfig(config?: MediaReadinessConfig): config is Required<MediaReadinessConfig> {
+  return Boolean(
+    config?.stream &&
     config.accountId?.trim() &&
     config.publicOrigin?.trim() &&
     config.sourceSigningSecret?.trim() &&
     config.streamApiToken?.trim()
   );
-  return { stream: ready ? 'ready' : 'unavailable' };
+}
+
+async function mediaStatus(
+  config: MediaReadinessConfig | undefined,
+  fetchImpl: FetchLike,
+): Promise<{ stream: 'ready' | 'unavailable' } | undefined> {
+  if (!config) return undefined;
+  if (!completeMediaConfig(config)) return { stream: 'unavailable' };
+
+  const accountId = config.accountId.trim();
+  const token = config.streamApiToken.trim();
+  try {
+    const response = await fetchImpl(
+      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/stream?per_page=1`,
+      {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      },
+    );
+    if (!response.ok) return { stream: 'unavailable' };
+
+    const payload = await response.json() as CloudflareApiEnvelope;
+    return { stream: payload?.success === true ? 'ready' : 'unavailable' };
+  } catch {
+    return { stream: 'unavailable' };
+  }
 }
 
 function result(input: Omit<ReadinessResult, 'ready'>, media?: { stream: 'ready' | 'unavailable' }): ReadinessResult {
@@ -89,9 +122,10 @@ export async function checkReadiness(
   db: ReadinessDatabaseLike,
   deepgramApiKey?: string,
   mediaConfig?: MediaReadinessConfig,
+  fetchImpl: FetchLike = fetch,
 ): Promise<ReadinessResult> {
   const asr = asrCapabilities(deepgramApiKey);
-  const media = mediaStatus(mediaConfig);
+  const media = await mediaStatus(mediaConfig, fetchImpl);
   try {
     const row = await db.prepare(`
       SELECT
