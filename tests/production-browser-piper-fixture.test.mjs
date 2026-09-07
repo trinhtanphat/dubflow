@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-// Keep this source-only RED carrier synchronized after PR coordination metadata normalization.
 async function source(path) {
   try {
     return await readFile(new URL(path, import.meta.url), 'utf8');
@@ -19,17 +18,20 @@ const [workflow, runner, packageSource] = await Promise.all([
 
 test('manual production fixture drives the deployed browser Piper lane without paid or deploy coupling', () => {
   assert.match(workflow, /workflow_dispatch/);
-  assert.match(workflow, /playwright-core@1\.63\.0/);
   assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
-  assert.doesNotMatch(workflow, /wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
+  assert.doesNotMatch(workflow, /playwright|puppeteer|selenium|wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
   assert.match(packageSource, /production-browser-piper-fixture\.test\.mjs/);
 });
 
-test('browser fixture uses the real production Studio export path and proves reload durability', () => {
+test('browser fixture uses native CDP on the real production Studio path and proves reload durability', () => {
+  assert.match(runner, /--remote-debugging-port=0/);
+  assert.match(runner, /new WebSocket\s*\(/);
+  assert.match(runner, /Runtime\.enable/);
+  assert.match(runner, /Network\.enable/);
   assert.match(runner, /\/projects\/\$\{encodeURIComponent\(projectId\)\}/);
   assert.match(runner, /data-testid=["']export-current-language["']/);
   assert.match(runner, /exports\/vi/);
-  assert.match(runner, /page\.reload\s*\(/);
+  assert.match(runner, /Page\.reload/);
   assert.match(runner, /PRODUCTION_MEDIA_OUTPUT_PATH/);
-  assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|PAID_/i);
+  assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|PAID_/i);
 });
