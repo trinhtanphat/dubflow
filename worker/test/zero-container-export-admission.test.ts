@@ -42,6 +42,7 @@ describe('zero-container export admission', () => {
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'voice-key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice-id',
+      PAID_ELEVENLABS_ENABLED: 'true',
       MEDIA_SOURCE_SIGNING_SECRET: 'source-secret',
       PUBLIC_ORIGIN: 'https://yupvox.qs3d.site',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); return { id: 'wf1' }; } },
