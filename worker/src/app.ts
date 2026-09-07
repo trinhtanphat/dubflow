@@ -33,6 +33,7 @@ app.get('/api/ready', async (c) => {
   const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY, {
     stream: c.env.STREAM,
     accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+    publicOrigin: c.env.PUBLIC_ORIGIN,
     sourceSigningSecret: c.env.STREAM_SOURCE_SIGNING_SECRET,
     streamApiToken: c.env.CLOUDFLARE_STREAM_API_TOKEN,
   });

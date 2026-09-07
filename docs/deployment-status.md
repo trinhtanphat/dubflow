@@ -33,7 +33,7 @@ Canonical target artifacts include:
 
 Visual lip-sync does **not** re-extract export audio with FFmpeg. Sync Labs receives the already-rendered standard MP4 plus the durable PCM/WAV soundtrack through bounded provider-media grants. Standard MP4 publication completes first and remains durable even if the optional visual operation fails.
 
-Stream write/signing configuration is required for dubbed export. `SYNC_API_KEY` is optional: when absent, standard zero-container dubbing/export stays available while visual lip-sync admission reports unavailable. Secret values are never committed. Source CI does not claim a real external provider is configured.
+Stream write/signing configuration is required for dubbed export. Readiness requires the `STREAM` binding, backend `CLOUDFLARE_ACCOUNT_ID`, canonical `PUBLIC_ORIGIN`, `STREAM_SOURCE_SIGNING_SECRET`, and `CLOUDFLARE_STREAM_API_TOKEN`; the REST token remains required for Stream audio-track publication even though source ingest uses the Workers Stream binding. Dubbing admission also rejects a missing `PUBLIC_ORIGIN` before creating a job so the signed source URL cannot fail later inside the Workflow. `SYNC_API_KEY` is optional: when absent, standard zero-container dubbing/export stays available while visual lip-sync admission reports unavailable. Secret values are never committed. Source CI does not claim a real external provider is configured.
 
 ## Phase 3B usage qualification
 
