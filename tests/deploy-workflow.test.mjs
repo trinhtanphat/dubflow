@@ -23,12 +23,12 @@ test('Cloudflare Workers Builds is the only production deployment lane', () => {
   assert.match(policy, /must not deploy/i);
 });
 
-test('Workers Builds policy documents Stream runtime secrets without Container permissions', () => {
+test('Workers Builds policy documents Stream runtime secrets without requiring Container permissions', () => {
   const policy = fs.readFileSync(policyUrl, 'utf8');
   assert.match(policy, /Cloudflare Stream/i);
   assert.match(policy, /CLOUDFLARE_STREAM_API_TOKEN/);
   assert.match(policy, /STREAM_SOURCE_SIGNING_SECRET/);
   assert.match(policy, /Settings\s*>\s*Builds/i);
-  assert.doesNotMatch(policy, /Containers Edit/i);
+  assert.match(policy, /No `Containers Edit` permission is required/i);
   assert.match(policy, /do not.*GitHub.*deploy/is);
 });
