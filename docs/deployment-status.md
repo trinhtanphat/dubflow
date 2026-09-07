@@ -11,7 +11,7 @@ Production is intentionally split across two Cloudflare accounts.
 
 The public gateway owns no DubFlow database or media state. It forwards `yupvox.qs3d.site` to the exact backend `workers.dev` origin configured as `BACKEND_ORIGIN`.
 
-`main` remains the repository source of truth. GitHub Actions is CI only. Cloudflare Workers Builds remains the backend deployment lane for `trinhtanphat6666`; gateway deployment uses `wrangler.gateway.jsonc` in the zone-owning `trinhtanphat2403` account. See `docs/DEPLOYMENT-POLICY.md` and `docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md`.
+`main` remains the repository source of truth. GitHub Actions is CI only. Cloudflare Workers Builds remains the backend deployment lane for `trinhtanphat6666`; gateway deployment uses `wrangler.gateway.jsonc` in the zone-owning `trinhtanphat2403` account. The historical manual-only GitHub production deployment lane remains removed. See `docs/DEPLOYMENT-POLICY.md` and `docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md`.
 
 ## Containers disabled
 
@@ -31,23 +31,29 @@ Phase 3B retains the durable idempotent usage ledger for ASR, translation, gener
 
 ## Phase 3C observability, rate-limit, and sharing qualification
 
-Phase 3C keeps bounded Analytics Engine telemetry, owner-managed revocable sharing, hash-only bearer-token persistence, Range support, and fail-closed anonymous access. Cross-account routing does not move these backend responsibilities into the gateway account.
+Phase 3C keeps the `dubflow_events` Analytics Engine dataset and the five original isolated admission lanes: `RATE_LIMIT_PROCESS`, `RATE_LIMIT_EXPORT`, `RATE_LIMIT_TRANSLATE`, `RATE_LIMIT_VOICE`, and `RATE_LIMIT_UPLOAD`.
+
+Sharing remains owner-managed and revocable. Invalid, missing, expired, revoked, or wrong anonymous share credentials continue to converge on `SHARE_NOT_FOUND`; raw bearer material is not persisted as public state. Cross-account routing does not move these backend responsibilities into the gateway account.
+
+The historical manual-only GitHub production lane remains removed; source/CI qualification does not prove real provider or media execution. Production runtime status remains **UNQUALIFIED**.
 
 ## Phase 4A translation context qualification
 
-Phase 4A translation context remains **source-qualified only**. Project style/glossary settings are revision-safe and owner scoped. The contextual provider runtime is not proven by source CI and remains **UNQUALIFIED**.
+Phase 4A translation context remains **source-qualified only**. Project style/glossary settings are revision-safe and owner scoped. The contextual model runtime is not proven by source CI, and runtime status remains **UNQUALIFIED**.
 
 ## Phase 4A project-stable diarization qualification
 
-Phase 4A diarization keeps 300-second ASR windows with a 15-second overlap and deterministic conservative speaker reconciliation. Real cross-window provider/media behavior remains **UNQUALIFIED** until a supported live fixture proves it.
+Phase 4A diarization keeps 300-second ASR windows with a 15-second overlap. The canonical stride is 285 seconds (`300 - 15`), preserving the fixed overlap contract. Duplicate suppression and conservative speaker reconciliation remain deterministic across rerun paths.
+
+Production runtime remains **UNQUALIFIED** until a supported real provider/media fixture proves cross-window persisted speaker linkage and safe rerun reconciliation.
 
 ## Phase 4B safe managed voice clone qualification
 
-Phase 4B remains **source/CI qualification only** for managed ElevenLabs IVC enrollment. Consent and ownership boundaries are unchanged. Provider runtime remains **UNQUALIFIED** until a real authorized fixture passes.
+Phase 4B remains **source/CI qualification only** for managed ElevenLabs IVC enrollment. Explicit consent and project ownership boundaries are unchanged. The historical manual-only GitHub production path remains removed; production runtime remains **UNQUALIFIED** until a real authorized IVC fixture passes.
 
 ## Phase 4C multi-language batch export qualification
 
-Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`.
+Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`. Vietnamese remains available for backward compatibility, including the legacy `vi` dubbing path, while target-language variants remain independently persisted.
 
 Canonical target artifact paths remain:
 
@@ -56,6 +62,8 @@ Canonical target artifact paths remain:
 - `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`
 
 `RATE_LIMIT_BATCH_EXPORT` remains the dedicated batch admission lane. Multi-language runtime that depends on final FFmpeg rendering is **UNQUALIFIED** while Containers are disabled.
+
+Production runtime remains **UNQUALIFIED** until a real authorized provider/media fixture proves at least two distinct target languages end-to-end through translation, TTS, final render, retrieval, and concrete export sharing.
 
 ## Phase 4D hybrid audio treatment qualification
 
