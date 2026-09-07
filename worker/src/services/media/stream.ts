@@ -219,10 +219,19 @@ export class StreamMediaService {
     return payload.result;
   }
 
+  private async listAudioTracks(sourceId: string): Promise<StreamAudioTrack[]> {
+    const result = await this.streamApi<{ audio?: StreamAudioTrack[] }>(`${encodeURIComponent(sourceId)}/audio`);
+    return Array.isArray(result.audio) ? result.audio : [];
+  }
+
+  private async findAudioTrackByLabel(sourceId: string, label: string): Promise<StreamAudioTrack | null> {
+    const tracks = await this.listAudioTracks(sourceId);
+    return tracks.find((track) => track.label === label) ?? null;
+  }
+
   private async waitForAudioTrack(sourceId: string, audioTrackUid: string): Promise<StreamAudioTrack> {
     for (let attempt = 0; attempt < MAX_READY_POLLS; attempt += 1) {
-      const result = await this.streamApi<{ audio?: StreamAudioTrack[] }>(`${encodeURIComponent(sourceId)}/audio`);
-      const track = result.audio?.find((item) => item.uid === audioTrackUid);
+      const track = (await this.listAudioTracks(sourceId)).find((item) => item.uid === audioTrackUid);
       if (track && audioTrackFailure(track)) {
         throw new Error('STREAM_AUDIO_TRACK_FAILED: Stream audio-track processing failed.');
       }
@@ -261,14 +270,19 @@ export class StreamMediaService {
   async publishDubbedExport(input: PublishDubbedExportInput): Promise<{ exportObjectKey: string; audioTrackUid: string }> {
     if (!this.deps.bucket?.put) throw new Error('STREAM_DOWNLOAD_FAILED: R2 put is unavailable.');
     const source = await this.ensureVideoSource(input.projectId, input.userId, input.sourceObjectKey);
-    const soundtrackUrl = await this.signedObjectUrl(input.projectId, input.soundtrackObjectKey);
     const label = `dubflow-${input.targetLanguage}-${input.exportId}`;
-    const copied = await this.streamApi<StreamAudioTrack>(`${encodeURIComponent(source.sourceId)}/audio/copy`, {
-      method: 'POST',
-      body: JSON.stringify({ label, url: soundtrackUrl }),
-    });
-    const audioTrackUid = copied.uid?.trim();
-    if (!audioTrackUid) throw new Error('STREAM_AUDIO_TRACK_FAILED: Stream audio copy returned no track uid.');
+    const existing = await this.findAudioTrackByLabel(source.sourceId, label);
+    let audioTrackUid = existing?.uid?.trim() ?? '';
+
+    if (!audioTrackUid) {
+      const soundtrackUrl = await this.signedObjectUrl(input.projectId, input.soundtrackObjectKey);
+      const copied = await this.streamApi<StreamAudioTrack>(`${encodeURIComponent(source.sourceId)}/audio/copy`, {
+        method: 'POST',
+        body: JSON.stringify({ label, url: soundtrackUrl }),
+      });
+      audioTrackUid = copied.uid?.trim() ?? '';
+      if (!audioTrackUid) throw new Error('STREAM_AUDIO_TRACK_FAILED: Stream audio copy returned no track uid.');
+    }
 
     await this.waitForAudioTrack(source.sourceId, audioTrackUid);
     await this.streamApi<StreamAudioTrack>(
