@@ -7,7 +7,7 @@ const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.ur
 const deploymentPolicy = fs.readFileSync(new URL('../docs/DEPLOYMENT-POLICY.md', import.meta.url), 'utf8');
 const deploymentStatus = fs.readFileSync(new URL('../docs/deployment-status.md', import.meta.url), 'utf8');
 
-const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
+const productionAccountId = '50afb4fd3c4c7a1f3e1bdb7f22d4af7f';
 
 function documentedProductionAccount(text, label) {
   const match = text.match(/(?:Cloudflare production account|production account|Cloudflare account)\s*:?\s*`([a-f0-9]{32})`/i);
