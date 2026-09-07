@@ -449,21 +449,19 @@ async function launchExportThroughStudio(browser, origin, projectId) {
     browser.cdp,
     `(() => {
       const button = document.querySelector('[data-testid="export-current-language"]');
-      if (!button) return null;
-      return { text: button.textContent?.trim() ?? '', disabled: Boolean(button.disabled) };
+      if (!button || button.disabled) return null;
+      return { text: button.textContent?.trim() ?? '', disabled: false };
     })()`,
-    'Export current language control',
+    'enabled Export current language control',
     { attempts: 180, delayMs: 1000 },
   );
   if (!buttonState.text.includes('Export current language')) {
     throw new Error(`Unexpected production export control: ${JSON.stringify(buttonState)}`);
   }
-  if (buttonState.disabled) {
-    throw new Error(`Production browser export control stayed disabled: ${JSON.stringify(buttonState)}; diagnostics=${JSON.stringify(browser.diagnostics)}`);
-  }
 
   const expectedExportUrl = `${origin}/api/projects/${encodeURIComponent(projectId)}/exports/vi`;
   const observer = createExportResponseObserver(browser.cdp, expectedExportUrl);
+  let observerSettled = false;
   try {
     const clicked = await browser.cdp.evaluate(`(() => {
       const button = document.querySelector('[data-testid="export-current-language"]');
@@ -473,10 +471,12 @@ async function launchExportThroughStudio(browser, origin, projectId) {
     })()`);
     if (!clicked) throw new Error('Unable to trigger Export current language through deployed Studio.');
 
+    const observedExport = observer.promise.finally(() => { observerSettled = true; });
     const launchResult = await Promise.race([
-      observer.promise,
+      observedExport,
       (async () => {
         for (let attempt = 1; attempt <= 360; attempt += 1) {
+          if (observerSettled) return null;
           const uiError = await currentUiError(browser.cdp);
           if (uiError) throw new Error(`Production browser Piper failed closed: ${uiError}`);
           await sleep(2000);
@@ -489,6 +489,7 @@ async function launchExportThroughStudio(browser, origin, projectId) {
     }
     return launchResult;
   } finally {
+    observerSettled = true;
     observer.cancel();
   }
 }
@@ -512,7 +513,11 @@ export async function runProductionBrowserPiperFixture({
   fixturePath = process.env.PRODUCTION_MEDIA_FIXTURE_PATH,
   outputPath = process.env.PRODUCTION_MEDIA_OUTPUT_PATH,
   browserExecutable = process.env.PRODUCTION_BROWSER_EXECUTABLE,
+  zeroChargeVerified = process.env.PRODUCTION_ZERO_CHARGE_VERIFIED,
 } = {}) {
+  if (String(zeroChargeVerified ?? '').trim().toLowerCase() !== 'true') {
+    throw new Error('ZERO_CHARGE_RUNTIME_UNVERIFIED: refuse production browser fixture before any production request.');
+  }
   if (!fixturePath) throw new Error('PRODUCTION_MEDIA_FIXTURE_PATH is required.');
   if (!outputPath) throw new Error('PRODUCTION_MEDIA_OUTPUT_PATH is required.');
   const media = fs.readFileSync(fixturePath);
