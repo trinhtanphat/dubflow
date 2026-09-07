@@ -10,6 +10,14 @@ const unconfigured = {
   cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: false },
 };
 
+const configured = {
+  configured: true,
+  languages: ['vi', 'en'] as const,
+  cloning: false,
+  preview: false,
+  cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: false },
+};
+
 function render({
   current = 'vi' as ('vi' | 'en'),
   selected = ['vi'] as ('vi' | 'en')[],
@@ -57,6 +65,13 @@ describe('Vietnamese browser client voice admission', () => {
     expect(dubbedAvailability(unconfigured, 'vi', false).allowed).toBe(false);
     const html = render();
     expect(html).toMatch(/data-testid="export-current-language"[^>]*disabled/);
+  });
+
+  it('does not admit vi through a configured server provider when the zero-cost client lane is unavailable', () => {
+    expect(dubbedAvailability(configured, 'vi', false)).toEqual({
+      allowed: false,
+      reason: 'Giọng Việt cục bộ chưa khả dụng trong trình duyệt này.',
+    });
   });
 
   it('still blocks a mixed batch when a selected non-vi target lacks server capability', () => {
