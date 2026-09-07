@@ -7,6 +7,8 @@ import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
+import { createR2MediaSource } from '../services/media/r2-mediabunny-source';
+import { assertRemuxableSource } from '../services/media/r2-remux';
 import { R2SourceMediaService } from '../services/media/r2-source';
 import { asrCapabilities, createAsrProvider } from '../services/asr/router';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
@@ -33,6 +35,17 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
       signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET
         ?? this.env.STREAM_SOURCE_SIGNING_SECRET
         ?? '',
+      durationProbe: async (sourceObjectKey) => {
+        if (!this.env.MEDIA.head) {
+          throw new Error('R2_SOURCE_HEAD_UNAVAILABLE: R2 head is unavailable for media duration probing.');
+        }
+        const mediaSource = await createR2MediaSource({
+          head: (key) => this.env.MEDIA.head!(key),
+          get: (key, options) => this.env.MEDIA.get(key, options),
+        }, sourceObjectKey);
+        const sourceInfo = await assertRemuxableSource(mediaSource);
+        return Math.round(sourceInfo.durationSeconds * 1000);
+      },
     });
 
     return runDubbingPipeline(
