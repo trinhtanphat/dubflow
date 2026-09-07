@@ -7,7 +7,7 @@ Canonical public hostname: `yupvox.qs3d.site`
 Production is intentionally split across two Cloudflare accounts.
 
 - Public zone/gateway: `trinhtanphat2403` — `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. This account owns `qs3d.site`, the `yupvox.qs3d.site` custom domain, TLS, and the thin `dubflow-gateway` Worker.
-- Backend/state: `trinhtanphat6666` — `6c5207813df3d5b83b9508125e0e9e12`. This account owns the `dubflow` backend Worker and its persisted production data in D1/R2 together with Workers AI, Analytics Engine, Workflows, and rate-limit resources.
+- Backend/state: `trinhtanphat6666` — `6c5207813df3d5b83b9508125e0e9e12`. This account owns the `dubflow` backend Worker and its persisted production data in D1/R2 together with Workers AI, Cloudflare Stream, Analytics Engine, Workflows, and rate-limit resources.
 
 The public gateway owns no DubFlow database or media state. It forwards `yupvox.qs3d.site` to the exact backend `workers.dev` origin configured as `BACKEND_ORIGIN`.
 
@@ -17,11 +17,19 @@ The public gateway owns no DubFlow database or media state. It forwards `yupvox.
 
 Cloudflare **Containers are disabled in production**. The production backend config does not declare Container resources, Container-backed Durable Objects, or Container exports. `Containers Edit` is not required for this topology.
 
-The FFmpeg and Demucs adapters remain in source as optional implementation/test material, but there is no deployed `FFMPEG_CONTAINER` or `SEPARATOR_CONTAINER` binding. Media operations that require those bindings remain fail-closed. A GREEN source test does not mean a paid Container is running.
+The FFmpeg and Demucs adapters remain in source as optional implementation/test material, but there is no deployed `FFMPEG_CONTAINER` or `SEPARATOR_CONTAINER` binding. Media operations that still require those bindings remain fail-closed. A GREEN source test does not mean a paid Container is running.
+
+## Zero-container Stream dubbing path
+
+The primary production dubbing ingest path is Cloudflare Stream, not the retired FFmpeg Container path. `wrangler.jsonc` binds `STREAM`; source media remains canonical in private R2 and is exposed to Stream only through a short-lived HMAC-signed `/api/stream-source/{projectId}` URL with range support. Stream provenance is persisted against the exact source object so retries can safely reuse the same ingest when the source has not changed.
+
+Dubbing admission fails closed before creating a job when the Stream binding or source-signing secret is missing. Deepgram Nova-3 can transcribe the Stream-generated HTTPS audio URL remotely without buffering the full source into the Worker. A bounded direct Workers AI fallback is allowed only for short payloads; long-form media without a remote-capable ASR provider fails explicitly instead of falling back to a Container.
+
+Migration `0013_stream_media.sql` adds nullable Stream provenance to projects and immutable project export attempts and advances the current deployment readiness target to schema revision **13**. Media readiness additionally requires the `STREAM` binding plus `CLOUDFLARE_ACCOUNT_ID`, `STREAM_SOURCE_SIGNING_SECRET`, and `CLOUDFLARE_STREAM_API_TOKEN`. `PUBLIC_ORIGIN` remains pinned to `https://yupvox.qs3d.site`. The two credential values are deployment secrets and must not be committed to Git.
 
 ## Runtime qualification boundary
 
-Worker-native project/state/UI/translation/observability paths can be deployed on the backend account. Media processing that requires the absent FFmpeg Container and dialogue separation that requires the absent Demucs Container remain **UNQUALIFIED** and unavailable until a different qualified media runtime is implemented.
+Worker-native project/state/UI/translation/observability paths and the zero-container Stream dubbing source path can be deployed on the backend account. Final rendering or dialogue-separation operations that still require the absent FFmpeg/Demucs Container bindings remain **UNQUALIFIED** and fail closed until a different qualified runtime covers those operations.
 
 The cross-account gateway itself does not upgrade provider/media qualification. Public and backend readiness must be checked independently during rollout.
 
@@ -35,7 +43,7 @@ Phase 3C keeps the `dubflow_events` Analytics Engine dataset and the five origin
 
 Sharing remains owner-managed and revocable. Invalid, missing, expired, revoked, or wrong anonymous share credentials continue to converge on `SHARE_NOT_FOUND`; raw bearer material is not persisted as public state. Cross-account routing does not move these backend responsibilities into the gateway account.
 
-The historical manual-only GitHub production lane remains removed; source/CI qualification does not prove real provider or media execution. Production runtime status remains **UNQUALIFIED**.
+The historical manual-only GitHub production lane remains removed; source/CI qualification does not prove real provider or media execution. Production runtime status remains **UNQUALIFIED** for capabilities that have not passed a real supported fixture.
 
 ## Phase 4A translation context qualification
 
@@ -43,9 +51,9 @@ Phase 4A translation context remains **source-qualified only**. Project style/gl
 
 ## Phase 4A project-stable diarization qualification
 
-Phase 4A diarization keeps 300-second ASR windows with a 15-second overlap. The canonical stride is 285 seconds (`300 - 15`), preserving the fixed overlap contract. Duplicate suppression and conservative speaker reconciliation remain deterministic across rerun paths.
+The retained source/test fallback contract keeps 300-second ASR windows with a 15-second overlap and a canonical 285-second stride (`300 - 15`). Duplicate suppression and conservative speaker reconciliation remain deterministic across rerun paths.
 
-Production runtime remains **UNQUALIFIED** until a supported real provider/media fixture proves cross-window persisted speaker linkage and safe rerun reconciliation.
+For production zero-container dubbing, Stream remote ASR supersedes FFmpeg chunk extraction and contributes one deterministic zero-overlap stitch input for the source. Production runtime remains **UNQUALIFIED** until a supported real Stream/provider fixture proves persisted speaker linkage and safe rerun reconciliation end-to-end.
 
 ## Phase 4B safe managed voice clone qualification
 
@@ -75,7 +83,7 @@ Cloudflare Workers Builds can deploy the account-6666 Worker without publishing 
 
 ## Phase 4E optional visual lip-sync qualification
 
-Phase 4E is **source/CI qualification only** for optional visual lip-sync. Migration `0012_visual_lipsync.sql` advances the source readiness target to schema revision **12** and persists visual processing state plus bounded provider-media grant authority.
+Phase 4E is **source/CI qualification only** for optional visual lip-sync. Migration `0012_visual_lipsync.sql` introduced the visual processing schema at schema revision **12** and persists visual processing state plus bounded provider-media grant authority. The later Stream provenance migration advances the current overall readiness target to revision **13** without rewriting migration 0012.
 
 The canonical standard export remains `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`; a successful visual result remains separate as `projects/{projectId}/exports/{targetLanguage}/{exportId}.lipsync.mp4`.
 
@@ -83,16 +91,17 @@ Sync Labs remains an optional configured provider. `SYNC_API_KEY` alone means on
 
 Production runtime remains **UNQUALIFIED** until a real supported Sync provider/media fixture completes end-to-end from a normal dubbed export through short-lived provider media delivery, Sync generation, canonical R2 visual publication, persisted completion state, and owner download. After that evidence is reviewed, an operator may explicitly set `SYNC_LIPSYNC_QUALIFIED=true`; until then UI/API/Workflow remain fail-closed even if the Sync credential exists.
 
-This cross-account deployment change does not preclaim Phase 4E runtime qualification.
+This zero-container dubbing change does not preclaim Phase 4E runtime qualification.
 
 ## Deployment verification
 
 The safe rollout order is:
 
 1. Merge a fully green commit to `main`.
-2. Deploy the backend in `trinhtanphat6666` with `wrangler.jsonc` and confirm its exact `workers.dev` origin.
-3. Verify backend `/api/ready` directly.
-4. Configure `BACKEND_ORIGIN` on `dubflow-gateway` and deploy `wrangler.gateway.jsonc` in `trinhtanphat2403`.
-5. Verify `https://yupvox.qs3d.site/api/ready` reaches the intended backend state/schema.
+2. Ensure `STREAM_SOURCE_SIGNING_SECRET` and `CLOUDFLARE_STREAM_API_TOKEN` are configured as backend Worker secrets in `trinhtanphat6666`.
+3. Deploy the backend in `trinhtanphat6666` with `wrangler.jsonc`; Workers Builds applies migration `0013_stream_media.sql` before readiness verification.
+4. Verify the backend `/api/ready` directly returns schema revision 13 and `media.stream = "ready"`.
+5. Confirm `BACKEND_ORIGIN` on `dubflow-gateway` still targets the exact backend `workers.dev` origin in `trinhtanphat2403`.
+6. Verify `https://yupvox.qs3d.site/api/ready` reaches the intended backend state/schema.
 
-No successful deploy, source CI result, screenshot, or Wrangler dry-run alone upgrades provider/media runtime from **UNQUALIFIED**.
+No successful deploy, source CI result, screenshot, or Wrangler dry-run alone upgrades an unqualified provider capability to **QUALIFIED**.

@@ -12,9 +12,14 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "vars": { "SEPARATION_RUNTIME_QUALIFIED": "false" },
+  "vars": {
+    "SEPARATION_RUNTIME_QUALIFIED": "false",
+    "CLOUDFLARE_ACCOUNT_ID": "6c5207813df3d5b83b9508125e0e9e12",
+    "PUBLIC_ORIGIN": "https://yupvox.qs3d.site"
+  },
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA" }],
+  "stream": { "binding": "STREAM" },
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "dubflow_events" }],
   "ratelimits": [
     { "name": "RATE_LIMIT_PROCESS", "namespace_id": "31001", "simple": { "limit": 4, "period": 60 } },
