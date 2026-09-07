@@ -42,10 +42,11 @@ describe('checkReadiness', () => {
         speakerDiarization: 'configured',
         speakerIdentityScope: 'chunk',
       },
+      inference: { workersAI: 'disabled' },
     });
   });
 
-  it('keeps the service ready on Workers AI when only the Deepgram secret exists', async () => {
+  it('keeps infrastructure ready but reports ASR unavailable when only the Deepgram secret exists', async () => {
     const db = {
       prepare() {
         return {
@@ -62,14 +63,15 @@ describe('checkReadiness', () => {
       database: 'ready',
       schemaRevision: 14,
       asr: {
-        provider: 'workers-ai-whisper-large-v3-turbo',
+        provider: 'unavailable',
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
       },
+      inference: { workersAI: 'disabled' },
     });
   });
 
-  it('keeps the service ready on the Workers AI fallback but reports diarization unavailable', async () => {
+  it('keeps the service ready on Workers AI only after explicit paid opt-in while reporting diarization unavailable', async () => {
     const db = {
       prepare() {
         return {
@@ -80,7 +82,7 @@ describe('checkReadiness', () => {
       },
     };
 
-    await expect(checkReadiness(db)).resolves.toEqual({
+    await expect(checkReadiness(db, undefined, undefined, undefined, 'true')).resolves.toEqual({
       ready: true,
       service: 'dubflow',
       database: 'ready',
@@ -90,6 +92,7 @@ describe('checkReadiness', () => {
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
       },
+      inference: { workersAI: 'enabled' },
     });
   });
 
@@ -131,6 +134,7 @@ describe('checkReadiness', () => {
         speakerDiarization: 'configured',
         speakerIdentityScope: 'chunk',
       },
+      inference: { workersAI: 'disabled' },
     });
   });
 
@@ -155,10 +159,11 @@ describe('checkReadiness', () => {
         speakerDiarization: 'configured',
         speakerIdentityScope: 'chunk',
       },
+      inference: { workersAI: 'disabled' },
     });
   });
 
-  it('fails closed when D1 is unavailable while still reporting the fallback capability', async () => {
+  it('fails closed when D1 is unavailable while paid inference remains disabled', async () => {
     const db = {
       prepare() {
         return {
@@ -175,10 +180,11 @@ describe('checkReadiness', () => {
       database: 'unavailable',
       schemaRevision: null,
       asr: {
-        provider: 'workers-ai-whisper-large-v3-turbo',
+        provider: 'unavailable',
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
       },
+      inference: { workersAI: 'disabled' },
     });
   });
 });
