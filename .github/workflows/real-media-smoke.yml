@@ -1,0 +1,63 @@
+name: Real media production smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type RUN_LIVE_MEDIA_SMOKE to run paid/quota-consuming production providers
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Require explicit live confirmation
+        env:
+          LIVE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [ "$LIVE_CONFIRMATION" != "RUN_LIVE_MEDIA_SMOKE" ]; then
+            echo "Refusing live production smoke without exact RUN_LIVE_MEDIA_SMOKE confirmation."
+            exit 1
+          fi
+
+      - name: Install fixture tools
+        run: sudo apt-get update && sudo apt-get install -y espeak-ng ffmpeg
+
+      - name: Generate short spoken-English MP4
+        run: |
+          espeak-ng -w /tmp/smoke.wav 'Hello from the DubFlow real media production smoke test.'
+          ffmpeg -y \
+            -f lavfi -i color=c=black:s=640x360:r=24 \
+            -i /tmp/smoke.wav \
+            -shortest \
+            -c:v libx264 -pix_fmt yuv420p \
+            -c:a aac \
+            /tmp/real-media-smoke.mp4
+          test -s /tmp/real-media-smoke.mp4
+
+      - name: Run production smoke
+        env:
+          SMOKE_MEDIA_PATH: /tmp/real-media-smoke.mp4
+          SMOKE_SUMMARY_PATH: real-media-smoke-summary.json
+        run: node scripts/real-media-smoke.mjs 2>&1 | tee real-media-smoke.log
+
+      - name: Upload production smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-media-production-smoke-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            real-media-smoke-summary.json
+            real-media-smoke.log
