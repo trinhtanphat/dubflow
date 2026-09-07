@@ -12,6 +12,7 @@ import {
   type VoiceClone,
   type VoiceCloneStore,
 } from '../db/voice-clones';
+import { paidElevenLabsEnabled } from '../services/paid-provider-policy';
 import { ElevenLabsVoiceCloneProvider } from '../services/voice-clone/elevenlabs';
 import {
   VOICE_CLONE_CONSENT_VERSION,
@@ -55,7 +56,7 @@ function assertCloneCanAcceptSample(clone: VoiceClone): void {
 }
 
 function providerConfigured(env: Env): boolean {
-  return Boolean(env.ELEVENLABS_API_KEY?.trim());
+  return Boolean(paidElevenLabsEnabled(env) && env.ELEVENLABS_API_KEY?.trim());
 }
 
 function routeError(error: unknown): { code: string; message: string; status: 400 | 404 | 409 | 500 | 502 | 503 } {
@@ -208,6 +209,9 @@ export function createVoiceCloneRoutes(
       const clone = await store.get(projectId, cloneId, userId);
       if (!clone) throw new VoiceCloneRouteError('VOICE_CLONE_NOT_FOUND', 'Voice clone not found.', 404);
       if (clone.status === 'deleted') return c.json(clone);
+      if (clone.providerVoiceId && !providerConfigured(c.env)) {
+        throw new VoiceCloneRouteError('VOICE_CLONE_PROVIDER_UNCONFIGURED', 'Voice clone provider is not configured.', 503);
+      }
 
       await store.markDeleting(projectId, cloneId, userId);
 
