@@ -146,27 +146,6 @@ export async function runVisualLipSync(
       throw new LipSyncProviderError('LIP_SYNC_INPUT_INVALID', 'Dubbed audio sidecar has an invalid object key.');
     }
 
-    const expiresAt = new Date(now().getTime() + GRANT_TTL_MS).toISOString();
-    const videoToken = await step.do('create visual lip-sync video token', makeToken);
-    const videoGrant = await step.do('create visual lip-sync video grant', () => deps.providerMediaGrants.create({
-      projectId: context.projectId,
-      userId: context.userId,
-      objectKey: context.standardObjectKey,
-      tokenHash: videoToken.tokenHash,
-      expiresAt,
-    }));
-    grantIds.push(videoGrant.id);
-
-    const audioToken = await step.do('create visual lip-sync audio token', makeToken);
-    const audioGrant = await step.do('create visual lip-sync audio grant', () => deps.providerMediaGrants.create({
-      projectId: context.projectId,
-      userId: context.userId,
-      objectKey: audioObjectKey,
-      tokenHash: audioToken.tokenHash,
-      expiresAt,
-    }));
-    grantIds.push(audioGrant.id);
-
     await step.do('persist visual lip-sync processing state', () => deps.exports.setLipSyncState(
       context.projectId,
       context.exportId,
@@ -188,18 +167,56 @@ export async function runVisualLipSync(
     }
 
     await step.do('check cancellation before visual lip-sync provider', ensureActive);
-    const result = await step.do('render visual lip-sync', () => withProviderTelemetry(deps.telemetry, {
-      requestId: context.requestId,
-      actorId: context.userId,
-      projectId: context.projectId,
-      jobId: context.jobId,
-      operation: 'lip_sync',
-      provider,
-      errorCode: 'LIP_SYNC_FAILED',
-    }, () => deps.lipSync.render({
-      videoUrl: providerMediaUrl(origin, videoGrant.id, videoToken.token),
-      audioUrl: providerMediaUrl(origin, audioGrant.id, audioToken.token),
-    })));
+    const submission = await step.do('render visual lip-sync', async () => {
+      const localGrantIds: string[] = [];
+      try {
+        const expiresAt = new Date(now().getTime() + GRANT_TTL_MS).toISOString();
+        const videoToken = await makeToken();
+        const videoGrant = await deps.providerMediaGrants.create({
+          projectId: context.projectId,
+          userId: context.userId,
+          objectKey: context.standardObjectKey,
+          tokenHash: videoToken.tokenHash,
+          expiresAt,
+        });
+        localGrantIds.push(videoGrant.id);
+
+        const audioToken = await makeToken();
+        const audioGrant = await deps.providerMediaGrants.create({
+          projectId: context.projectId,
+          userId: context.userId,
+          objectKey: audioObjectKey,
+          tokenHash: audioToken.tokenHash,
+          expiresAt,
+        });
+        localGrantIds.push(audioGrant.id);
+
+        const result = await withProviderTelemetry(deps.telemetry, {
+          requestId: context.requestId,
+          actorId: context.userId,
+          projectId: context.projectId,
+          jobId: context.jobId,
+          operation: 'lip_sync',
+          provider,
+          errorCode: 'LIP_SYNC_FAILED',
+        }, () => deps.lipSync.render({
+          videoUrl: providerMediaUrl(origin, videoGrant.id, videoToken.token),
+          audioUrl: providerMediaUrl(origin, audioGrant.id, audioToken.token),
+        }));
+        return { result, grantIds: localGrantIds };
+      } catch (error) {
+        for (const grantId of localGrantIds) {
+          try {
+            await deps.providerMediaGrants.expire(grantId, now());
+          } catch {
+            // Best-effort cleanup must not replace the provider failure.
+          }
+        }
+        throw error;
+      }
+    });
+    grantIds.push(...submission.grantIds);
+    const result = submission.result;
     if (result.provider !== provider || !result.providerJobId.trim()) {
       throw new LipSyncProviderError('LIP_SYNC_RESPONSE_INVALID', 'Visual lip-sync provider returned invalid job metadata.');
     }
