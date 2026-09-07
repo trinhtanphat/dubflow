@@ -1,6 +1,7 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import type { WorkflowEvent, WorkflowStep } from 'cloudflare:workers';
 import type { Env } from '../env';
+import { AudioSeparationRepository } from '../db/audio-separation';
 import { ProjectRepository } from '../db/projects';
 import { JobRepository } from '../db/jobs';
 import { SegmentRepository } from '../db/segments';
@@ -10,6 +11,7 @@ import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
 import { ContainerMediaProcessor } from '../services/media/container';
+import { separationCapabilities } from '../services/separation/config';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
@@ -24,6 +26,8 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         segments: new SegmentRepository(this.env.DB),
         translations: new SegmentTranslationRepository(this.env.DB),
         exports: new ProjectExportRepository(this.env.DB),
+        separations: new AudioSeparationRepository(this.env.DB),
+        separationCapabilities: separationCapabilities(this.env),
         speakers: new SpeakerRepository(this.env.DB),
         bucket: this.env.MEDIA,
         voice: new ElevenLabsVoiceProvider(
