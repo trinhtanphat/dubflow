@@ -6,6 +6,8 @@ import {
   type PiperWorkerResponse,
 } from './browserPiperProtocol';
 
+const QUALIFIED_VIETNAMESE_VOICE: 'vi_VN-vais1000-medium' = VIETNAMESE_PIPER_VOICE;
+
 const workerScope = self as unknown as {
   postMessage(message: PiperWorkerResponse, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent<PiperWorkerRequest>) => void) | null;
@@ -24,7 +26,7 @@ function postProgress(progress: { loaded: number; total: number }, requestId?: s
 
 function ensureReady(): Promise<void> {
   if (!readyPromise) {
-    readyPromise = tts.download(VIETNAMESE_PIPER_VOICE, (progress) => postProgress(progress));
+    readyPromise = tts.download(QUALIFIED_VIETNAMESE_VOICE, (progress) => postProgress(progress));
   }
   return readyPromise;
 }
@@ -54,7 +56,7 @@ workerScope.onmessage = (event) => {
 
   void ensureReady()
     .then(() => tts.predict(
-      { text, voiceId: VIETNAMESE_PIPER_VOICE },
+      { text, voiceId: QUALIFIED_VIETNAMESE_VOICE },
       (progress) => postProgress(progress, requestId),
     ))
     .then((wav) => wav.arrayBuffer())
