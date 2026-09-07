@@ -21,11 +21,28 @@ type StreamProjectStore = {
   ): Promise<void>;
 };
 
+type StreamExportAsset = {
+  streamVideoUid?: string | null;
+  streamSourceObjectKey?: string | null;
+};
+
+type StreamExportAssetStore = {
+  get(projectId: string, exportId: string, userId: string): Promise<StreamExportAsset | null>;
+  setStreamProvenance(
+    projectId: string,
+    exportId: string,
+    userId: string,
+    sourceObjectKey: string,
+    videoUid: string,
+  ): Promise<void>;
+};
+
 type WaitLike = (milliseconds: number) => Promise<void>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 type StreamMediaServiceDeps = {
   projects: StreamProjectStore;
+  exportAssets?: StreamExportAssetStore;
   stream: StreamBindingLike;
   bucket?: Pick<R2BucketLike, 'put'>;
   publicOrigin: string;
@@ -109,7 +126,7 @@ export class StreamMediaService {
     this.fetcher = deps.fetcher ?? fetch;
   }
 
-  private async signedObjectUrl(projectId: string, objectKey: string): Promise<string> {
+  private async signedObjectUrl(projectId: string, objectKey: string, renderId?: string): Promise<string> {
     const origin = this.deps.publicOrigin.trim();
     if (!origin) throw new Error('STREAM_BINDING_UNAVAILABLE: Public origin is missing.');
     const expires = this.nowSeconds() + SOURCE_URL_TTL_SECONDS;
@@ -123,6 +140,7 @@ export class StreamMediaService {
     url.searchParams.set('key', objectKey);
     url.searchParams.set('expires', String(expires));
     url.searchParams.set('signature', signature);
+    if (renderId) url.searchParams.set('render', renderId);
     return url.toString();
   }
 
@@ -138,32 +156,39 @@ export class StreamMediaService {
     throw new Error('STREAM_NOT_READY: Cloudflare Stream source did not become ready in time.');
   }
 
-  private async ensureVideoSource(projectId: string, userId: string, sourceObjectKey: string): Promise<{ sourceId: string; durationMs: number }> {
+  private async assertCurrentProjectSource(projectId: string, userId: string, sourceObjectKey: string): Promise<StreamProject> {
     const project = await this.deps.projects.getByIdForUser(projectId, userId);
     if (!project) throw new Error('Project not found.');
     if (!sourceObjectKey || project.sourceObjectKey !== sourceObjectKey) {
       throw new Error('STREAM_INGEST_FAILED: Project source media changed before Stream ingest.');
     }
+    return project;
+  }
 
+  private async uploadStreamSource(projectId: string, sourceObjectKey: string, renderId?: string): Promise<string> {
+    const sourceUrl = await this.signedObjectUrl(projectId, sourceObjectKey, renderId);
+    let uploaded: StreamVideoLike;
+    try {
+      uploaded = await this.deps.stream.upload(sourceUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Cloudflare Stream ingest failed.';
+      throw new Error(`STREAM_INGEST_FAILED: ${message}`);
+    }
+    const sourceId = uploaded.id?.trim() ?? '';
+    if (!sourceId) throw new Error('STREAM_INGEST_FAILED: Stream ingest returned no video id.');
+    return sourceId;
+  }
+
+  private async ensureVideoSource(projectId: string, userId: string, sourceObjectKey: string): Promise<{ sourceId: string; durationMs: number }> {
+    const project = await this.assertCurrentProjectSource(projectId, userId, sourceObjectKey);
     const reusable = Boolean(
       project.streamVideoUid
       && project.streamSourceObjectKey === sourceObjectKey,
     );
 
-    let sourceId = reusable ? project.streamVideoUid! : '';
-    if (!sourceId) {
-      const sourceUrl = await this.signedObjectUrl(projectId, sourceObjectKey);
-      let uploaded: StreamVideoLike;
-      try {
-        uploaded = await this.deps.stream.upload(sourceUrl);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Cloudflare Stream ingest failed.';
-        throw new Error(`STREAM_INGEST_FAILED: ${message}`);
-      }
-      sourceId = uploaded.id?.trim();
-      if (!sourceId) throw new Error('STREAM_INGEST_FAILED: Stream ingest returned no video id.');
-    }
-
+    const sourceId = reusable
+      ? project.streamVideoUid!
+      : await this.uploadStreamSource(projectId, sourceObjectKey);
     const video = await this.waitForReady(sourceId);
     if (!reusable) {
       await this.deps.projects.setStreamProvenance(
@@ -175,6 +200,43 @@ export class StreamMediaService {
       );
     }
     return { sourceId, durationMs: durationMs(video) };
+  }
+
+  private async ensureExportVideo(input: PublishDubbedExportInput): Promise<string> {
+    await this.assertCurrentProjectSource(input.projectId, input.userId, input.sourceObjectKey);
+    const store = this.deps.exportAssets;
+    const durable = store && input.exportId !== 'legacy'
+      ? await store.get(input.projectId, input.exportId, input.userId)
+      : null;
+    if (store && input.exportId !== 'legacy' && !durable) {
+      throw new Error('STREAM_INGEST_FAILED: Export attempt is missing.');
+    }
+
+    const reusable = Boolean(
+      durable?.streamVideoUid
+      && durable.streamSourceObjectKey === input.sourceObjectKey,
+    );
+    if (reusable) {
+      const sourceId = durable!.streamVideoUid!;
+      await this.waitForReady(sourceId);
+      return sourceId;
+    }
+
+    const renderId = input.exportId === 'legacy'
+      ? `legacy-${crypto.randomUUID()}`
+      : input.exportId;
+    const sourceId = await this.uploadStreamSource(input.projectId, input.sourceObjectKey, renderId);
+    if (store && durable) {
+      await store.setStreamProvenance(
+        input.projectId,
+        input.exportId,
+        input.userId,
+        input.sourceObjectKey,
+        sourceId,
+      );
+    }
+    await this.waitForReady(sourceId);
+    return sourceId;
   }
 
   private async waitForAudio(sourceId: string): Promise<string> {
@@ -269,14 +331,14 @@ export class StreamMediaService {
 
   async publishDubbedExport(input: PublishDubbedExportInput): Promise<{ exportObjectKey: string; audioTrackUid: string }> {
     if (!this.deps.bucket?.put) throw new Error('STREAM_DOWNLOAD_FAILED: R2 put is unavailable.');
-    const source = await this.ensureVideoSource(input.projectId, input.userId, input.sourceObjectKey);
+    const renderSourceId = await this.ensureExportVideo(input);
     const label = `dubflow-${input.targetLanguage}-${input.exportId}`;
-    const existing = await this.findAudioTrackByLabel(source.sourceId, label);
+    const existing = await this.findAudioTrackByLabel(renderSourceId, label);
     let audioTrackUid = existing?.uid?.trim() ?? '';
 
     if (!audioTrackUid) {
       const soundtrackUrl = await this.signedObjectUrl(input.projectId, input.soundtrackObjectKey);
-      const copied = await this.streamApi<StreamAudioTrack>(`${encodeURIComponent(source.sourceId)}/audio/copy`, {
+      const copied = await this.streamApi<StreamAudioTrack>(`${encodeURIComponent(renderSourceId)}/audio/copy`, {
         method: 'POST',
         body: JSON.stringify({ label, url: soundtrackUrl }),
       });
@@ -284,13 +346,13 @@ export class StreamMediaService {
       if (!audioTrackUid) throw new Error('STREAM_AUDIO_TRACK_FAILED: Stream audio copy returned no track uid.');
     }
 
-    await this.waitForAudioTrack(source.sourceId, audioTrackUid);
+    await this.waitForAudioTrack(renderSourceId, audioTrackUid);
     await this.streamApi<StreamAudioTrack>(
-      `${encodeURIComponent(source.sourceId)}/audio/${encodeURIComponent(audioTrackUid)}`,
+      `${encodeURIComponent(renderSourceId)}/audio/${encodeURIComponent(audioTrackUid)}`,
       { method: 'PATCH', body: JSON.stringify({ default: true }) },
     );
 
-    const downloadUrl = await this.waitForDefaultDownload(source.sourceId);
+    const downloadUrl = await this.waitForDefaultDownload(renderSourceId);
     const download = await this.fetcher(downloadUrl);
     if (!download.ok || !download.body) {
       throw new Error(`STREAM_DOWNLOAD_FAILED: Stream MP4 download failed (${download.status}).`);
