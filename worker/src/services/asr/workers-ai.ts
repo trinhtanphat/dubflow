@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import type { AiBinding } from '../../cloudflare/ai';
 import type { AsrChunkResult, AsrContext, AsrProvider } from './types';
 import { AsrError } from './types';
@@ -7,12 +8,19 @@ export const WORKERS_AI_ASR_MODEL = '@cf/openai/whisper-large-v3-turbo';
 type RawSegment = { start?: number; end?: number; text?: string };
 type RawResponse = { text?: string; segments?: RawSegment[] };
 
+function mediaInput(audio: ArrayBuffer, mediaType?: string) {
+  return {
+    body: Buffer.from(audio).toString('base64'),
+    contentType: mediaType?.trim() || 'audio/wav',
+  };
+}
+
 export class WorkersAIAsrProvider implements AsrProvider {
   constructor(private readonly ai: AiBinding) {}
 
   async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
     const input: Record<string, unknown> = {
-      audio,
+      audio: mediaInput(audio, context.mediaType),
       task: 'transcribe',
       vad_filter: true,
     };
