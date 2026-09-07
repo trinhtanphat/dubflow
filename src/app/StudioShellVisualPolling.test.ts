@@ -46,4 +46,9 @@ describe('Phase 4E canonical export polling identity', () => {
     expect(isTerminalExportAttempt(launch, attempt({ lipSyncStatus: 'completed' }))).toBe(true);
     expect(isTerminalExportAttempt(launch, attempt({ lipSyncStatus: 'failed' }))).toBe(true);
   });
+
+  it('stops visual polling when the underlying standard export itself failed or was invalidated', () => {
+    expect(isTerminalExportAttempt(launch, attempt({ status: 'failed', lipSyncStatus: 'queued' }))).toBe(true);
+    expect(isTerminalExportAttempt(launch, attempt({ status: 'invalidated', lipSyncStatus: 'queued' }))).toBe(true);
+  });
 });
