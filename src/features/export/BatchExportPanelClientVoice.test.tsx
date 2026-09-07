@@ -11,7 +11,7 @@ const unconfigured = {
 };
 
 function render({
-  current = 'vi' as const,
+  current = 'vi' as ('vi' | 'en'),
   selected = ['vi'] as ('vi' | 'en')[],
   clientVoiceAvailable = false,
   clientVoiceStatus = '',
