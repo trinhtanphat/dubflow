@@ -21,13 +21,14 @@ test('real-media smoke runner exercises live upload, dubbing, export and media v
   assert.match(source, /timeout/i);
 });
 
-test('real-media workflow is permanently manual and requires explicit live confirmation', async () => {
+test('real-media workflow is permanently manual, fail-closed and requires explicit live confirmation', async () => {
   const source = await readRequiredSource('.github/workflows/real-media-smoke.yml');
   assert.match(source, /workflow_dispatch:/);
   assert.doesNotMatch(source, /^\s*push:/m);
   assert.match(source, /RUN_LIVE_MEDIA_SMOKE/);
   assert.match(source, /espeak-ng/);
   assert.match(source, /ffmpeg/);
+  assert.match(source, /set\s+-o\s+pipefail/);
   assert.match(source, /real-media-smoke\.mjs/);
   assert.match(source, /upload-artifact/);
 });
