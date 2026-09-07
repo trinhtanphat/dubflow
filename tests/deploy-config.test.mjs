@@ -30,9 +30,10 @@ test('production deploy targets the Cloudflare account that owns the live yupvox
   assert.equal(config.account_id, productionAccountId);
 });
 
-test('live dubbing runtime is declared on the production account', () => {
+test('live dubbing runtime is declared on the production account without Containers', () => {
   assert.equal(config.account_id, productionAccountId);
-  assert.ok(config.containers?.some((entry) => entry.class_name === 'FfmpegContainer'));
-  assert.ok(config.durable_objects?.bindings?.some((entry) => entry.name === 'FFMPEG_CONTAINER' && entry.class_name === 'FfmpegContainer'));
+  assert.deepEqual(config.stream, { binding: 'STREAM' });
+  assert.equal(config.containers, undefined);
+  assert.equal(config.durable_objects, undefined);
   assert.ok(config.workflows?.some((entry) => entry.binding === 'DUBBING_WORKFLOW' && entry.class_name === 'DubbingWorkflow'));
 });
