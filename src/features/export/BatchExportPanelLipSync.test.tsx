@@ -11,7 +11,12 @@ const voiceCapabilities = {
   cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: true },
 };
 
-function capabilities(available: boolean): ExportCapabilitiesDto {
+type VisualQualification = 'qualified' | 'unqualified' | 'unavailable';
+
+function capabilities(
+  available: boolean,
+  qualification: VisualQualification = available ? 'qualified' : 'unavailable',
+): ExportCapabilitiesDto {
   return {
     duckOriginal: true,
     separation: {
@@ -23,9 +28,10 @@ function capabilities(available: boolean): ExportCapabilitiesDto {
     },
     visualLipSync: {
       available,
-      provider: available ? 'sync-labs' : null,
+      provider: qualification === 'unavailable' ? null : 'sync-labs',
+      qualification,
     },
-  };
+  } as unknown as ExportCapabilitiesDto;
 }
 
 function result(
@@ -50,6 +56,7 @@ function result(
 
 function render(options: {
   available?: boolean;
+  qualification?: VisualQualification;
   visualMode?: 'standard' | 'lip_sync';
   results?: ExportLaunchDto[];
 } = {}) {
@@ -62,7 +69,7 @@ function render(options: {
       output="dubbed"
       audioMode="dubbed_only"
       visualMode={options.visualMode ?? 'standard'}
-      exportCapabilities={capabilities(options.available ?? false)}
+      exportCapabilities={capabilities(options.available ?? false, options.qualification)}
       voiceCapabilities={voiceCapabilities}
       busy={false}
       results={options.results ?? []}
@@ -79,13 +86,13 @@ function render(options: {
 }
 
 describe('Phase 4E Studio visual-mode UX', () => {
-  it('fails closed when the backend has not configured a qualified visual provider', () => {
-    expect(visualLipSyncAvailability(capabilities(false))).toEqual({
+  it('fails closed when the backend has no configured visual provider', () => {
+    expect(visualLipSyncAvailability(capabilities(false, 'unavailable'))).toEqual({
       allowed: false,
       reason: 'Visual lip-sync chưa khả dụng vì provider chưa được cấu hình.',
     });
 
-    const html = render({ available: false, visualMode: 'lip_sync' });
+    const html = render({ available: false, qualification: 'unavailable', visualMode: 'lip_sync' });
     expect(html).toContain('Standard dubbed video');
     expect(html).toContain('Visual lip-sync');
     expect(html).toMatch(/<option value="lip_sync" disabled=""[^>]*>Visual lip-sync<\/option>/);
@@ -93,9 +100,21 @@ describe('Phase 4E Studio visual-mode UX', () => {
     expect(html).toMatch(/<button[^>]*data-testid="export-current-language"[^>]*disabled=""/);
   });
 
-  it('enables the visual choice only with an available named provider', () => {
-    expect(visualLipSyncAvailability(capabilities(true))).toEqual({ allowed: true, reason: '' });
-    const html = render({ available: true, visualMode: 'lip_sync' });
+  it('fails closed when Sync is configured but runtime qualification is still unqualified', () => {
+    expect(visualLipSyncAvailability(capabilities(false, 'unqualified'))).toEqual({
+      allowed: false,
+      reason: 'Visual lip-sync đã cấu hình nhưng runtime chưa được xác nhận (unqualified).',
+    });
+
+    const html = render({ available: false, qualification: 'unqualified', visualMode: 'lip_sync' });
+    expect(html).toMatch(/<option value="lip_sync" disabled=""[^>]*>Visual lip-sync<\/option>/);
+    expect(html).toContain('Visual lip-sync đã cấu hình nhưng runtime chưa được xác nhận (unqualified).');
+    expect(html).toMatch(/<button[^>]*data-testid="export-current-language"[^>]*disabled=""/);
+  });
+
+  it('enables the visual choice only with an available named qualified provider', () => {
+    expect(visualLipSyncAvailability(capabilities(true, 'qualified'))).toEqual({ allowed: true, reason: '' });
+    const html = render({ available: true, qualification: 'qualified', visualMode: 'lip_sync' });
     expect(html).toContain('value="lip_sync" selected=""');
     expect(html).not.toMatch(/<option value="lip_sync"[^>]*disabled/);
     expect(html).not.toMatch(/data-testid="export-current-language"[^>]*disabled/);
@@ -104,6 +123,7 @@ describe('Phase 4E Studio visual-mode UX', () => {
   it('renders queued, processing, failed, and completed visual states without claiming completion early', () => {
     const html = render({
       available: true,
+      qualification: 'qualified',
       visualMode: 'lip_sync',
       results: [result('queued'), result('processing'), result('failed'), result('completed')],
     });
@@ -116,7 +136,7 @@ describe('Phase 4E Studio visual-mode UX', () => {
   });
 
   it('keeps the normal dubbed artifact downloadable and retryable when visual processing fails', () => {
-    const html = render({ available: true, visualMode: 'lip_sync', results: [result('failed')] });
+    const html = render({ available: true, qualification: 'qualified', visualMode: 'lip_sync', results: [result('failed')] });
     expect(html).toContain('Thử lại lip-sync');
     expect(html).toContain('Tải video dubbed chuẩn');
     expect(html).toContain('/api/projects/p1/exports/ja/media?output=dubbed');
@@ -124,7 +144,7 @@ describe('Phase 4E Studio visual-mode UX', () => {
   });
 
   it('publishes the owner visual download only after lip-sync completion without presenting the standard fallback', () => {
-    const html = render({ available: true, visualMode: 'lip_sync', results: [result('completed')] });
+    const html = render({ available: true, qualification: 'qualified', visualMode: 'lip_sync', results: [result('completed')] });
     expect(html).toContain('Lip-sync hoàn tất');
     expect(html).toContain('Tải video lip-sync');
     expect(html).toContain('/api/projects/p1/exports/ja/media?output=dubbed&amp;visualMode=lip_sync');
