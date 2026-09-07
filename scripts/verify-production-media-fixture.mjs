@@ -61,6 +61,18 @@ function assertReady(body) {
   }
 }
 
+function assertVoiceCapability(body) {
+  if (
+    typeof body?.provider !== 'string'
+    || !body.provider.trim()
+    || body?.configured !== true
+    || !Array.isArray(body?.languages)
+    || !body.languages.includes('vi')
+  ) {
+    throw new Error(`Production voice capability is not ready for Vietnamese dubbed export: ${JSON.stringify(body)}`);
+  }
+}
+
 function assertMp4(bytes, contentType) {
   if (!contentType.toLowerCase().includes('video/mp4')) {
     throw new Error(`Final export is not video/mp4: ${contentType || '<missing>'}`);
@@ -83,6 +95,9 @@ export async function runProductionMediaFixture({
 
   const readiness = await request(fetchImpl, `${origin}/api/ready`);
   assertReady(readiness.body);
+
+  const voiceCapability = await request(fetchImpl, `${origin}/api/voice/capabilities`);
+  assertVoiceCapability(voiceCapability.body);
 
   const title = `prod-r2-fixture-${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
   const created = await request(fetchImpl, `${origin}/api/projects`, {
