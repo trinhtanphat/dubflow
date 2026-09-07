@@ -1,11 +1,24 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { runDubbingPipeline } from '../src/workflows/pipeline';
 
 const step = { async do<T>(_name: string, fn: () => Promise<T>) { return fn(); } };
 const telemetry = { write() {} };
 
+const longFormSource = readFileSync(
+  new URL('../src/services/asr/r2-long-form.ts', import.meta.url),
+  'utf8',
+);
+
 describe('R2 long-form Workers AI ASR', () => {
-  it('transcribes bounded decoded chunks and preserves their timeline offsets without a paid remote provider', async () => {
+  it('uses encoded AAC packet demux/remux only and never relies on runtime audio decode/transcode', () => {
+    expect(longFormSource).toMatch(/EncodedPacketSink/);
+    expect(longFormSource).toMatch(/EncodedAudioPacketSource/);
+    expect(longFormSource).toMatch(/Mp4OutputFormat/);
+    expect(longFormSource).not.toMatch(/\bConversion\b|WavOutputFormat|forceTranscode|AudioDecoder|@mediabunny\/server/);
+  });
+
+  it('transcribes bounded injected chunks and preserves their timeline offsets without a paid remote provider', async () => {
     const transcribe = vi.fn(async (_audio: ArrayBuffer) => ({
       text: 'chunk',
       segments: [{ startMs: 1_000, endMs: 2_000, text: 'chunk' }],
