@@ -19,6 +19,7 @@ const [
   workerClientSource,
   apiSource,
   pcmSource,
+  viteConfigSource,
 ] = await Promise.all([
   source('../package.json'),
   source('../src/features/export/BatchExportPanel.tsx'),
@@ -28,6 +29,7 @@ const [
   source('../src/features/voice/browserPiperClient.ts'),
   source('../src/features/voice/clientVoiceApi.ts'),
   source('../src/features/voice/clientPcm.ts'),
+  source('../vite.config.ts'),
 ]);
 
 test('browser Piper zero-cost lane pins the qualified dependency and voice', () => {
@@ -43,6 +45,10 @@ test('browser Piper stays lazy and converts to the backend PCM contract', () => 
   assert.match(pcmSource, /8\s*\*\s*1024\s*\*\s*1024/);
   assert.match(apiSource, /X-DubFlow-PCM-Format/);
   assert.match(apiSource, /X-DubFlow-Translation-Version/);
+});
+
+test('browser Piper worker bundle uses ES modules so Vite can code-split Piper runtime dependencies', () => {
+  assert.match(viteConfigSource, /worker\s*:\s*\{[\s\S]*?format\s*:\s*['"]es['"]/);
 });
 
 test('Studio preloads exact-version Vietnamese voices before export', () => {
