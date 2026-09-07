@@ -28,7 +28,8 @@ test('Workers Builds policy documents R2-only media secrets without Stream or Co
   assert.match(policy, /R2-only/i);
   assert.match(policy, /MEDIA_SOURCE_SIGNING_SECRET/);
   assert.match(policy, /STREAM_SOURCE_SIGNING_SECRET.*alias|alias.*STREAM_SOURCE_SIGNING_SECRET/is);
-  assert.doesNotMatch(policy, /CLOUDFLARE_STREAM_API_TOKEN.*required|required.*CLOUDFLARE_STREAM_API_TOKEN/is);
+  assert.match(policy, /must not require `CLOUDFLARE_STREAM_API_TOKEN`/i);
+  assert.doesNotMatch(policy, /(?:requires?|required:)\s+`?CLOUDFLARE_STREAM_API_TOKEN`?/i);
   assert.match(policy, /Settings\s*>\s*Builds/i);
   assert.match(policy, /No `Containers Edit` permission is required/i);
   assert.match(policy, /do not.*GitHub.*deploy/is);
