@@ -8,9 +8,10 @@ const readyBody = {
   database: 'ready',
   schemaRevision: 14,
   media: { r2: 'ready', remux: 'ready' },
+  voice: { provider: 'elevenlabs', status: 'ready' },
 };
 
-test('deployment probe requires HTTP 200, schema revision 14, and R2/remux readiness', async () => {
+test('deployment probe requires HTTP 200, schema revision 14, R2/remux readiness, and configured dubbing voice', async () => {
   assert.equal(CURRENT_SCHEMA_REVISION, 14);
   const fetchOk = async () => ({
     ok: true,
@@ -25,7 +26,13 @@ test('deployment probe rejects a stale HTTP 200 readiness payload without curren
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', media: { r2: 'ready', remux: 'ready' } };
+      return {
+        ready: true,
+        service: 'dubflow',
+        database: 'ready',
+        media: { r2: 'ready', remux: 'ready' },
+        voice: { provider: 'elevenlabs', status: 'ready' },
+      };
     },
   });
   const result = await probeDeployment(fetchStale);
@@ -64,7 +71,14 @@ test('deployment probe rejects Stream-shaped or unavailable media readiness', as
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 14, media: { stream: 'ready' } };
+      return {
+        ready: true,
+        service: 'dubflow',
+        database: 'ready',
+        schemaRevision: 14,
+        media: { stream: 'ready' },
+        voice: { provider: 'elevenlabs', status: 'ready' },
+      };
     },
   });
   assert.equal((await probeDeployment(fetchStream)).ok, false);
@@ -77,4 +91,25 @@ test('deployment probe rejects Stream-shaped or unavailable media readiness', as
     },
   });
   assert.equal((await probeDeployment(fetchRemuxUnavailable)).ok, false);
+});
+
+test('deployment probe rejects false-green readiness when the standard dubbing voice provider is missing or unavailable', async () => {
+  const fetchMissingVoice = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      const { voice: _voice, ...withoutVoice } = readyBody;
+      return withoutVoice;
+    },
+  });
+  assert.equal((await probeDeployment(fetchMissingVoice)).ok, false);
+
+  const fetchUnavailableVoice = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { ...readyBody, voice: { provider: 'elevenlabs', status: 'unavailable' } };
+    },
+  });
+  assert.equal((await probeDeployment(fetchUnavailableVoice)).ok, false);
 });
