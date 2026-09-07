@@ -86,6 +86,15 @@ async function ensureAacEncoder() {
   }
 }
 
+export async function isR2Mp4RemuxRuntimeReady(): Promise<boolean> {
+  try {
+    await ensureAacEncoder();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function inspectInput(input: Input): Promise<R2Mp4RemuxSourceInfo> {
   if (!(await input.canRead()) || (await input.getFormat()) !== MP4) {
     throw stableError('VIDEO_TRANSCODE_REQUIRED', 'Source must be a readable MP4 file.');
