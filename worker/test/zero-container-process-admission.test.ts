@@ -64,13 +64,9 @@ describe('R2-only process admission', () => {
     expect(created).toBe(false);
   });
 
-  it('accepts the temporary legacy signing-secret alias while canonical secret rolls out', async () => {
-    const project = projectFixture();
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createProcessRoutes({
-      makeProjects: () => ({ async getByIdForUser() { return project; }, async setStatus() {} }) as never,
-      makeJobs: () => ({ async create() { return { id: 'job-1' }; } }) as never,
-    }));
+  it('fails closed when only the retired Stream signing-secret alias is present', async () => {
+    let created = false;
+    const app = appWithJobGuard(() => { created = true; });
     const env = {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
@@ -81,6 +77,8 @@ describe('R2-only process admission', () => {
     } as unknown as Env;
 
     const response = await app.request('/api/projects/project-1/process', { method: 'POST' }, env);
-    expect(response.status).toBe(202);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: true, code: 'MEDIA_SOURCE_SIGNING_UNAVAILABLE' });
+    expect(created).toBe(false);
   });
 });
