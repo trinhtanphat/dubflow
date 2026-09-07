@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-// Keep this acceptance contract RED until the browser runner and manual workflow are implemented.
 const scriptUrl = new URL('../scripts/verify-production-browser-piper-fixture.mjs', import.meta.url);
 const workflowUrl = new URL('../.github/workflows/production-browser-piper-fixture.yml', import.meta.url);
 
@@ -38,7 +37,7 @@ test('browser-driven production Piper fixture is checked in and manual-only', ()
   assert.doesNotMatch(combined, /CLOUDFLARE_STREAM|FFMPEG_CONTAINER/);
 });
 
-test('browser fixture source admission proves zero-cost provider routing before live media calls', () => {
+test('browser fixture source admission proves zero-cost provider routing before live media calls', async () => {
   assert.equal(fs.existsSync(scriptUrl), true, 'missing browser Piper production fixture runner');
   const script = fs.readFileSync(scriptUrl, 'utf8');
 
@@ -50,6 +49,15 @@ test('browser fixture source admission proves zero-cost provider routing before 
   assert.match(script, /requested\s*===\s*undefined/);
   assert.match(script, /targetVoiceObjectKey/);
   assert.match(script, /deps\.voice\.generate/);
+
+  const runner = await import(scriptUrl.href);
+  assert.doesNotThrow(() => runner.assertCheckedOutZeroCostSource());
+});
+
+test('browser fixture preserves CHROME_BIN discovered through GITHUB_ENV', () => {
+  const workflow = fs.readFileSync(workflowUrl, 'utf8');
+  assert.match(workflow, /echo\s+["']CHROME_BIN=\$CHROME["']\s*>>\s*["']\$GITHUB_ENV["']/);
+  assert.doesNotMatch(workflow, /CHROME_BIN:\s*\$\{\{\s*env\.CHROME_BIN\s*\}\}/);
 });
 
 test('browser fixture independently verifies exact-version client PCM before accepting export launch', () => {
