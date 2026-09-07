@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkReadiness } from '../src/routes/readiness';
 
-const schema13 = {
+const schema14 = {
   projects_table: 1,
   project_export_column: 1,
   usage_operation_column: 1,
@@ -24,58 +24,57 @@ function schemaDb() {
   return {
     prepare() {
       return {
-        async first<T>() { return schema13 as T; },
+        async first<T>() { return schema14 as T; },
       };
     },
   };
 }
 
-describe('zero-container media readiness', () => {
-  it('requires schema 13 and complete Stream configuration before reporting ready', async () => {
+describe('R2-only media readiness', () => {
+  it('reports schema 14 ready with R2, public origin, signing secret, and remux capability only', async () => {
     const result = await checkReadiness(schemaDb(), 'dg-secret', {
-      stream: {},
-      accountId: '6c5207813df3d5b83b9508125e0e9e12',
+      r2: {},
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
-      streamApiToken: 'stream-token',
+      remuxReady: true,
     });
 
     expect(result).toMatchObject({
       ready: true,
       database: 'ready',
-      schemaRevision: 13,
-      media: { stream: 'ready' },
+      schemaRevision: 14,
+      media: { r2: 'ready', remux: 'ready' },
     });
   });
 
-  it('reports media unavailable when the signed source origin is incomplete', async () => {
+  it('reports R2 media unavailable when the signed source origin is incomplete', async () => {
     const result = await checkReadiness(schemaDb(), 'dg-secret', {
-      stream: {},
-      accountId: '6c5207813df3d5b83b9508125e0e9e12',
+      r2: {},
       sourceSigningSecret: 'source-secret',
-      streamApiToken: 'stream-token',
+      remuxReady: true,
     });
 
     expect(result).toMatchObject({
       ready: false,
       database: 'ready',
-      schemaRevision: 13,
-      media: { stream: 'unavailable' },
+      schemaRevision: 14,
+      media: { r2: 'unavailable', remux: 'ready' },
     });
   });
 
-  it('keeps Stream REST credentials required for final dubbed MP4 publication', async () => {
+  it('fails readiness when the remux runtime self-check is unavailable without requiring Stream credentials', async () => {
     const result = await checkReadiness(schemaDb(), 'dg-secret', {
-      stream: {},
+      r2: {},
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
+      remuxReady: false,
     });
 
     expect(result).toMatchObject({
       ready: false,
       database: 'ready',
-      schemaRevision: 13,
-      media: { stream: 'unavailable' },
+      schemaRevision: 14,
+      media: { r2: 'ready', remux: 'unavailable' },
     });
   });
 });
