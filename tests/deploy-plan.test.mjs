@@ -31,13 +31,13 @@ test('Workers Builds production deploy applies remote D1 migrations before readi
   ]);
 });
 
-test('Workers Builds production config retains the FFmpeg container binding used by workflows', () => {
+test('Workers Builds production config strips FFmpeg container deployment while source keeps the optional binding', () => {
   const wrangler = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
   assert.ok(wrangler.containers?.some((entry) => entry.class_name === 'FfmpegContainer'));
   assert.ok(wrangler.durable_objects?.bindings?.some((entry) => entry.name === 'FFMPEG_CONTAINER' && entry.class_name === 'FfmpegContainer'));
-  assert.doesNotMatch(deployScript, /delete\s+source\.containers\b/);
-  assert.doesNotMatch(deployScript, /delete\s+source\.durable_objects\b/);
+  assert.match(deployScript, /delete\s+source\.containers\b/);
+  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
 });
 
 test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {
