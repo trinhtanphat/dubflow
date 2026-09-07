@@ -147,6 +147,61 @@ describe('export route', () => {
     expect(created).toBe(false);
   });
 
+  it('launches legacy Vietnamese export from a complete exact-version client PCM cache without inspecting server TTS', async () => {
+    const calls: string[] = [];
+    const routes = createExportRoutes({
+      makeProjects: () => ({
+        async getByIdForUser() {
+          calls.push('project:get');
+          return { id: 'p1', userId: 'dev-user', status: 'needs_review', sourceObjectKey: 'projects/p1/source/a.mp4' };
+        },
+        async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
+      }) as never,
+      makeJobs: () => ({
+        async create() { calls.push('job:create'); return { id: 'j1' }; },
+        async fail() { throw new Error('must not fail'); },
+      }) as never,
+      ...phase4cExportDeps(calls),
+      makeVariants: () => ({
+        async list() {
+          return [{
+            segmentId: 'segment-1',
+            projectId: 'p1',
+            targetLanguage: 'vi' as const,
+            translatedText: 'Xin chào',
+            translationEngine: 'workers-ai',
+            translationStatus: 'completed',
+            translationContextRevision: null,
+            voiceStatus: 'completed',
+            dubbedObjectKey: 'projects/p1/voices/vi/segment-1/3.pcm',
+            version: 3,
+          }];
+        },
+      }) as never,
+      getVoiceCapabilities: () => { throw new Error('must not inspect server voice provider for complete client cache'); },
+    });
+    const env = {
+      MEDIA: {},
+      ANALYTICS: analytics,
+      RATE_LIMIT_EXPORT: allowExport,
+      EXPORT_WORKFLOW: {
+        async create() { calls.push('workflow:create'); return { id: 'w1' }; },
+      },
+    } as unknown as Env;
+
+    const response = await post(routes, env, '/p1/export');
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ jobId: 'j1', workflowId: 'w1', status: 'queued' });
+    expect(calls).toEqual([
+      'project:get',
+      'project:get',
+      'export:create',
+      'job:create',
+      'project:processing',
+      'workflow:create',
+    ]);
+  });
+
   it('rejects projects that are not ready for review/export', async () => {
     let created = false;
     const routes = createExportRoutes({
