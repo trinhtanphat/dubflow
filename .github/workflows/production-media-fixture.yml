@@ -2,6 +2,12 @@ name: Production R2 Media Fixture
 
 on:
   workflow_dispatch:
+    inputs:
+      zero_charge_verified:
+        description: Confirm every production request in this run is inside a verified hard no-charge boundary
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -48,6 +54,7 @@ jobs:
         env:
           PRODUCTION_MEDIA_FIXTURE_PATH: ${{ runner.temp }}/production-r2-fixture.mp4
           PRODUCTION_MEDIA_OUTPUT_PATH: ${{ runner.temp }}/production-r2-output.mp4
+          PRODUCTION_ZERO_CHARGE_VERIFIED: ${{ inputs.zero_charge_verified }}
         run: node scripts/verify-production-browser-piper-fixture.mjs
 
       - name: Prove H.264 video and AAC dubbed soundtrack
