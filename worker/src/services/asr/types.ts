@@ -7,7 +7,10 @@ export type AsrSegment = {
   speakerIndex?: number;
 };
 export type AsrChunkResult = { text: string; segments: AsrSegment[]; durationMs?: number };
-export type AsrContext = { sourceLanguage: SourceLanguage };
+export type AsrContext = {
+  sourceLanguage: SourceLanguage;
+  mediaType?: string;
+};
 
 export interface AsrProvider {
   transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult>;
