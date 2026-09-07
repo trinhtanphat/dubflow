@@ -106,6 +106,7 @@ function envFor(db: FakeDb, options: {
     CONTEXT_TRANSLATION_MODEL: '@cf/example/context-model',
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'test-key',
     PAID_GOOGLE_TRANSLATE_ENABLED: 'true',
+    PAID_WORKERS_AI_ENABLED: 'true',
   } as any;
 }
 
