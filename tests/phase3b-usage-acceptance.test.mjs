@@ -6,15 +6,28 @@ async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-const [usage, pipeline, exportPipeline, migration, usageRoutes, usageApi, usagePanel] = await Promise.all([
+const [
+  usage,
+  pipeline,
+  exportPipelineEntry,
+  legacyExportPipeline,
+  zeroContainerExportPipeline,
+  migration,
+  usageRoutes,
+  usageApi,
+  usagePanel,
+] = await Promise.all([
   source('worker/src/db/usage.ts'),
   source('worker/src/workflows/pipeline.ts'),
   source('worker/src/workflows/exportPipeline.ts'),
+  source('worker/src/workflows/legacyExportPipeline.ts'),
+  source('worker/src/workflows/zeroContainerExportPipeline.ts'),
   source('migrations/0005_usage_event_idempotency.sql'),
   source('worker/src/routes/usage.ts'),
   source('src/features/projects/usageApi.ts'),
   source('src/features/projects/UsageSummaryPanel.tsx'),
 ]);
+const exportPipeline = [exportPipelineEntry, legacyExportPipeline, zeroContainerExportPipeline].join('\n');
 
 test('Phase 3B uses canonical seconds-based usage kinds and summary fields', () => {
   for (const kind of ['asr_audio_second', 'translation_character', 'tts_audio_second', 'render_second']) {
