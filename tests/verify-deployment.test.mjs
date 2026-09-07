@@ -2,20 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CURRENT_SCHEMA_REVISION, probeDeployment } from '../scripts/verify-deployment.mjs';
 
-test('deployment probe requires HTTP 200 and the exact zero-container schema revision 13', async () => {
-  assert.equal(CURRENT_SCHEMA_REVISION, 13);
+const readyBody = {
+  ready: true,
+  service: 'dubflow',
+  database: 'ready',
+  schemaRevision: 14,
+  media: { r2: 'ready', remux: 'ready' },
+};
+
+test('deployment probe requires HTTP 200, schema revision 14, and R2/remux readiness', async () => {
+  assert.equal(CURRENT_SCHEMA_REVISION, 14);
   const fetchOk = async () => ({
     ok: true,
     status: 200,
-    async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 13 };
-    },
+    async json() { return readyBody; },
   });
-  assert.deepEqual(await probeDeployment(fetchOk), {
-    ok: true,
-    status: 200,
-    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 13 },
-  });
+  assert.deepEqual(await probeDeployment(fetchOk), { ok: true, status: 200, body: readyBody });
 });
 
 test('deployment probe rejects a stale HTTP 200 readiness payload without current schema provenance', async () => {
@@ -23,7 +25,7 @@ test('deployment probe rejects a stale HTTP 200 readiness payload without curren
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready' };
+      return { ready: true, service: 'dubflow', database: 'ready', media: { r2: 'ready', remux: 'ready' } };
     },
   });
   const result = await probeDeployment(fetchStale);
@@ -36,7 +38,7 @@ test('deployment probe rejects a prior schema revision even when the payload say
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 };
+      return { ...readyBody, schemaRevision: 13 };
     },
   });
   const result = await probeDeployment(fetchPrior);
@@ -49,10 +51,30 @@ test('deployment probe rejects a response without database readiness', async () 
     ok: false,
     status: 503,
     async json() {
-      return { ready: false, service: 'dubflow', database: 'missing-schema', schemaRevision: null };
+      return { ...readyBody, ready: false, database: 'missing-schema', schemaRevision: null };
     },
   });
   const result = await probeDeployment(fetchNotReady);
   assert.equal(result.ok, false);
   assert.equal(result.status, 503);
+});
+
+test('deployment probe rejects Stream-shaped or unavailable media readiness', async () => {
+  const fetchStream = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 14, media: { stream: 'ready' } };
+    },
+  });
+  assert.equal((await probeDeployment(fetchStream)).ok, false);
+
+  const fetchRemuxUnavailable = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { ...readyBody, media: { r2: 'ready', remux: 'unavailable' } };
+    },
+  });
+  assert.equal((await probeDeployment(fetchRemuxUnavailable)).ok, false);
 });
