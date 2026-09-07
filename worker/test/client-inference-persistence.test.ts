@@ -46,6 +46,7 @@ class SqliteStatement implements D1StatementLike {
 class SqliteD1 implements D1DatabaseLike {
   batchCalls = 0;
   failBatch = false;
+  beforeBatch?: () => void;
 
   constructor(readonly db: DatabaseSync) {}
 
@@ -55,6 +56,7 @@ class SqliteD1 implements D1DatabaseLike {
 
   async batch(statements: D1StatementLike[]): Promise<unknown[]> {
     this.batchCalls += 1;
+    this.beforeBatch?.();
     if (this.failBatch) throw new Error('simulated batch failure');
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -214,6 +216,38 @@ describe('browser-local client inference atomic persistence', () => {
     }
   });
 
+  it('fails closed if source identity changes after admission but before the atomic batch', async () => {
+    const h = harness();
+    try {
+      h.d1.beforeBatch = () => {
+        h.db.exec(`
+          UPDATE projects
+          SET source_generation = 4,
+              source_object_key = 'projects/p1/source/new.mp4'
+          WHERE id = 'p1'
+        `);
+      };
+
+      await expect(h.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_SOURCE_CONFLICT',
+        source: {
+          sourceGeneration: 4,
+          sourceObjectKey: 'projects/p1/source/new.mp4',
+        },
+      });
+
+      expect(h.d1.batchCalls).toBe(1);
+      expect(h.db.prepare(`SELECT id FROM segments WHERE project_id = 'p1'`).all())
+        .toEqual([{ id: 'old-segment' }]);
+      expect(h.db.prepare(`SELECT id FROM speakers WHERE project_id = 'p1'`).all())
+        .toEqual([{ id: 'old-speaker' }]);
+      expect(h.db.prepare(`SELECT status FROM project_exports WHERE id = 'export-old'`).get())
+        .toEqual({ status: 'completed' });
+    } finally {
+      h.db.close();
+    }
+  });
+
   it('rejects busy project, busy vi target and busy exports with zero writes', async () => {
     const projectBusy = harness();
     try {
@@ -250,6 +284,25 @@ describe('browser-local client inference atomic persistence', () => {
       expect(exportBusy.d1.batchCalls).toBe(0);
     } finally {
       exportBusy.db.close();
+    }
+  });
+
+  it('rejects an active export for any project target before replacing canonical segments', async () => {
+    const h = harness();
+    try {
+      h.db.exec(`
+        INSERT INTO project_exports (
+          id, project_id, target_language, output, status, generation
+        ) VALUES ('export-ja-busy', 'p1', 'ja', 'dubbed', 'pending', 4)
+      `);
+      await expect(h.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+      });
+      expect(h.d1.batchCalls).toBe(0);
+      expect(h.db.prepare(`SELECT id FROM segments WHERE project_id = 'p1'`).all())
+        .toEqual([{ id: 'old-segment' }]);
+    } finally {
+      h.db.close();
     }
   });
 
