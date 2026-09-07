@@ -5,13 +5,15 @@ import { AsrError } from './types';
 
 export const WORKERS_AI_ASR_MODEL = '@cf/openai/whisper-large-v3-turbo';
 
+const DEFAULT_DIRECT_SOURCE_MEDIA_TYPE = 'video/mp4';
+
 type RawSegment = { start?: number; end?: number; text?: string };
 type RawResponse = { text?: string; segments?: RawSegment[] };
 
 function mediaInput(audio: ArrayBuffer, mediaType?: string) {
   return {
     body: Buffer.from(audio).toString('base64'),
-    contentType: mediaType?.trim() || 'audio/wav',
+    contentType: mediaType?.trim() || DEFAULT_DIRECT_SOURCE_MEDIA_TYPE,
   };
 }
 
