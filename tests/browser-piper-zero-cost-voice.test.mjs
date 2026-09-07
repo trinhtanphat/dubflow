@@ -59,6 +59,13 @@ test('Studio preloads exact-version Vietnamese voices before export', () => {
   assert.match(studioSource, /clientVoiceStatus/);
 });
 
+test('Piper initialization failure makes the mounted Studio client lane unavailable', () => {
+  assert.match(workerClientSource, /class\s+BrowserPiperError\s+extends\s+Error/);
+  assert.match(studioSource, /BrowserPiperError/);
+  assert.match(studioSource, /PIPER_INIT_FAILED/);
+  assert.match(studioSource, /setClientVoiceState\(\s*['"]unavailable['"]\s*\)/);
+});
+
 test('export presentation can admit the Vietnamese client lane without broadening provider admission', () => {
   assert.match(panelSource, /clientVoiceAvailable/);
   assert.match(panelSource, /targetLanguage\s*===\s*['"]vi['"]/);
