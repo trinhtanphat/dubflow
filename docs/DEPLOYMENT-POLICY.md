@@ -1,50 +1,57 @@
 # Deployment policy
 
-## Single production deployment lane
+## Canonical source of truth
 
-`main` is the only production source of truth.
+`main` is the only production source of truth for DubFlow backend and public gateway configuration.
 
-The required flow is:
+Production is intentionally split across two Cloudflare accounts:
 
-1. Change code in Git.
-2. Commit and push the change.
-3. Merge the change into `main`.
-4. Cloudflare Workers Builds detects the new `main` commit.
-5. Cloudflare Workers Builds automatically builds the repository.
-6. Cloudflare Workers Builds automatically deploys production from that same `main` commit.
+- `trinhtanphat6666` (`6c5207813df3d5b83b9508125e0e9e12`) owns the **DubFlow backend** Worker and its D1/R2/Workers AI/Analytics/Workflow/rate-limit/Stream resources.
+- `trinhtanphat2403` (`50afb4fd3c4c7a1f3e1bdb7f22d4af7f`) owns the `qs3d.site` zone and the thin **gateway** Worker for `yupvox.qs3d.site`.
 
-Cloudflare Workers Builds is the only production deployment lane for this repository.
+Administrative access across both accounts does not merge account-scoped Worker resources with zone ownership.
 
-The canonical public deployment belongs to Cloudflare account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. That account owns the `yupvox.qs3d.site` custom-domain binding and the persisted production D1/R2 state. A second account must not be treated as production merely because it has a Worker named `dubflow` or a successful build.
+## Backend production lane
+
+Cloudflare Workers Builds is the only production deployment lane for the DubFlow backend. It watches `main` in account `trinhtanphat6666`, automatically builds the repository, and automatically deploys the backend from that same admitted `main` commit.
+
+The backend `wrangler.jsonc` must target account `6c5207813df3d5b83b9508125e0e9e12`, keep `workers_dev = true`, and must not claim `yupvox.qs3d.site`. Backend D1/R2/Workers AI/Analytics/Workflows/rate limits and Cloudflare Stream stay with that backend account.
+
+The repository-owned Workers Builds deploy command is `node scripts/cloudflare-workers-build-deploy.mjs`. The deployment phase owns Worker upload, remote D1 migration application, and readiness verification.
+
+## Public gateway
+
+`wrangler.gateway.jsonc` is the only checked-in Wrangler config allowed to attach `yupvox.qs3d.site`.
+
+It targets account `trinhtanphat2403` and deploys `dubflow-gateway`, which owns no DubFlow D1/R2/Workflow state. It proxies to the exact verified account-6666 `workers.dev` origin supplied through `BACKEND_ORIGIN`. The gateway must fail closed when that origin is absent, invalid, or points back to the public hostname.
 
 ## GitHub Actions responsibility
 
-GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform `wrangler deploy --dry-run`, and capture test artifacts/screenshots.
+GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform Wrangler dry-runs, typecheck the gateway, and capture test artifacts/screenshots.
 
-GitHub Actions must not deploy production. Do not add a production `wrangler deploy`, remote D1 migration, `wrangler secret put`, Cloudflare production API call, or a second production deployment workflow to GitHub Actions.
+GitHub Actions **must not deploy production**. Do not add a production `wrangler deploy`, remote D1 migration, secret mutation, Cloudflare production API call, or alternate production deployment workflow to GitHub Actions.
 
-`.github/workflows/deploy-cloudflare.yml` must not exist. Do not recreate it as a workaround for a Cloudflare build/deploy failure.
+`.github/workflows/deploy-cloudflare.yml` must not exist.
 
-## Cloudflare responsibility
+## Zero-container Stream media runtime
 
-The Cloudflare project in the canonical production account must watch the GitHub repository's `main` branch. A new commit on `main` is the deployment trigger. Cloudflare owns the build/deploy environment and executes the configured production build/deploy commands.
+Cloudflare **Containers are disabled in production**. Production config must not declare `containers`, Container-backed `durable_objects`, Container exports, `FFMPEG_CONTAINER`, or `SEPARATOR_CONTAINER`.
 
-If a Cloudflare build or deploy fails, fix the relevant source/configuration in this repository, commit it, and merge it to `main`; let Cloudflare retry through its normal `main`-change build flow. Do not introduce a parallel GitHub deploy path.
+The active media path is zero-container: private R2 source -> Cloudflare Stream source preparation -> remote ASR -> translation/TTS -> Worker-native PCM/WAV soundtrack assembly -> Cloudflare Stream dubbed MP4 publishing. There is no hidden FFmpeg Container fallback.
 
-The repository-owned Workers Builds deploy command is `node scripts/cloudflare-workers-build-deploy.mjs`. The normal build phase remains remote-mutation free; the deployment phase owns the Worker upload, remote D1 migration application, and exact readiness qualification.
+The backend Worker requires its normal account-6666 Cloudflare Stream binding plus runtime secrets `CLOUDFLARE_STREAM_API_TOKEN` and `STREAM_SOURCE_SIGNING_SECRET`. Secret values are managed in Cloudflare and must never be committed to Git, tests, screenshots, logs, or documentation.
 
-## Cloudflare Stream runtime configuration
+Cloudflare Workers Builds uses its configured deployment credential under **Settings > Builds**. No `Containers Edit` permission is required for this production path. If deployment authorization fails, fix the Cloudflare build credential and let the normal `main` build deploy again; do not add a GitHub deployment workaround.
 
-The production media path is zero-container. `wrangler.jsonc` binds Cloudflare Stream as `STREAM`; the repository must not declare an FFmpeg Container, `FFMPEG_CONTAINER` Durable Object binding, or `FfmpegContainer` export.
+## Repository guards
 
-Dubbed export uses Cloudflare Stream APIs at runtime. The Worker runtime therefore requires `CLOUDFLARE_STREAM_API_TOKEN` and `STREAM_SOURCE_SIGNING_SECRET` in the canonical production account. Secret values must be configured in Cloudflare and must never be committed to Git, tests, screenshots, logs, or documentation.
+CI must fail if any of these regressions return:
 
-Cloudflare Workers Builds itself still uses its configured deployment credential under the Worker at **Settings > Builds** to publish the Worker and its normal resources. No Container publication permission is required by this repository's production path. If deployment authorization fails, fix the Workers Builds credential in Cloudflare and let the normal `main` build deploy again; do not add a GitHub production deploy workflow as a workaround.
-
-The repository cannot grant Cloudflare account permissions to its own build token. Runtime provider/API secrets and Workers Builds deployment credentials are separate concerns and must remain managed by Cloudflare.
-
-## Repository guard
-
-CI contains regression tests that fail if a GitHub production deployment workflow is reintroduced, if CI starts performing a non-dry-run Wrangler deploy, if the checked-in production account drifts away from the account that owns the public custom domain and persisted project data, if Container runtime configuration returns, or if a stale HTTP 200 readiness payload lacks the exact current schema revision.
+- backend `wrangler.jsonc` claims `yupvox.qs3d.site` or targets the gateway account;
+- `wrangler.gateway.jsonc` stops targeting account 2403 or stops owning the public custom domain;
+- paid Container runtime bindings or exports return;
+- the zero-container Stream binding disappears from the backend;
+- GitHub Actions gains a production deployment path;
+- readiness accepts a stale schema revision.
 
 This policy is intentional and should be treated as a repository-level requirement.
