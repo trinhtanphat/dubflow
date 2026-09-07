@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+const configText = fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+const config = JSON.parse(configText);
 const gateway = JSON.parse(fs.readFileSync(new URL('../wrangler.gateway.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -33,12 +34,14 @@ test('public custom domain belongs only to the account-2403 gateway', () => {
   assert.equal(gateway.keep_vars, true, 'gateway deploys must preserve runtime BACKEND_ORIGIN configured outside source');
 });
 
-test('zero-container dubbing runtime stays on backend account 6666 with Stream', () => {
+test('R2-only dubbing runtime stays on backend account 6666 without Stream or Containers', () => {
   assert.equal(config.account_id, backendAccountId);
-  assert.equal(config.vars?.CLOUDFLARE_ACCOUNT_ID, backendAccountId);
-  assert.deepEqual(config.stream, { binding: 'STREAM' });
+  assert.equal(config.stream, undefined);
+  assert.doesNotMatch(configText, /CLOUDFLARE_STREAM_API_TOKEN/);
   assert.equal(config.containers, undefined);
   assert.equal(config.durable_objects, undefined);
   assert.equal(config.exports, undefined);
+  assert.ok(config.r2_buckets?.some((entry) => entry.binding === 'MEDIA'));
   assert.ok(config.workflows?.some((entry) => entry.binding === 'DUBBING_WORKFLOW' && entry.class_name === 'DubbingWorkflow'));
+  assert.equal(config.vars?.PUBLIC_ORIGIN, 'https://yupvox.qs3d.site');
 });
