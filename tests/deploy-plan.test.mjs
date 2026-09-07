@@ -40,6 +40,14 @@ test('Workers Builds production config strips FFmpeg container deployment while 
   assert.match(deployScript, /delete\s+source\.durable_objects\b/);
 });
 
+test('Workers Builds hard-pins account 2403 before generating its zero-container production config', () => {
+  const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
+  assert.match(deployScript, /PRODUCTION_ACCOUNT_ID\s*=\s*['"]50afb4fd3c4c7a1f3e1bdb7f22d4af7f['"]/);
+  assert.match(deployScript, /source\.account_id\s*=\s*PRODUCTION_ACCOUNT_ID/);
+  assert.match(deployScript, /delete\s+source\.containers\b/);
+  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
+});
+
 test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {
   assert.doesNotMatch(pkg.scripts.build, /cloudflare-workers-build-migrate/i);
   assert.doesNotMatch(pkg.scripts.build, /wrangler\s+d1\s+migrations\s+apply/i);
