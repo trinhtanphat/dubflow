@@ -34,6 +34,29 @@ describe('R2 source media service', () => {
     })).toBe(true);
   });
 
+  it('probes the R2 source duration when a new upload has no stored duration', async () => {
+    const sourceObjectKey = 'projects/project-1/source/movie.mp4';
+    const probed: string[] = [];
+    const service = new R2SourceMediaService({
+      projects: {
+        async getByIdForUser() {
+          return { id: 'project-1', sourceObjectKey, durationMs: null };
+        },
+      },
+      publicOrigin: 'https://yupvox.qs3d.site',
+      signingSecret: 'media-secret',
+      durationProbe: async (key: string) => {
+        probed.push(key);
+        return 12_345;
+      },
+      nowSeconds: () => 1_000,
+    });
+
+    const result = await service.prepareSource('project-1', 'dev-user', sourceObjectKey);
+    expect(probed).toEqual([sourceObjectKey]);
+    expect(result.durationMs).toBe(12_345);
+  });
+
   it('fails if the project source changed and does not trust invalid stored duration', async () => {
     const service = new R2SourceMediaService({
       projects: {
