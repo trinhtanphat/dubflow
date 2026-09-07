@@ -11,6 +11,7 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
 import { LipSyncProviderError, type LipSyncProvider } from '../services/lipsync/types';
+import { targetVoiceObjectKey } from '../services/voice/object-key';
 import type { VoiceCapabilities, VoiceGenerateInput } from '../services/voice/types';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 import { runVisualLipSync } from './visualLipSync';
@@ -212,15 +213,6 @@ function operationKey(jobId: string, retryCount: number, stage: string, item: st
 
 function legacyVoiceObjectKey(projectId: string, segmentId: string): string {
   return `projects/${projectId}/dubbed/${segmentId}.pcm`;
-}
-
-function targetVoiceObjectKey(
-  projectId: string,
-  targetLanguage: TargetLanguage,
-  segmentId: string,
-  version: number,
-): string {
-  return `projects/${projectId}/voices/${targetLanguage}/${segmentId}/${version}.pcm`;
 }
 
 function legacyWorkItems(segments: ZeroContainerSegment[]): ZeroContainerWorkItem[] {
