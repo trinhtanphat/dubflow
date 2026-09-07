@@ -44,6 +44,7 @@ export interface Env {
   DEEPGRAM_API_KEY?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
+  PAID_GROK_TTS_ENABLED?: string;
   SYNC_API_KEY?: string;
   SYNC_LIPSYNC_QUALIFIED?: string;
 }
