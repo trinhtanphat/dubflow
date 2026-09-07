@@ -122,4 +122,66 @@ describe('StreamMediaService dubbed export publication', () => {
     expect(downloadGenerate).toEqual(['default']);
     expect(puts).toEqual([{ key: 'projects/p1/exports/vi/e1.mp4', bytes: 'mp4-data', contentType: 'video/mp4' }]);
   });
+
+  it('reuses the export audio track label on workflow retry instead of copying a duplicate track', async () => {
+    const methods: string[] = [];
+    const project = {
+      id: 'p1',
+      sourceObjectKey: 'projects/p1/source/a.mp4',
+      streamVideoUid: 'stream-existing',
+      streamSourceObjectKey: 'projects/p1/source/a.mp4',
+      streamReadyAt: '2026-09-07T00:00:00Z',
+    };
+    const stream = {
+      async upload() { throw new Error('must reuse source'); },
+      video() {
+        return {
+          async details() { return readyVideo(); },
+          downloads: {
+            async generate() {},
+            async get() { return { default: { status: 'ready', url: 'https://videodelivery.net/retry.mp4' } }; },
+          },
+        };
+      },
+    };
+    const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      methods.push(`${method} ${url}`);
+      if (method === 'GET' && url.endsWith('/audio')) {
+        return Response.json({
+          success: true,
+          result: { audio: [{ uid: 'audio-existing', label: 'dubflow-vi-e1', default: false, status: 'ready' }] },
+        });
+      }
+      if (method === 'PATCH' && url.endsWith('/audio/audio-existing')) {
+        return Response.json({ success: true, result: { uid: 'audio-existing', label: 'dubflow-vi-e1', default: true, status: 'ready' } });
+      }
+      if (method === 'GET' && url === 'https://videodelivery.net/retry.mp4') {
+        return new Response('retry-mp4', { status: 200 });
+      }
+      if (method === 'POST' && url.endsWith('/audio/copy')) {
+        throw new Error('duplicate audio track copy must not happen on retry');
+      }
+      throw new Error(`unexpected request ${method} ${url}`);
+    };
+    const service = new StreamMediaService({
+      projects: { async getByIdForUser() { return project; }, async setStreamProvenance() {} } as never,
+      stream: stream as never,
+      bucket: { async put() { return { key: 'out', size: 9 }; } } as never,
+      publicOrigin: 'https://yupvox.qs3d.site',
+      signingSecret: 'secret',
+      accountId: 'account-1',
+      apiToken: 'stream-token',
+      fetcher,
+      wait: async () => {},
+    });
+
+    await expect(service.publishDubbedExport({
+      projectId: 'p1', userId: 'dev-user', sourceObjectKey: project.sourceObjectKey,
+      soundtrackObjectKey: 'projects/p1/soundtracks/vi/e1.wav', targetLanguage: 'vi', exportId: 'e1',
+      exportObjectKey: 'projects/p1/exports/vi/e1.mp4',
+    })).resolves.toMatchObject({ audioTrackUid: 'audio-existing' });
+    expect(methods.some((entry) => entry.includes('POST') && entry.endsWith('/audio/copy'))).toBe(false);
+  });
 });
