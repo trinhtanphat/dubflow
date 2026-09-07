@@ -112,6 +112,8 @@ BACKEND_ORIGIN=https://dubflow.<exact-6666-account-subdomain>.workers.dev
 
 Set `BACKEND_ORIGIN` to the exact backend origin returned by the successful account-6666 deploy. It is an origin, not a path, and must use HTTPS.
 
+`BACKEND_ORIGIN` is deliberately not committed into source. `wrangler.gateway.jsonc` therefore keeps `keep_vars = true` so a runtime value configured through Cloudflare survives later automatic Wrangler/Workers Builds deployments instead of being replaced just because it is absent from the checked-in config.
+
 Example deployment after resolving the exact origin:
 
 ```bash
@@ -126,9 +128,10 @@ Equivalent configuration through the Cloudflare dashboard is acceptable. The sou
 2. Let Cloudflare Workers Builds deploy `wrangler.jsonc` in `trinhtanphat6666`.
 3. Confirm Wrangler reports the backend `workers.dev` URL.
 4. Verify the backend directly at `<BACKEND_ORIGIN>/api/ready`.
-5. Deploy/update `dubflow-gateway` in `trinhtanphat2403` with that exact `BACKEND_ORIGIN`.
-6. Verify `https://yupvox.qs3d.site/api/ready` reaches the same backend schema/state.
-7. Keep GitHub Actions CI-only; do not add an alternate GitHub production deployment workflow.
+5. Configure the gateway runtime `BACKEND_ORIGIN` to that exact origin; keep `keep_vars = true` in `wrangler.gateway.jsonc`.
+6. Deploy/update `dubflow-gateway` in `trinhtanphat2403`.
+7. Verify `https://yupvox.qs3d.site/api/ready` reaches the same backend schema/state.
+8. Keep GitHub Actions CI-only; do not add an alternate GitHub production deployment workflow.
 
 ## Regression rules
 
@@ -139,6 +142,7 @@ The following are architecture regressions and should fail CI/review:
 - restoring `containers`, container Durable Objects, or Container exports to production config without an explicit paid-runtime decision;
 - moving D1/R2 production state into the gateway account accidentally;
 - hard-coding a guessed `workers.dev` account subdomain;
+- disabling gateway runtime-variable preservation while `BACKEND_ORIGIN` remains configured outside source;
 - configuring `BACKEND_ORIGIN` to `https://yupvox.qs3d.site`, which would create a proxy loop;
 - claiming FFmpeg/Demucs production qualification while their Container bindings are disabled.
 
