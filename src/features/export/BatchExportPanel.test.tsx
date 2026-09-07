@@ -146,7 +146,7 @@ describe('Phase 4C batch export studio controls', () => {
     );
 
     expect(html).toContain('Ready');
-    expect(html).toContain('value="preserve_background" checked=""');
+    expect(html).toMatch(/<input(?=[^>]*value="preserve_background")(?=[^>]*checked="")[^>]*>/);
     expect(html).not.toContain('Unqualified');
   });
 });
