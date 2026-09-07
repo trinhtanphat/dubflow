@@ -14,6 +14,7 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  "vars": { "SEPARATION_RUNTIME_QUALIFIED": "false" },
   "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA" }],
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "dubflow_events" }],
@@ -24,19 +25,28 @@
     { "name": "RATE_LIMIT_VOICE", "namespace_id": "31004", "simple": { "limit": 30, "period": 60 } },
     { "name": "RATE_LIMIT_UPLOAD", "namespace_id": "31005", "simple": { "limit": 20, "period": 60 } },
     { "name": "RATE_LIMIT_VOICE_CLONE", "namespace_id": "31006", "simple": { "limit": 6, "period": 60 } },
-    { "name": "RATE_LIMIT_BATCH_EXPORT", "namespace_id": "31007", "simple": { "limit": 2, "period": 60 } }
+    { "name": "RATE_LIMIT_BATCH_EXPORT", "namespace_id": "31007", "simple": { "limit": 2, "period": 60 } },
+    { "name": "RATE_LIMIT_SEPARATION", "namespace_id": "31008", "simple": { "limit": 2, "period": 60 } }
   ],
   "ai": { "binding": "AI" },
   "workflows": [
     { "binding": "DUBBING_WORKFLOW", "name": "dubflow-dubbing", "class_name": "DubbingWorkflow" },
     { "binding": "EXPORT_WORKFLOW", "name": "dubflow-export", "class_name": "ExportWorkflow" },
-    { "binding": "LANGUAGE_TRANSLATION_WORKFLOW", "name": "dubflow-language-translation", "class_name": "LanguageTranslationWorkflow" }
+    { "binding": "LANGUAGE_TRANSLATION_WORKFLOW", "name": "dubflow-language-translation", "class_name": "LanguageTranslationWorkflow" },
+    { "binding": "SEPARATION_WORKFLOW", "name": "dubflow-separation", "class_name": "SeparationWorkflow" }
   ],
   "containers": [
-    { "class_name": "FfmpegContainer", "image": "./containers/ffmpeg/Dockerfile", "max_instances": 4, "instance_type": "standard-1" }
+    { "class_name": "FfmpegContainer", "image": "./containers/ffmpeg/Dockerfile", "max_instances": 4, "instance_type": "standard-1" },
+    { "class_name": "SeparatorContainer", "image": "./containers/separator/Dockerfile", "max_instances": 2, "instance_type": "standard-1" }
   ],
-  "durable_objects": { "bindings": [{ "name": "FFMPEG_CONTAINER", "class_name": "FfmpegContainer" }] },
-  "exports": { "FfmpegContainer": { "type": "durable-object", "state": "created", "storage": "sqlite" } },
+  "durable_objects": { "bindings": [
+    { "name": "FFMPEG_CONTAINER", "class_name": "FfmpegContainer" },
+    { "name": "SEPARATOR_CONTAINER", "class_name": "SeparatorContainer" }
+  ] },
+  "exports": {
+    "FfmpegContainer": { "type": "durable-object", "state": "created", "storage": "sqlite" },
+    "SeparatorContainer": { "type": "durable-object", "state": "created", "storage": "sqlite" }
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,

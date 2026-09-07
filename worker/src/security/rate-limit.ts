@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { errorBody } from '../http/json';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 
-export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone' | 'batch-export';
+export type RateLimitOperation = 'process' | 'export' | 'translate' | 'voice' | 'upload' | 'voice-clone' | 'batch-export' | 'separation';
 
 const bindingName = {
   process: 'RATE_LIMIT_PROCESS',
@@ -13,6 +13,7 @@ const bindingName = {
   upload: 'RATE_LIMIT_UPLOAD',
   'voice-clone': 'RATE_LIMIT_VOICE_CLONE',
   'batch-export': 'RATE_LIMIT_BATCH_EXPORT',
+  separation: 'RATE_LIMIT_SEPARATION',
 } as const satisfies Record<RateLimitOperation, keyof Env>;
 
 export async function checkRateLimit(
@@ -22,14 +23,15 @@ export async function checkRateLimit(
 ): Promise<{ allowed: boolean; retryAfterSeconds: 60 }> {
   const actor = userId.trim();
   if (!actor) throw new Error('Rate-limit actor is required.');
-  const result = await env[bindingName[operation]].limit({ key: `${actor}:${operation}` });
+  const binding = env[bindingName[operation]];
+  if (!binding || typeof binding !== 'object' || !('limit' in binding)) {
+    throw new Error(`Rate-limit binding for ${operation} is unavailable.`);
+  }
+  const result = await (binding as Env['RATE_LIMIT_PROCESS']).limit({ key: `${actor}:${operation}` });
   return { allowed: result.success, retryAfterSeconds: 60 };
 }
 
 function effectiveOperation(c: Context<any>, operation: RateLimitOperation): RateLimitOperation {
-  // Main already shipped a dedicated batch-export admission budget. The canonical Phase 4C
-  // reconciliation keeps batch fan-out inside the export router, so preserve that budget at
-  // the shared limiter boundary instead of consuming both batch and single-export quotas.
   if (operation === 'export' && c.req.path.endsWith('/exports/batch')) return 'batch-export';
   return operation;
 }

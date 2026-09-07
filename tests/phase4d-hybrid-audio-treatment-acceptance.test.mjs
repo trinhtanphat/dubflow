@@ -18,14 +18,14 @@ const readiness = source('worker/src/routes/readiness.ts');
 const ci = source('.github/workflows/ci.yml');
 const readme = source('README.md');
 const deploymentStatus = source('docs/deployment-status.md');
+const wrangler = source('wrangler.jsonc');
 
 test('Phase 4D persists the canonical source generation, audio mode, and reusable stem schema', () => {
   assert.match(migration, /source_generation/i);
   assert.match(migration, /audio_mode/i);
   assert.match(migration, /CREATE TABLE project_audio_stems/i);
   assert.match(migration, /idx_project_audio_stems_active/i);
-  const readinessRevision = Number(readiness.match(/CURRENT_SCHEMA_REVISION\s*=\s*(\d+)\s+as const/)?.[1]);
-  assert.ok(Number.isInteger(readinessRevision) && readinessRevision >= 11);
+  assert.match(readiness, /CURRENT_SCHEMA_REVISION = 11 as const/);
   assert.match(readiness, /project_audio_stems/);
 });
 
@@ -42,7 +42,7 @@ test('Phase 4D locks deterministic ducking and separated-background rendering co
   assert.match(render, /separated_background/);
 });
 
-test('Phase 4D separation stays fail-closed with stable errors and an unavailable production adapter', () => {
+test('Phase 4D separation keeps stable fail-closed errors and an unavailable fallback adapter', () => {
   for (const code of [
     'DIALOGUE_SEPARATION_UNAVAILABLE',
     'DIALOGUE_SEPARATION_UNQUALIFIED',
@@ -51,7 +51,8 @@ test('Phase 4D separation stays fail-closed with stable errors and an unavailabl
   ]) assert.match(separationTypes, new RegExp(code));
   assert.match(unavailable, /qualification:\s*'unavailable'/);
   assert.match(unavailable, /configured:\s*false/);
-  assert.match(exportWorkflow, /new UnavailableDialogueSeparationProvider\(\)/);
+  assert.match(exportWorkflow, /createDialogueSeparationProvider\(this\.env\)/);
+  assert.match(wrangler, /"SEPARATION_RUNTIME_QUALIFIED"\s*:\s*"false"/);
 });
 
 test('Phase 4D exposes capability admission and honest Studio treatment labels', () => {

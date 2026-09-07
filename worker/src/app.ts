@@ -8,7 +8,7 @@ import { createVoiceRoutes } from './routes/voice';
 import { createVoiceCloneRoutes } from './routes/voice-clones';
 import { createProcessRoutes } from './routes/process';
 import { createExportRoutes } from './routes/export';
-import { createVisualExportMediaRoutes } from './routes/visual-export-media';
+import { createSeparationRoutes } from './routes/separation';
 import { createSegmentRoutes } from './routes/segments';
 import { createSpeakerRoutes } from './routes/speakers';
 import { createTranslationRoutes } from './routes/translation';
@@ -19,10 +19,12 @@ import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
-import { createProviderMediaRoutes } from './routes/provider-media';
+import { createDialogueSeparationProvider } from './services/separation/config';
 
 const app = new Hono<WorkerHonoEnv>();
-const exportRoutes = createExportRoutes();
+const exportRoutes = createExportRoutes({
+  makeSeparation: (env) => createDialogueSeparationProvider(env),
+});
 const languageRoutes = createLanguageRoutes();
 const translationVariantRoutes = createTranslationVariantRoutes();
 
@@ -35,8 +37,8 @@ app.get('/api/ready', async (c) => {
 app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
-app.route('/api/projects', createVisualExportMediaRoutes());
 app.route('/api/projects', exportRoutes);
+app.route('/api/projects', createSeparationRoutes());
 app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
@@ -50,7 +52,6 @@ app.route('/api/projects', createMediaRoutes());
 app.route('/api/voice', createVoiceRoutes());
 app.route('/api', createUsageRoutes());
 app.route('/api', createPublicShareRoutes());
-app.route('/api', createProviderMediaRoutes());
 app.get('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default app;

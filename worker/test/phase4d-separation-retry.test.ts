@@ -1,36 +1,40 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { UsageRecordInput } from '../src/db/usage';
-import { runExportPipeline } from '../src/workflows/exportPipeline';
+import { runSeparationPipeline } from '../src/workflows/separationPipeline';
 
 function step() {
   return { do: vi.fn(async (_name: string, callback: () => Promise<unknown>) => callback()) };
 }
 
 describe('Phase 4D separation retry safety', () => {
-  it('retries a failed provider attempt from a new export job without colliding on project-scoped started usage', async () => {
+  it('retries a failed provider attempt with a new retry generation without usage-key collision', async () => {
     const usage = new Map<string, UsageRecordInput>();
-    let stemSerial = 0;
-    let stem: {
+    const stems = new Map<'background' | 'dialogue', {
       id: string;
       status: 'pending' | 'completed' | 'failed';
       objectKey: string | null;
-    } | null = null;
+    }>();
+    let stemSerial = 0;
+    let retryCount = 0;
+    const provider = 'separator';
     const expectedBackground = 'projects/p1/stems/1/separator/background.wav';
+    const expectedDialogue = 'projects/p1/stems/1/separator/dialogue.wav';
 
     const separation = {
       capabilities: vi.fn(async () => ({
         configured: true,
-        provider: 'separator',
+        provider,
         backgroundStem: true,
-        dialogueStem: false,
+        dialogueStem: true,
         qualification: 'qualified' as const,
       })),
       separate: vi.fn()
         .mockRejectedValueOnce(new Error('provider failed'))
         .mockResolvedValueOnce({
-          provider: 'separator',
+          provider,
           providerVersion: '1',
           backgroundObjectKey: expectedBackground,
+          dialogueObjectKey: expectedDialogue,
         }),
     };
 
@@ -38,86 +42,90 @@ describe('Phase 4D separation retry safety', () => {
       projects: {
         getByIdForUser: vi.fn(async () => ({
           id: 'p1',
+          userId: 'u1',
+          title: 'P1',
+          sourceLanguage: 'zh' as const,
+          targetLanguage: 'vi' as const,
+          targetLanguagesRevision: 1,
+          sourceGeneration: 1,
+          status: 'needs_review' as const,
           sourceObjectKey: 'projects/p1/source/video.mp4',
           durationMs: 10_000,
-          sourceGeneration: 1,
         })),
-        setStatus: vi.fn(async () => {}),
-        setExportObject: vi.fn(async () => {}),
       },
       jobs: {
-        getForProject: vi.fn(async () => ({ status: 'running' as const, retryCount: 0 })),
+        getForProject: vi.fn(async () => ({
+          id: 'job-1',
+          projectId: 'p1',
+          type: 'audio_separation',
+          status: 'running' as const,
+          progress: 0.1,
+          currentStep: 'separating_audio',
+          errorCode: null,
+          errorMessage: null,
+          retryCount,
+          createdAt: '',
+          updatedAt: '',
+        })),
         setProgress: vi.fn(async () => {}),
         fail: vi.fn(async () => {}),
         complete: vi.fn(async () => {}),
       },
-      segments: {
-        list: vi.fn(async () => [{
-          id: 's1',
-          speakerId: null,
-          startMs: 0,
-          endMs: 2_000,
-          translatedText: 'legacy',
-          voiceStatus: 'completed',
-          dubbedObjectKey: null,
-          version: 1,
-        }]),
-        setVoiceResult: vi.fn(async () => {}),
-      },
-      translations: {
-        list: vi.fn(async () => [{
-          segmentId: 's1',
-          targetLanguage: 'ja' as const,
-          translatedText: 'こんにちは',
-          translationStatus: 'completed',
-          voiceStatus: 'completed',
-          dubbedObjectKey: 'projects/p1/voices/ja/s1/1.mp3',
-          version: 1,
-        }]),
-        setVoiceResult: vi.fn(async () => {}),
-      },
-      exports: {
-        complete: vi.fn(async () => {}),
-        fail: vi.fn(async () => {}),
-      },
-      speakers: { list: vi.fn(async () => []) },
       stems: {
-        latestCompleted: vi.fn(async () => stem?.status === 'completed' ? {
-          id: stem.id,
-          projectId: 'p1',
-          sourceGeneration: 1,
-          kind: 'background' as const,
-          provider: 'separator',
-          providerVersion: '1',
-          status: 'completed' as const,
-          objectKey: stem.objectKey,
-          errorCode: null,
-          errorMessage: null,
-          createdAt: '',
-          updatedAt: '',
-        } : null),
-        begin: vi.fn(async () => {
-          if (stem?.status === 'pending' || stem?.status === 'completed') return {
+        latestCompleted: vi.fn(async (
+          _projectId: string,
+          _userId: string,
+          _sourceGeneration: number,
+          kind: 'background' | 'dialogue',
+        ) => {
+          const stem = stems.get(kind);
+          if (stem?.status !== 'completed') return null;
+          return {
             id: stem.id,
             projectId: 'p1',
             sourceGeneration: 1,
-            kind: 'background' as const,
-            provider: 'separator',
-            providerVersion: null,
-            status: stem.status,
+            kind,
+            provider,
+            providerVersion: '1',
+            status: 'completed' as const,
             objectKey: stem.objectKey,
             errorCode: null,
             errorMessage: null,
             createdAt: '',
             updatedAt: '',
           };
-          stem = { id: `stem-${++stemSerial}`, status: 'pending', objectKey: null };
+        }),
+        begin: vi.fn(async (
+          _projectId: string,
+          _userId: string,
+          _sourceGeneration: number,
+          kind: 'background' | 'dialogue',
+        ) => {
+          const current = stems.get(kind);
+          if (current?.status === 'pending' || current?.status === 'completed') {
+            return {
+              id: current.id,
+              projectId: 'p1',
+              sourceGeneration: 1,
+              kind,
+              provider,
+              providerVersion: null,
+              status: current.status,
+              objectKey: current.objectKey,
+              errorCode: null,
+              errorMessage: null,
+              createdAt: '',
+              updatedAt: '',
+            };
+          }
+          const next = { id: `stem-${++stemSerial}`, status: 'pending' as const, objectKey: null };
+          stems.set(kind, next);
           return {
-            id: stem.id,
+            id: next.id,
             projectId: 'p1',
             sourceGeneration: 1,
-            kind: 'background' as const,
-            provider: 'separator',
+            kind,
+            provider,
             providerVersion: null,
             status: 'pending' as const,
             objectKey: null,
@@ -127,24 +135,23 @@ describe('Phase 4D separation retry safety', () => {
             updatedAt: '',
           };
         }),
-        complete: vi.fn(async (_projectId: string, stemId: string, _userId: string, objectKey: string) => {
-          expect(stem?.id).toBe(stemId);
-          stem = { id: stemId, status: 'completed', objectKey };
+        complete: vi.fn(async (
+          _projectId: string,
+          stemId: string,
+          _userId: string,
+          objectKey: string,
+        ) => {
+          const entry = [...stems.entries()].find(([, stem]) => stem.id === stemId);
+          expect(entry).toBeTruthy();
+          stems.set(entry![0], { id: stemId, status: 'completed', objectKey });
         }),
         fail: vi.fn(async (_projectId: string, stemId: string) => {
-          expect(stem?.id).toBe(stemId);
-          stem = { id: stemId, status: 'failed', objectKey: null };
+          const entry = [...stems.entries()].find(([, stem]) => stem.id === stemId);
+          expect(entry).toBeTruthy();
+          stems.set(entry![0], { id: stemId, status: 'failed', objectKey: null });
         }),
       },
-      separation,
-      bucket: { put: vi.fn(async () => ({})) },
-      voice: { generate: vi.fn(async () => { throw new Error('voice must not run'); }) },
-      media: {
-        probe: vi.fn(async () => ({ durationMs: 1_000 })),
-        renderExport: vi.fn(async (_projectId: string, _source: string, _clips: unknown[], options: { targetLanguage: string; exportId: string }) => ({
-          exportObjectKey: `projects/p1/exports/${options.targetLanguage}/${options.exportId}.mp4`,
-        })),
-      },
+      provider: separation,
       usage: {
         getByOperation: vi.fn(async (operationKey: string, phase: 'started' | 'completed') => usage.get(`${operationKey}|${phase}`) ?? null),
         record: vi.fn(async (input: UsageRecordInput) => {
@@ -158,35 +165,34 @@ describe('Phase 4D separation retry safety', () => {
           return { ...input, id: key, costBasis: 0, createdAt: '' };
         }),
       },
-      telemetry: { write: vi.fn(async () => {}) },
     };
 
-    await expect(runExportPipeline({
+    await expect(runSeparationPipeline({
       projectId: 'p1',
       userId: 'u1',
       jobId: 'job-1',
-      exportId: 'export-1',
-      targetLanguage: 'ja',
-      output: 'dubbed',
-      audioMode: 'separated_background',
-    }, deps as never, step() as never)).rejects.toMatchObject({ code: 'DIALOGUE_SEPARATION_FAILED' });
+    }, deps as never, step() as never)).rejects.toThrow('provider failed');
 
-    expect(stem).toMatchObject({ status: 'failed' });
+    expect(stems.get('background')).toMatchObject({ status: 'failed' });
+    expect(stems.get('dialogue')).toMatchObject({ status: 'failed' });
+    expect(usage.has('job:job-1:retry:0:dialogue-separation:separator|started')).toBe(true);
 
-    await expect(runExportPipeline({
+    retryCount = 1;
+    await expect(runSeparationPipeline({
       projectId: 'p1',
       userId: 'u1',
-      jobId: 'job-2',
-      exportId: 'export-2',
-      targetLanguage: 'ja',
-      output: 'dubbed',
-      audioMode: 'separated_background',
+      jobId: 'job-1',
     }, deps as never, step() as never)).resolves.toEqual({
       status: 'completed',
-      exportObjectKey: 'projects/p1/exports/ja/export-2.mp4',
+      reused: false,
+      backgroundObjectKey: expectedBackground,
+      dialogueObjectKey: expectedDialogue,
     });
 
     expect(separation.separate).toHaveBeenCalledTimes(2);
-    expect(stem).toMatchObject({ status: 'completed', objectKey: expectedBackground });
+    expect(stems.get('background')).toMatchObject({ status: 'completed', objectKey: expectedBackground });
+    expect(stems.get('dialogue')).toMatchObject({ status: 'completed', objectKey: expectedDialogue });
+    expect(usage.has('job:job-1:retry:1:dialogue-separation:separator|started')).toBe(true);
+    expect(usage.has('job:job-1:retry:1:dialogue-separation:separator|completed')).toBe(true);
   });
 });
