@@ -8,9 +8,7 @@ import {
 
 type TargetLanguageRow = {
   targetLanguage: string;
-  enabled: number;
   status: string;
-  structuralVersion: number;
 };
 
 class CreateProjectMemoryDb implements D1DatabaseLike {
@@ -42,18 +40,10 @@ class CreateProjectStatement implements D1StatementLike {
       return { meta: { changes: 1 } };
     }
     if (/INSERT INTO project_target_languages/i.test(this.sql)) {
-      const [projectId, targetLanguage, enabled, status, structuralVersion] = this.values as [
-        string,
-        string,
-        number,
-        string,
-        number,
-      ];
+      const [projectId, targetLanguage] = this.values as [string, string];
       this.db.targetLanguages.set(projectId, {
         targetLanguage,
-        enabled,
-        status,
-        structuralVersion,
+        status: 'pending',
       });
       return { meta: { changes: 1 } };
     }
@@ -82,9 +72,7 @@ describe('project creation language seed', () => {
 
     expect(db.targetLanguages.get(project.id)).toEqual({
       targetLanguage: 'vi',
-      enabled: 1,
       status: 'pending',
-      structuralVersion: 1,
     });
   });
 });
