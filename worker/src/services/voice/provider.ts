@@ -23,5 +23,6 @@ export function createVoiceProvider(env: VoiceProviderEnv): VoiceProvider {
     model: GROK_TTS_MODEL,
     verifiedLanguages: ['vi'],
     voice: GROK_TTS_DEFAULT_VOICE,
+    provider: GROK_TTS_MODEL,
   });
 }

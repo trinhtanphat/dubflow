@@ -3,6 +3,7 @@ import type { AiBinding, AiRunOptions } from '../src/cloudflare/ai';
 import type { Env } from '../src/env';
 import type { UsageRecordInput } from '../src/db/usage';
 import { createExportRoutes } from '../src/routes/export';
+import { createVoiceProvider } from '../src/services/voice/provider';
 import { WorkersAIVoiceProvider } from '../src/services/voice/workers-ai';
 import { runExportPipeline } from '../src/workflows/exportPipeline';
 
@@ -76,6 +77,18 @@ afterEach(() => {
 });
 
 describe('production Grok TTS fallback', () => {
+  it('reports the selected Grok model as provider provenance while native Workers AI keeps its generic label', () => {
+    const ai = new FakeAI();
+    const selected = createVoiceProvider({ AI: ai } as unknown as Env);
+    const native = new WorkersAIVoiceProvider(ai, {
+      model: '@cf/myshell-ai/melotts',
+      verifiedLanguages: ['en'],
+    });
+
+    expect(selected.capabilities().provider).toBe('xai/grok-tts');
+    expect(native.capabilities().provider).toBe('workers-ai');
+  });
+
   it('requests Vietnamese raw PCM 24 kHz and fetches the Unified AI presigned audio URL', async () => {
     const ai = new FakeAI();
     const fetchMock = vi.fn(async () => new Response(new Uint8Array([1, 2, 3, 4]), {
