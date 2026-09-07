@@ -19,6 +19,8 @@ The backend `wrangler.jsonc` must target account `6c5207813df3d5b83b9508125e0e9e
 
 The repository-owned Workers Builds deploy command is `node scripts/cloudflare-workers-build-deploy.mjs`. The deployment phase owns Worker upload, remote D1 migration application, and readiness verification.
 
+That deploy runner delegates temporary production-config generation to the pure `scripts/cloudflare-workers-build-config.mjs` module. The generator writes `.wrangler-production.json` from `wrangler.jsonc` while defensively removing `containers`, `durable_objects`, top-level `exports`, and `routes`. It never changes the backend account or removes the zero-container Stream binding.
+
 ## Public gateway
 
 `wrangler.gateway.jsonc` is the only checked-in Wrangler config allowed to attach `yupvox.qs3d.site`.
@@ -28,6 +30,8 @@ It targets account `trinhtanphat2403` and deploys `dubflow-gateway`, which owns 
 ## GitHub Actions responsibility
 
 GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform Wrangler dry-runs, typecheck the gateway, and capture test artifacts/screenshots.
+
+CI must dry-run both the checked-in backend `wrangler.jsonc` and the exact generated `.wrangler-production.json`. CI may invoke only the pure config generator to create that temporary file; it must not invoke the Workers Builds deployment runner, remote migrations, readiness mutation, or any non-dry-run production deployment. The generated file is removed after qualification.
 
 GitHub Actions **must not deploy production**. Do not add a production `wrangler deploy`, remote D1 migration, secret mutation, Cloudflare production API call, or alternate production deployment workflow to GitHub Actions.
 
@@ -49,9 +53,10 @@ CI must fail if any of these regressions return:
 
 - backend `wrangler.jsonc` claims `yupvox.qs3d.site` or targets the gateway account;
 - `wrangler.gateway.jsonc` stops targeting account 2403 or stops owning the public custom domain;
-- paid Container runtime bindings or exports return;
+- paid Container runtime bindings, dormant Durable Object lifecycle exports, or custom-domain routes survive into the generated backend production config;
 - the zero-container Stream binding disappears from the backend;
-- GitHub Actions gains a production deployment path;
+- CI stops validating the exact generated `.wrangler-production.json`;
+- GitHub Actions invokes the production deployment runner or gains any production deployment path;
 - readiness accepts a stale schema revision.
 
 This policy is intentional and should be treated as a repository-level requirement.
