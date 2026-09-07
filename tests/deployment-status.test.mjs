@@ -20,7 +20,7 @@ test('deployment status documents the split public gateway and backend state own
 
 test('deployment status describes schema-14 R2-only media and optional lip-sync paths', () => {
   assert.match(status, /R2-only/i);
-  assert.doesNotMatch(status, /Cloudflare Stream.*production dependency|production dependency.*Cloudflare Stream/is);
+  assert.match(status, /no Cloudflare Stream production dependency/i);
   assert.match(status, /remote ASR/i);
   assert.match(status, /PCM|WAV/i);
   assert.match(status, /schema revision \*\*14\*\*|schema revision 14/i);
