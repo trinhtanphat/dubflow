@@ -433,12 +433,27 @@ export function StudioShell(props: Props) {
     setClientVoiceState('preparing');
     setClientVoiceStatus('Đang chuẩn bị giọng Việt cục bộ…');
     try {
+      const initial = await getTranslationVariants(projectId, 'vi');
+      if (vietnameseClientVoiceCacheComplete(projectId, initial)) {
+        if (currentLanguage === 'vi') setTargetSegments(initial);
+        setClientVoiceCached(true);
+        setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+        setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
+        return initial;
+      }
+      if (!browserPiperAvailable()) {
+        throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+      }
+      let useInitial = true;
       const verified = await preloadVietnameseVoices(projectId, {
-        fetchVariants: (id) => getTranslationVariants(id, 'vi'),
-        synthesize: (text, onProgress) => {
-          if (!browserPiperAvailable()) {
-            throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+        fetchVariants: async (id) => {
+          if (useInitial) {
+            useInitial = false;
+            return initial;
           }
+          return getTranslationVariants(id, 'vi');
+        },
+        synthesize: (text, onProgress) => {
           if (!piperClientRef.current) piperClientRef.current = new BrowserPiperClient();
           return piperClientRef.current.synthesize(text, onProgress);
         },
@@ -446,7 +461,7 @@ export function StudioShell(props: Props) {
       }, (progress) => setClientVoiceStatus(clientVoiceProgressLabel(progress)));
       if (currentLanguage === 'vi') setTargetSegments(verified);
       setClientVoiceCached(true);
-      setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+      setClientVoiceState('available');
       setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
       return verified;
     } catch (error) {
