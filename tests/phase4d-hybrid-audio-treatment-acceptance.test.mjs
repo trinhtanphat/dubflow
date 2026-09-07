@@ -33,12 +33,12 @@ test('Phase 4D exposes exactly three backwards-compatible dubbed audio modes', (
   assert.match(audioMode, /value === undefined\) return 'dubbed_only'/);
 });
 
-test('zero-container production selects Stream publishing only for dubbed_only and keeps legacy hybrid modes fail-closed', () => {
+test('zero-container production selects R2 remux publishing only for dubbed_only and keeps legacy hybrid modes fail-closed', () => {
   assert.match(exportPipeline, /value\.output === 'dubbed' && value\.audioMode === 'dubbed_only'/);
   assert.match(exportPipeline, /if \(!deps\.media && value\.output !== 'subtitles'\)/);
-  assert.doesNotMatch(exportWorkflow, /ContainerMediaProcessor|FFMPEG_CONTAINER|ffmpeg-container/);
+  assert.doesNotMatch(exportWorkflow, /ContainerMediaProcessor|FFMPEG_CONTAINER|ffmpeg-container|StreamMediaService/);
   assert.match(exportWorkflow, /PcmSoundtrackService/);
-  assert.match(exportWorkflow, /StreamMediaService/);
+  assert.match(exportWorkflow, /R2Mp4RemuxPublisher/);
 });
 
 test('Phase 4D separation stays fail-closed with stable errors and an unavailable production adapter', () => {
