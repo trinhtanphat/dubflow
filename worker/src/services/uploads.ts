@@ -6,6 +6,7 @@ import {
   type NormalizedUploadInput,
   UploadInputError,
 } from '../domain/upload';
+import { MAX_MEDIA_DURATION_SECONDS } from '../../../shared/mediaPolicy';
 
 export const MULTIPART_PART_SIZE_BYTES = 25 * 1024 * 1024;
 export const PREPARED_ASR_MAX_CHUNK_DURATION_MS = 300_000;
@@ -32,10 +33,29 @@ export type PreparedAsrManifest = {
   chunks: PreparedAsrChunkDescriptor[];
 };
 
+export type PreparedAsrChunkUploadInput = {
+  sourceGeneration: unknown;
+  index: unknown;
+  offsetMs: unknown;
+  durationMs: unknown;
+  wav: ArrayBuffer;
+};
+
 type CompletePreparedAsrInput = {
   sourceGeneration?: number;
   durationMs?: number;
-  chunks?: Array<{ index?: number; offsetMs?: number; durationMs?: number; sizeBytes?: number }>;
+  chunks?: Array<{
+    index?: number;
+    objectKey?: string;
+    offsetMs?: number;
+    durationMs?: number;
+    sizeBytes?: number;
+  }>;
+};
+
+export type PreparedAsrCompletion = PreparedAsrManifest & {
+  manifestKey: string;
+  chunkCount: number;
 };
 
 export class UploadServiceError extends Error {
@@ -59,6 +79,70 @@ function nonNegativeInteger(value: unknown, code: string, message: string): numb
   const number = Number(value);
   if (!Number.isInteger(number) || number < 0) throw new UploadServiceError(code, message);
   return number;
+}
+
+function validateCanonicalPcmWav(wav: ArrayBuffer, declaredDurationMs: number): void {
+  if (!(wav instanceof ArrayBuffer) || wav.byteLength <= 44 || wav.byteLength > PREPARED_ASR_MAX_CHUNK_BYTES) {
+    throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV chunk size is invalid.');
+  }
+
+  const bytes = new Uint8Array(wav);
+  const view = new DataView(wav);
+  if (ascii(bytes, 0, 4) !== 'RIFF' || ascii(bytes, 8, 4) !== 'WAVE') {
+    throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR chunk must be a RIFF/WAVE file.');
+  }
+
+  let offset = 12;
+  let foundFmt = false;
+  let foundData = false;
+  let dataBytes = 0;
+  while (offset + 8 <= bytes.byteLength) {
+    const id = ascii(bytes, offset, 4);
+    const size = view.getUint32(offset + 4, true);
+    const dataOffset = offset + 8;
+    const next = dataOffset + size + (size % 2);
+    if (next > bytes.byteLength) {
+      throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV chunk table is truncated.');
+    }
+
+    if (id === 'fmt ') {
+      if (size < 16) throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV fmt chunk is invalid.');
+      const audioFormat = view.getUint16(dataOffset, true);
+      const channels = view.getUint16(dataOffset + 2, true);
+      const sampleRate = view.getUint32(dataOffset + 4, true);
+      const byteRate = view.getUint32(dataOffset + 8, true);
+      const blockAlign = view.getUint16(dataOffset + 12, true);
+      const bitsPerSample = view.getUint16(dataOffset + 14, true);
+      if (
+        audioFormat !== 1
+        || channels !== 1
+        || sampleRate !== 16_000
+        || byteRate !== 32_000
+        || blockAlign !== 2
+        || bitsPerSample !== 16
+      ) {
+        throw new UploadServiceError(
+          'ASR_PREP_WAV_INVALID',
+          'Prepared ASR WAV must be PCM16 mono at 16 kHz.',
+        );
+      }
+      foundFmt = true;
+    } else if (id === 'data') {
+      if (size <= 0) throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV data is empty.');
+      dataBytes = size;
+      foundData = true;
+    }
+
+    offset = next;
+  }
+
+  if (!foundFmt || !foundData) {
+    throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV is missing canonical fmt or data chunks.');
+  }
+  const actualDurationMs = (dataBytes / 32_000) * 1000;
+  if (!Number.isFinite(actualDurationMs) || Math.abs(actualDurationMs - declaredDurationMs) > 100) {
+    throw new UploadServiceError('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV duration does not match its descriptor.');
+  }
 }
 
 export class UploadService {
@@ -85,14 +169,14 @@ export class UploadService {
     const project = await this.requireProject(projectId, userId);
     const generation = positiveInteger(
       sourceGeneration,
-      'PREPARED_ASR_GENERATION_INVALID',
+      'ASR_PREP_GENERATION_INVALID',
       'Prepared ASR source generation must be a positive integer.',
     );
     if (!project.sourceObjectKey) {
-      throw new UploadServiceError('PREPARED_ASR_SOURCE_MISSING', 'Project source media is missing.');
+      throw new UploadServiceError('ASR_PREP_SOURCE_MISSING', 'Project source media is missing.');
     }
     if (project.sourceGeneration !== generation) {
-      throw new UploadServiceError('PREPARED_ASR_SOURCE_CHANGED', 'Project source generation changed before prepared audio was stored.');
+      throw new UploadServiceError('ASR_PREP_STALE', 'Project source generation changed before prepared audio was stored.');
     }
     return { project, sourceGeneration: generation };
   }
@@ -179,35 +263,25 @@ export class UploadService {
     return { objectKey, size: object.size };
   }
 
-  async putPreparedAsrChunk(
+  async uploadPreparedAsrChunk(
     projectId: string,
     userId: string,
-    sourceGeneration: unknown,
-    indexValue: unknown,
-    offsetValue: unknown,
-    durationValue: unknown,
-    wav: ArrayBuffer,
+    input: PreparedAsrChunkUploadInput,
   ): Promise<PreparedAsrChunkDescriptor> {
-    const { sourceGeneration: generation } = await this.requireCurrentSourceGeneration(projectId, userId, sourceGeneration);
-    const index = nonNegativeInteger(indexValue, 'PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR chunk index is invalid.');
-    const offsetMs = nonNegativeInteger(offsetValue, 'PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR chunk offset is invalid.');
-    const durationMs = positiveInteger(durationValue, 'PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR chunk duration is invalid.');
+    const { sourceGeneration } = await this.requireCurrentSourceGeneration(projectId, userId, input.sourceGeneration);
+    const index = nonNegativeInteger(input.index, 'ASR_PREP_CHUNK_INVALID', 'Prepared ASR chunk index is invalid.');
+    const offsetMs = nonNegativeInteger(input.offsetMs, 'ASR_PREP_CHUNK_INVALID', 'Prepared ASR chunk offset is invalid.');
+    const durationMs = positiveInteger(input.durationMs, 'ASR_PREP_CHUNK_INVALID', 'Prepared ASR chunk duration is invalid.');
     if (durationMs > PREPARED_ASR_MAX_CHUNK_DURATION_MS) {
-      throw new UploadServiceError('PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR chunk exceeds 300 seconds.');
+      throw new UploadServiceError('ASR_PREP_CHUNK_INVALID', 'Prepared ASR chunk exceeds 300 seconds.');
     }
-    if (!(wav instanceof ArrayBuffer) || wav.byteLength <= 44 || wav.byteLength > PREPARED_ASR_MAX_CHUNK_BYTES) {
-      throw new UploadServiceError('PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR WAV chunk size is invalid.');
-    }
-    const bytes = new Uint8Array(wav);
-    if (ascii(bytes, 0, 4) !== 'RIFF' || ascii(bytes, 8, 4) !== 'WAVE') {
-      throw new UploadServiceError('PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR chunk must be a RIFF/WAVE file.');
-    }
-    if (!this.bucket.put) throw new UploadServiceError('R2_PUT_UNAVAILABLE', 'R2 put is unavailable.');
+    validateCanonicalPcmWav(input.wav, durationMs);
+    if (!this.bucket.put) throw new UploadServiceError('ASR_PREP_R2_UNAVAILABLE', 'R2 put is unavailable.');
 
-    const objectKey = this.preparedChunkKey(projectId, generation, index);
-    const object = await this.bucket.put(objectKey, wav, { httpMetadata: { contentType: 'audio/wav' } });
-    if (object.key !== objectKey) {
-      throw new UploadServiceError('PREPARED_ASR_CHUNK_MISMATCH', 'Stored prepared ASR chunk key does not match the derived key.');
+    const objectKey = this.preparedChunkKey(projectId, sourceGeneration, index);
+    const object = await this.bucket.put(objectKey, input.wav, { httpMetadata: { contentType: 'audio/wav' } });
+    if (object.key !== objectKey || object.size !== input.wav.byteLength) {
+      throw new UploadServiceError('ASR_PREP_CHUNK_MISMATCH', 'Stored prepared ASR chunk does not match the derived object.');
     }
     return { index, objectKey, offsetMs, durationMs, sizeBytes: object.size };
   }
@@ -216,39 +290,47 @@ export class UploadService {
     projectId: string,
     userId: string,
     input: CompletePreparedAsrInput,
-  ): Promise<PreparedAsrManifest> {
+  ): Promise<PreparedAsrCompletion> {
     const { project, sourceGeneration } = await this.requireCurrentSourceGeneration(projectId, userId, input.sourceGeneration);
-    const durationMs = positiveInteger(input.durationMs, 'PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR duration is invalid.');
+    const durationMs = positiveInteger(input.durationMs, 'ASR_PREP_MANIFEST_INVALID', 'Prepared ASR duration is invalid.');
+    if (durationMs > MAX_MEDIA_DURATION_SECONDS * 1000) {
+      throw new UploadServiceError('ASR_PREP_MANIFEST_INVALID', 'Prepared ASR duration exceeds the media limit.');
+    }
     if (!Array.isArray(input.chunks) || input.chunks.length === 0) {
-      throw new UploadServiceError('PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR manifest requires at least one chunk.');
+      throw new UploadServiceError('ASR_PREP_MANIFEST_INVALID', 'Prepared ASR manifest requires at least one chunk.');
     }
     if (!this.bucket.head || !this.bucket.put) {
-      throw new UploadServiceError('R2_PREPARED_ASR_UNAVAILABLE', 'R2 head/put is unavailable for prepared ASR completion.');
+      throw new UploadServiceError('ASR_PREP_R2_UNAVAILABLE', 'R2 head/put is unavailable for prepared ASR completion.');
     }
 
     const chunks: PreparedAsrChunkDescriptor[] = [];
     let expectedOffsetMs = 0;
     for (let position = 0; position < input.chunks.length; position += 1) {
       const raw = input.chunks[position];
-      const index = nonNegativeInteger(raw.index, 'PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunk index is invalid.');
-      if (index !== position) throw new UploadServiceError('PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunks must be contiguous from index zero.');
-      const offsetMs = nonNegativeInteger(raw.offsetMs, 'PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunk offset is invalid.');
-      const chunkDurationMs = positiveInteger(raw.durationMs, 'PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunk duration is invalid.');
-      const declaredSizeBytes = positiveInteger(raw.sizeBytes, 'PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunk size is invalid.');
+      const index = nonNegativeInteger(raw.index, 'ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunk index is invalid.');
+      if (index !== position) {
+        throw new UploadServiceError('ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunks must be contiguous from index zero.');
+      }
+      const offsetMs = nonNegativeInteger(raw.offsetMs, 'ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunk offset is invalid.');
+      const chunkDurationMs = positiveInteger(raw.durationMs, 'ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunk duration is invalid.');
+      const declaredSizeBytes = positiveInteger(raw.sizeBytes, 'ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunk size is invalid.');
       if (offsetMs !== expectedOffsetMs || chunkDurationMs > PREPARED_ASR_MAX_CHUNK_DURATION_MS) {
-        throw new UploadServiceError('PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR chunk timeline is not contiguous or bounded.');
+        throw new UploadServiceError('ASR_PREP_DESCRIPTOR_INVALID', 'Prepared ASR chunk timeline is not contiguous or bounded.');
       }
 
       const objectKey = this.preparedChunkKey(projectId, sourceGeneration, index);
+      if (raw.objectKey !== undefined && raw.objectKey !== objectKey) {
+        throw new UploadServiceError('ASR_PREP_DESCRIPTOR_INVALID', 'Client-provided prepared ASR object key is not canonical.');
+      }
       const stored = await this.bucket.head(objectKey);
       if (!stored || stored.size !== declaredSizeBytes || stored.size <= 44 || stored.size > PREPARED_ASR_MAX_CHUNK_BYTES) {
-        throw new UploadServiceError('PREPARED_ASR_CHUNK_MISSING', `Prepared ASR chunk ${index} is missing or changed.`);
+        throw new UploadServiceError('ASR_PREP_CHUNK_MISSING', `Prepared ASR chunk ${index} is missing or changed.`);
       }
       chunks.push({ index, objectKey, offsetMs, durationMs: chunkDurationMs, sizeBytes: stored.size });
       expectedOffsetMs += chunkDurationMs;
     }
     if (expectedOffsetMs !== durationMs) {
-      throw new UploadServiceError('PREPARED_ASR_MANIFEST_INVALID', 'Prepared ASR manifest duration does not match its chunks.');
+      throw new UploadServiceError('ASR_PREP_MANIFEST_INVALID', 'Prepared ASR manifest duration does not match its chunks.');
     }
 
     const manifest: PreparedAsrManifest = {
@@ -267,8 +349,8 @@ export class UploadService {
     const encoded = JSON.stringify(manifest);
     const storedManifest = await this.bucket.put(manifestKey, encoded, { httpMetadata: { contentType: 'application/json' } });
     if (storedManifest.key !== manifestKey) {
-      throw new UploadServiceError('PREPARED_ASR_MANIFEST_MISMATCH', 'Stored prepared ASR manifest key does not match the derived key.');
+      throw new UploadServiceError('ASR_PREP_MANIFEST_MISMATCH', 'Stored prepared ASR manifest key does not match the derived key.');
     }
-    return manifest;
+    return { ...manifest, manifestKey, chunkCount: chunks.length };
   }
 }
