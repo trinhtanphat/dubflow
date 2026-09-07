@@ -37,9 +37,6 @@ app.get('/api/ready', async (c) => {
     publicOrigin: c.env.PUBLIC_ORIGIN,
     sourceSigningSecret: c.env.MEDIA_SOURCE_SIGNING_SECRET ?? c.env.STREAM_SOURCE_SIGNING_SECRET,
     remuxReady,
-  }, {
-    apiKey: c.env.ELEVENLABS_API_KEY,
-    defaultVoiceId: c.env.ELEVENLABS_DEFAULT_VOICE_ID,
   });
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });
