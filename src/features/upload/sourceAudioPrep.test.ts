@@ -1,69 +1,120 @@
 import { describe, expect, it } from 'vitest';
-import {
-  DIRECT_ASR_MAX_BYTES,
-  PREPARED_ASR_CHUNK_DURATION_MS,
-  prepareSourceAudioChunks,
-  type SourceAudioPrepWorkerLike,
-} from './sourceAudioPrep';
+import * as sourceAudioPrep from './sourceAudioPrep';
 
-class FakePrepWorker implements SourceAudioPrepWorkerLike {
+type DecodeResult = {
+  pcm: Float32Array;
+  durationMs: number;
+  sampleRate: number;
+};
+
+type DecodeSourceAudio = (
+  file: File,
+  workerFactory?: () => FakeDecodeWorker,
+) => Promise<DecodeResult>;
+
+class FakeDecodeWorker {
   private listeners = new Set<(event: MessageEvent<any>) => void>();
   terminated = false;
-  constructor(private readonly durationMs: number) {}
-  addEventListener(_type: 'message', listener: (event: MessageEvent<any>) => void) { this.listeners.add(listener); }
-  removeEventListener(_type: 'message', listener: (event: MessageEvent<any>) => void) { this.listeners.delete(listener); }
-  terminate() { this.terminated = true; }
+  messages: any[] = [];
+
+  constructor(
+    private readonly response: any = {
+      type: 'decoded',
+      durationMs: 2_000,
+      sampleRate: 16_000,
+      pcm: new Float32Array([0.25, -0.5, 0.75]).buffer,
+    },
+  ) {}
+
+  addEventListener(_type: 'message', listener: (event: MessageEvent<any>) => void) {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(_type: 'message', listener: (event: MessageEvent<any>) => void) {
+    this.listeners.delete(listener);
+  }
+
+  terminate() {
+    this.terminated = true;
+  }
+
   postMessage(message: any) {
+    this.messages.push(message);
     queueMicrotask(() => {
-      const data = message.type === 'inspect'
-        ? { type: 'inspection', requestId: message.requestId, durationMs: this.durationMs, decodable: true }
-        : {
-            type: 'chunk',
-            requestId: message.requestId,
-            wav: new ArrayBuffer(48),
-            durationMs: message.endMs - message.startMs,
-          };
+      const data = { ...this.response, requestId: message.requestId };
       for (const listener of [...this.listeners]) listener({ data } as MessageEvent<any>);
     });
   }
 }
 
-describe('browser source audio preparation', () => {
-  it('uses bounded <=300s windows and backpressures each chunk consumer', async () => {
-    const worker = new FakePrepWorker(610_000);
-    const received: Array<[number, number, number]> = [];
-    let activeConsumers = 0;
-    let maxActiveConsumers = 0;
-    const file = new File([new Uint8Array(64)], 'long.mp4', { type: 'video/mp4' });
+function requireDecode(): DecodeSourceAudio {
+  const candidate = (sourceAudioPrep as Record<string, unknown>).decodeSourceAudio;
+  expect(typeof candidate).toBe('function');
+  return candidate as DecodeSourceAudio;
+}
 
-    const result = await prepareSourceAudioChunks(file, async (chunk) => {
-      activeConsumers += 1;
-      maxActiveConsumers = Math.max(maxActiveConsumers, activeConsumers);
-      received.push([chunk.index, chunk.offsetMs, chunk.durationMs]);
-      await Promise.resolve();
-      activeConsumers -= 1;
-    }, () => worker);
+describe('browser-local source audio decode', () => {
+  it('materializes one transferable mono Float32 16 kHz buffer for an admitted source', async () => {
+    const decodeSourceAudio = requireDecode();
+    const worker = new FakeDecodeWorker();
+    const file = new File([new Uint8Array(64)], 'source.mp4', { type: 'video/mp4' });
 
-    expect(result).toEqual({ required: true, durationMs: 610_000, chunkCount: 3 });
-    expect(received).toEqual([
-      [0, 0, PREPARED_ASR_CHUNK_DURATION_MS],
-      [1, 300_000, PREPARED_ASR_CHUNK_DURATION_MS],
-      [2, 600_000, 10_000],
-    ]);
-    expect(maxActiveConsumers).toBe(1);
+    const result = await decodeSourceAudio(file, () => worker);
+
+    expect(worker.messages).toHaveLength(1);
+    expect(worker.messages[0]).toMatchObject({ type: 'decode', file });
+    expect(result.durationMs).toBe(2_000);
+    expect(result.sampleRate).toBe(16_000);
+    expect(result.pcm).toBeInstanceOf(Float32Array);
+    expect(Array.from(result.pcm)).toEqual([0.25, -0.5, 0.75]);
     expect(worker.terminated).toBe(true);
   });
 
-  it('does not materialize chunks for a short source below the direct payload ceiling', async () => {
-    const worker = new FakePrepWorker(120_000);
-    const file = new File([new Uint8Array(64)], 'short.mp4', { type: 'video/mp4' });
-    let consumed = false;
-    const result = await prepareSourceAudioChunks(file, async () => { consumed = true; }, () => worker);
-    expect(result).toEqual({ required: false, durationMs: 120_000, chunkCount: 0 });
-    expect(consumed).toBe(false);
+  it('rejects a source above 24 MiB before constructing the decode worker', async () => {
+    const decodeSourceAudio = requireDecode();
+    const file = new File(
+      [new Uint8Array(24 * 1024 * 1024 + 1)],
+      'oversize.mp4',
+      { type: 'video/mp4' },
+    );
+    let workerCreated = false;
+
+    await expect(decodeSourceAudio(file, () => {
+      workerCreated = true;
+      return new FakeDecodeWorker();
+    })).rejects.toMatchObject({ code: 'LOCAL_SOURCE_DECODE_FAILED' });
+
+    expect(workerCreated).toBe(false);
   });
 
-  it('requires preparation for a source above the direct byte ceiling even when duration is short', async () => {
-    expect(DIRECT_ASR_MAX_BYTES).toBe(24 * 1024 * 1024);
+  it('fails closed when worker decode is unavailable and always terminates the worker', async () => {
+    const decodeSourceAudio = requireDecode();
+    const worker = new FakeDecodeWorker({
+      type: 'error',
+      code: 'LOCAL_SOURCE_DECODE_FAILED',
+      message: 'decode unavailable',
+    });
+    const file = new File([new Uint8Array(64)], 'unsupported.mkv', { type: 'video/x-matroska' });
+
+    await expect(decodeSourceAudio(file, () => worker)).rejects.toMatchObject({
+      code: 'LOCAL_SOURCE_DECODE_FAILED',
+    });
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('rejects worker output that is not mono Float32 16 kHz bounded to five minutes', async () => {
+    const decodeSourceAudio = requireDecode();
+    const badRate = new FakeDecodeWorker({
+      type: 'decoded',
+      durationMs: 2_000,
+      sampleRate: 48_000,
+      pcm: new Float32Array([0]).buffer,
+    });
+    const file = new File([new Uint8Array(64)], 'source.mp4', { type: 'video/mp4' });
+
+    await expect(decodeSourceAudio(file, () => badRate)).rejects.toMatchObject({
+      code: 'LOCAL_SOURCE_DECODE_FAILED',
+    });
+    expect(badRate.terminated).toBe(true);
   });
 });
