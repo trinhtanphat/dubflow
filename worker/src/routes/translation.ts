@@ -41,6 +41,8 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
     new WorkersAITranslationProvider(env.AI),
     new GoogleCloudTranslationProvider(
       env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? '',
+      fetch,
+      15_000,
       env.PAID_GOOGLE_TRANSLATE_ENABLED,
     ),
     new ContextualWorkersAITranslationProvider(env.AI, env.CONTEXT_TRANSLATION_MODEL ?? ''),
