@@ -123,3 +123,14 @@ test('production fixture persists the downloaded MP4 and proves H.264 plus AAC w
   assert.match(workflow, /h264/);
   assert.match(workflow, /aac/);
 });
+
+test('production fixture proves the H.264 elementary stream is packet-preserved', () => {
+  const workflow = fs.readFileSync(workflowUrl, 'utf8');
+
+  assert.match(workflow, /sha256sum/);
+  assert.match(workflow, /-c:v\s+copy/);
+  assert.match(workflow, /production-r2-fixture\.mp4/);
+  assert.match(workflow, /production-r2-output\.mp4/);
+  assert.match(workflow, /source_video_sha/);
+  assert.match(workflow, /output_video_sha/);
+});
