@@ -20,7 +20,8 @@ export type LipSyncErrorCode =
   | 'LIP_SYNC_UNAVAILABLE'
   | 'LIP_SYNC_FAILED'
   | 'LIP_SYNC_TIMEOUT'
-  | 'LIP_SYNC_RESPONSE_INVALID';
+  | 'LIP_SYNC_RESPONSE_INVALID'
+  | 'LIP_SYNC_INPUT_INVALID';
 
 export class LipSyncProviderError extends Error {
   constructor(public readonly code: LipSyncErrorCode, message: string) {
