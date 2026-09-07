@@ -61,6 +61,15 @@ function assertReady(body) {
   }
 }
 
+function sanitizeVoiceCapability(body) {
+  return {
+    provider: typeof body?.provider === 'string' ? body.provider : null,
+    configured: body?.configured === true,
+    cloning: body?.cloning === true,
+    preview: body?.preview === true,
+  };
+}
+
 function assertMp4(bytes, contentType) {
   if (!contentType.toLowerCase().includes('video/mp4')) {
     throw new Error(`Final export is not video/mp4: ${contentType || '<missing>'}`);
@@ -83,6 +92,10 @@ export async function runProductionMediaFixture({
 
   const readiness = await request(fetchImpl, `${origin}/api/ready`);
   assertReady(readiness.body);
+
+  const voiceCapability = await request(fetchImpl, `${origin}/api/voice/capabilities`);
+  const safeVoiceCapability = sanitizeVoiceCapability(voiceCapability.body);
+  console.log(`Production voice capability ${JSON.stringify(safeVoiceCapability)}`);
 
   const title = `prod-r2-fixture-${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
   const created = await request(fetchImpl, `${origin}/api/projects`, {
