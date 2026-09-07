@@ -69,6 +69,17 @@ test('server local-inference contract locks exact route, limits, provenance and 
   assert.doesNotMatch(domain, /browser-local-speaker-1/);
 });
 
+test('browser-local translation provenance is admitted only by a new append-only migration', async () => {
+  const migration = await source('migrations/0013_browser_local_translation_engine.sql');
+
+  assert.ok(migration.length > 0, '0013 browser-local translation-engine migration must exist');
+  assert.match(migration, /browser-opus-mt/);
+  assert.match(migration, /CREATE TABLE\s+segments/i);
+  assert.match(migration, /idx_segments_project_start/);
+  assert.match(migration, /idx_segments_project_split_parent/);
+  assert.doesNotMatch(migration, /ALTER\s+TABLE\s+.*0012|UPDATE\s+.*0012/i);
+});
+
 test('superseded backend-ASR chunk contract is absent from source verification', () => {
   assert.doesNotMatch(packageSource, /browser-asr-r2-chunks\.test\.mjs/);
 });
