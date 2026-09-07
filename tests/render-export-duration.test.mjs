@@ -72,7 +72,7 @@ test('preserve-background graph uses the downloaded background stem as base and 
     backgroundPath: '/tmp/background.wav',
   });
   const graph = args[args.indexOf('-filter_complex') + 1];
-  assert.deepEqual(args.slice(0, 13), [
+  assert.deepEqual(args.slice(0, 12), [
     '-nostdin', '-y', '-v', 'error', '-i', '/tmp/source', '-i', '/tmp/background.wav', '-i', '/tmp/s1.mp3', '-filter_complex', graph,
   ]);
   assert.match(graph, /^\[1:a\].*\[base\]/);
