@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-const migrations = readdirSync(new URL('../migrations/', import.meta.url)).filter((name) => /^\d{4}_.*\.sql$/.test(name));
+const migrations = readdirSync(new URL('../migrations/', import.meta.url)).filter((name) => /^\d{4}_.*\.sql$/.test(name)).sort();
 const policy = read('docs/DEPLOYMENT-POLICY.md');
 const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
@@ -20,11 +20,27 @@ const exportPipeline = [
 
 const hasMigration = (name) => migrations.includes(name);
 
-test('main reconciliation keeps migration history collision-free and adds a forward Phase 4C migration', () => {
+function sharedMigrationPrefixes(files) {
+  const groups = new Map();
+  for (const name of files) {
+    const prefix = name.slice(0, 4);
+    const names = groups.get(prefix) ?? [];
+    names.push(name);
+    groups.set(prefix, names);
+  }
+  return [...groups.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => [prefix, names.sort()]);
+}
+
+test('main reconciliation keeps migration history ledger-compatible and adds a forward Phase 4C migration', () => {
   assert.equal(hasMigration('0009_multilang_exports.sql'), true, 'keep already-landed main migration 0009');
   assert.equal(hasMigration('0010_multilanguage_variants.sql'), true, 'add forward migration 0010 for canonical Phase 4C schema');
-  const numbers = migrations.map((name) => name.slice(0, 4));
-  assert.equal(new Set(numbers).size, numbers.length, 'migration numbers must be unique');
+  assert.deepEqual(
+    sharedMigrationPrefixes(migrations),
+    [['0012', ['0012_stream_media.sql', '0012_visual_lipsync.sql']]],
+    'only the production-ledger-compatible 0012 Stream/visual pair may share a numeric prefix',
+  );
   if (hasMigration('0010_multilanguage_variants.sql')) {
     const forward = read('migrations/0010_multilanguage_variants.sql');
     assert.match(forward, /project_target_languages/);
