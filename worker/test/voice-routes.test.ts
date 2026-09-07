@@ -42,6 +42,7 @@ describe('voice HTTP routes', () => {
     const response = await routes.fetch(new Request('https://yupvox.test/capabilities'), voiceEnv({
       ELEVENLABS_API_KEY: undefined,
       ELEVENLABS_DEFAULT_VOICE_ID: undefined,
+      PAID_GROK_TTS_ENABLED: 'true',
     }));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
