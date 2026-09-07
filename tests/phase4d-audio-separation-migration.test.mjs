@@ -12,6 +12,19 @@ function migrationFiles() {
     .sort();
 }
 
+function sharedMigrationPrefixes(files) {
+  const groups = new Map();
+  for (const name of files) {
+    const prefix = name.match(/^(\d+)_/)?.[1];
+    const names = groups.get(prefix) ?? [];
+    names.push(name);
+    groups.set(prefix, names);
+  }
+  return [...groups.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([prefix, names]) => [prefix, names.sort()]);
+}
+
 function columns(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
 }
@@ -20,10 +33,14 @@ test('Phase 4D migration extends the full canonical schema without breaking fore
   assert.equal(fs.existsSync(phase4dUrl), true, '0011_phase4d_audio_separation.sql must exist');
 
   const files = migrationFiles();
-  const prefixes = files.map((name) => name.match(/^(\d+)_/)?.[1]);
-  assert.equal(new Set(prefixes).size, prefixes.length, 'migration numeric prefixes must remain unique');
+  assert.deepEqual(
+    sharedMigrationPrefixes(files),
+    [['0012', ['0012_stream_media.sql', '0012_visual_lipsync.sql']]],
+    'only the production-ledger-compatible 0012 Stream/visual pair may share a numeric prefix',
+  );
   assert.ok(files.includes('0011_phase4d_audio_separation.sql'));
   assert.ok(files.indexOf('0011_phase4d_audio_separation.sql') < files.indexOf('0012_stream_media.sql'));
+  assert.ok(files.indexOf('0012_stream_media.sql') < files.indexOf('0012_visual_lipsync.sql'));
 
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON;');
