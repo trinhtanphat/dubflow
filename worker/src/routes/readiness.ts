@@ -11,6 +11,7 @@ export interface ReadinessDatabaseLike {
 export type MediaReadinessConfig = {
   stream?: unknown;
   accountId?: string;
+  publicOrigin?: string;
   sourceSigningSecret?: string;
   streamApiToken?: string;
 };
@@ -72,6 +73,7 @@ function mediaStatus(config?: MediaReadinessConfig): { stream: 'ready' | 'unavai
   const ready = Boolean(
     config.stream &&
     config.accountId?.trim() &&
+    config.publicOrigin?.trim() &&
     config.sourceSigningSecret?.trim() &&
     config.streamApiToken?.trim()
   );
