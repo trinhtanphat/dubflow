@@ -193,6 +193,36 @@ export class SegmentTranslationRepository {
     if (changes(result) === 0) throw new SegmentTranslationPersistenceError('TRANSLATION_VARIANT_NOT_FOUND', 'Translation variant not found.');
   }
 
+  async setVoiceResultForVersion(
+    projectId: string,
+    segmentId: string,
+    userId: string,
+    target: TargetLanguage,
+    expectedVersion: number,
+    objectKey: string,
+  ): Promise<SegmentTranslation> {
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+      throw new SegmentTranslationPersistenceError('TRANSLATION_VARIANT_CONFLICT', 'Translation version must be a positive integer.');
+    }
+    const result = await this.db.prepare(
+      `UPDATE segment_translations
+       SET voice_status = 'completed', dubbed_object_key = ?, updated_at = datetime('now')
+       WHERE segment_id = ? AND project_id = ? AND target_language = ?
+         AND EXISTS (SELECT 1 FROM projects WHERE id = project_id AND user_id = ?)
+         AND version = ?`,
+    ).bind(objectKey, segmentId, projectId, target, userId, expectedVersion).run();
+
+    if (changes(result) !== 1) {
+      const canonical = await this.get(projectId, segmentId, userId, target);
+      if (!canonical) throw new SegmentTranslationPersistenceError('TRANSLATION_VARIANT_NOT_FOUND', 'Translation variant not found.');
+      throw new SegmentTranslationPersistenceError('TRANSLATION_VARIANT_CONFLICT', 'Translation variant changed on the server.', canonical);
+    }
+
+    const updated = await this.get(projectId, segmentId, userId, target);
+    if (!updated) throw new SegmentTranslationPersistenceError('TRANSLATION_VARIANT_NOT_FOUND', 'Translation variant not found.');
+    return updated;
+  }
+
   async invalidateForSourceSegment(projectId: string, segmentId: string, userId: string): Promise<void> {
     await this.assertProject(projectId, userId);
     await this.db.prepare(
