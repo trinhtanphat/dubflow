@@ -79,7 +79,7 @@ afterEach(() => {
 describe('production Grok TTS fallback', () => {
   it('reports the selected Grok model as provider provenance while native Workers AI keeps its generic label', () => {
     const ai = new FakeAI();
-    const selected = createVoiceProvider({ AI: ai } as unknown as Env);
+    const selected = createVoiceProvider({ AI: ai, PAID_GROK_TTS_ENABLED: 'true' } as unknown as Env);
     const native = new WorkersAIVoiceProvider(ai, {
       model: '@cf/myshell-ai/melotts',
       verifiedLanguages: ['en'],
@@ -153,6 +153,7 @@ describe('production Grok TTS fallback', () => {
     const response = await routes.fetch(new Request('https://yupvox.test/p1/export', { method: 'POST' }), {
       MEDIA: {},
       AI: ai,
+      PAID_GROK_TTS_ENABLED: 'true',
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       EXPORT_WORKFLOW: {
