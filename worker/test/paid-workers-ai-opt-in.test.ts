@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
 import { checkReadiness } from '../src/routes/readiness';
@@ -29,6 +30,10 @@ const unavailableDb = {
     throw new Error('db unavailable');
   },
 };
+
+function compactSource(path: string): string {
+  return readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\s+/g, ' ');
+}
 
 describe('Workers AI paid opt-in', () => {
   it('fails ASR closed before invoking Workers AI when opt-in is absent', async () => {
@@ -105,5 +110,16 @@ describe('Workers AI paid opt-in', () => {
       asr: { provider: 'workers-ai-whisper-large-v3-turbo' },
       inference: { workersAI: 'enabled' },
     });
+  });
+
+  it('propagates the explicit Workers AI opt-in through every production inference entrypoint', () => {
+    const dubbing = compactSource('../src/workflows/DubbingWorkflow.ts');
+    const language = compactSource('../src/workflows/LanguageTranslationWorkflow.ts');
+    const route = compactSource('../src/routes/translation.ts');
+
+    expect(dubbing).toContain('paidWorkersAiEnabled(this.env.PAID_WORKERS_AI_ENABLED)');
+    expect(dubbing).toContain('this.env.PAID_DEEPGRAM_ASR_ENABLED, this.env.PAID_WORKERS_AI_ENABLED');
+    expect(language).toContain('paidWorkersAiEnabled(this.env.PAID_WORKERS_AI_ENABLED)');
+    expect(route).toContain('paidWorkersAiEnabled(env.PAID_WORKERS_AI_ENABLED)');
   });
 });
