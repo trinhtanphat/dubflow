@@ -16,6 +16,10 @@ export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
       && body?.service === 'dubflow'
       && body?.database === 'ready'
       && body?.schemaRevision === CURRENT_SCHEMA_REVISION
+      && body?.asr?.provider === 'deepgram-nova-3'
+      && body?.asr?.speakerDiarization === 'configured'
+      && body?.voice?.provider === 'elevenlabs'
+      && body?.voice?.configured === true
       && body?.media?.r2 === 'ready'
       && body?.media?.remux === 'ready'
     );
