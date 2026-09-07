@@ -12,6 +12,7 @@ import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
+import { qualifiedSyncLabsApiKey } from '../services/lipsync/qualification';
 import { SyncLabsLipSyncProvider } from '../services/lipsync/sync-labs';
 import { ContainerMediaProcessor } from '../services/media/container';
 import { createDialogueSeparationProvider } from '../services/separation/config';
@@ -33,7 +34,12 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         stems: new AudioStemRepository(this.env.DB),
         separation: createDialogueSeparationProvider(this.env),
         providerMediaGrants: new ProviderMediaGrantRepository(this.env.DB),
-        lipSync: new SyncLabsLipSyncProvider({ apiKey: this.env.SYNC_API_KEY }),
+        lipSync: new SyncLabsLipSyncProvider({
+          apiKey: qualifiedSyncLabsApiKey(
+            this.env.SYNC_API_KEY,
+            this.env.SYNC_LIPSYNC_QUALIFIED,
+          ),
+        }),
         makeProviderMediaToken: createProviderMediaToken,
         providerMediaOrigin: 'https://yupvox.qs3d.site',
         fetchImpl: fetch,
