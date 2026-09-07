@@ -8,8 +8,8 @@ import {
 
 function validPayload() {
   return {
-    sourceGeneration: 3,
-    sourceObjectKey: 'projects/p1/source/current.mp4',
+    expectedSourceGeneration: 3,
+    expectedSourceObjectKey: 'projects/p1/source/current.mp4',
     durationMs: 4_000,
     asr: { ...LOCAL_INFERENCE_ASR },
     translation: { ...LOCAL_INFERENCE_TRANSLATION },
@@ -27,8 +27,8 @@ function validPayload() {
 describe('browser-local client inference request validation', () => {
   it('normalizes the exact approved EN→VI local inference payload', () => {
     const input = normalizeClientInferenceInput('p1', validPayload());
-    expect(input.sourceGeneration).toBe(3);
-    expect(input.sourceObjectKey).toBe('projects/p1/source/current.mp4');
+    expect(input.expectedSourceGeneration).toBe(3);
+    expect(input.expectedSourceObjectKey).toBe('projects/p1/source/current.mp4');
     expect(input.durationMs).toBe(4_000);
     expect(input.asr).toEqual(LOCAL_INFERENCE_ASR);
     expect(input.translation).toEqual(LOCAL_INFERENCE_TRANSLATION);
@@ -43,9 +43,9 @@ describe('browser-local client inference request validation', () => {
   });
 
   it('rejects malformed source identity, duration and model provenance', () => {
-    expect(() => normalizeClientInferenceInput('p1', { ...validPayload(), sourceGeneration: 0 }))
+    expect(() => normalizeClientInferenceInput('p1', { ...validPayload(), expectedSourceGeneration: 0 }))
       .toThrow(LocalInferenceInputError);
-    expect(() => normalizeClientInferenceInput('p1', { ...validPayload(), sourceObjectKey: '   ' }))
+    expect(() => normalizeClientInferenceInput('p1', { ...validPayload(), expectedSourceObjectKey: '   ' }))
       .toThrow(LocalInferenceInputError);
     expect(() => normalizeClientInferenceInput('p1', { ...validPayload(), durationMs: 300_001 }))
       .toThrow(LocalInferenceInputError);
