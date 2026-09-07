@@ -45,3 +45,10 @@ test('R2-only dubbing runtime stays on backend account 6666 without Stream or Co
   assert.ok(config.workflows?.some((entry) => entry.binding === 'DUBBING_WORKFLOW' && entry.class_name === 'DubbingWorkflow'));
   assert.equal(config.vars?.PUBLIC_ORIGIN, 'https://yupvox.qs3d.site');
 });
+
+test('production config declares provider secrets required by real dubbing and export', () => {
+  assert.deepEqual(
+    [...(config.secrets?.required ?? [])].sort(),
+    ['DEEPGRAM_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_DEFAULT_VOICE_ID'].sort(),
+  );
+});
