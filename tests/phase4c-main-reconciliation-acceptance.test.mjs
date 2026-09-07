@@ -6,6 +6,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const migrations = readdirSync(new URL('../migrations/', import.meta.url)).filter((name) => /^\d{4}_.*\.sql$/.test(name));
 const policy = read('docs/DEPLOYMENT-POLICY.md');
 const deploymentStatus = read('docs/deployment-status.md');
+const crossAccountTopology = read('docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md');
 const ci = read('.github/workflows/ci.yml');
 const wrangler = JSON.parse(read('wrangler.jsonc'));
 const gateway = JSON.parse(read('wrangler.gateway.jsonc'));
@@ -50,6 +51,16 @@ test('main reconciliation keeps backend state on 6666 and the public domain on t
   assert.equal(gateway.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
   assert.deepEqual(gateway.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
   assert.ok(wrangler.workflows?.some((entry) => entry.binding === 'LANGUAGE_TRANSLATION_WORKFLOW' && entry.class_name === 'LanguageTranslationWorkflow'));
+});
+
+test('cross-account topology documentation is R2-only while preserving the 6666/2403 split', () => {
+  assert.match(crossAccountTopology, /R2-only/i);
+  assert.match(crossAccountTopology, /MEDIA_SOURCE_SIGNING_SECRET/);
+  assert.match(crossAccountTopology, /H\.264\/AVC|H\.264/i);
+  assert.match(crossAccountTopology, /AAC/);
+  assert.doesNotMatch(crossAccountTopology, /Cloudflare Stream source preparation|Cloudflare Stream dubbed MP4 publishing|zero-container Stream binding|rate-limit\/Stream bindings/i);
+  assert.match(crossAccountTopology, /trinhtanphat6666/);
+  assert.match(crossAccountTopology, /trinhtanphat2403/);
 });
 
 test('main reconciliation keeps one active Phase 4C backend source of truth', () => {
