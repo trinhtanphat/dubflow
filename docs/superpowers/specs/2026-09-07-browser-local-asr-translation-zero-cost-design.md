@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 Status: Written-spec review required before implementation
-Base: `main` at `fc66c4e9b39d9cbb47edcaf8eb115f163ab8e269`
+Reviewed against `main`: `848dd48cd94115a502a23faa8b8bb83b48381bc8`
 Issue: #91
 Paid-Resources: FORBIDDEN
 
@@ -21,6 +21,8 @@ Existing remote provider paths remain available to the normal product under thei
 ## 2. Why this change is required
 
 The production backend account is Workers Paid/Standard. Workers AI has a daily free allocation, but usage above that allocation can be billed and the current account surface cannot prove a hard no-overage boundary at dispatch time. Therefore `zero_charge_verified=true` cannot safely be asserted for a fixture that calls Workers AI.
+
+Current `main` further hardens this boundary: PR #134 requires explicit paid opt-in before Workers AI ASR/translation may execute. The zero-cost qualification lane must not enable that opt-in, so browser-local inference is the intended no-paid path rather than a bypass of the paid-provider policy.
 
 Browser Piper already removed paid Vietnamese TTS from the zero-cost path. The remaining metered steps are server ASR and translation, so this design removes those calls from the qualification path entirely.
 
