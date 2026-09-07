@@ -16,8 +16,7 @@ function mediaAdmissionError(env: Env) {
   if (!env.MEDIA) {
     return errorBody('MEDIA_SOURCE_UNAVAILABLE', 'R2 media binding is unavailable.');
   }
-  const signingSecret = env.MEDIA_SOURCE_SIGNING_SECRET ?? env.STREAM_SOURCE_SIGNING_SECRET;
-  if (!signingSecret?.trim()) {
+  if (!env.MEDIA_SOURCE_SIGNING_SECRET?.trim()) {
     return errorBody('MEDIA_SOURCE_SIGNING_UNAVAILABLE', 'Media source signing secret is unavailable.');
   }
   if (!env.PUBLIC_ORIGIN?.trim()) {
