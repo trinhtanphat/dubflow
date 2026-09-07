@@ -1,5 +1,6 @@
 const MAX_EXPORT_CLIPS = 4096;
 const TARGET_LANGUAGES = new Set(['vi', 'en', 'zh', 'ja', 'ko']);
+const MIX_MODES = new Set(['dubbed_only', 'preserve_background']);
 
 function projectPrefix(projectId) {
   return `projects/${projectId}/`;
@@ -13,12 +14,37 @@ function renderOptions(input) {
   const hasTarget = input?.targetLanguage !== undefined;
   const hasExport = input?.exportId !== undefined;
   if (hasTarget !== hasExport) throw new Error('targetLanguage and exportId must be provided together.');
-  if (!hasTarget) return null;
+  if (!hasTarget) {
+    if (input?.mixMode !== undefined || input?.backgroundObjectKey !== undefined) {
+      throw new Error('Mix options require a target export.');
+    }
+    return null;
+  }
   if (!TARGET_LANGUAGES.has(input.targetLanguage)) throw new Error('Invalid targetLanguage.');
   if (typeof input.exportId !== 'string' || !/^[A-Za-z0-9._-]{1,200}$/.test(input.exportId)) {
     throw new Error('Invalid exportId.');
   }
-  return { targetLanguage: input.targetLanguage, exportId: input.exportId };
+  const mixMode = input.mixMode ?? 'dubbed_only';
+  if (!MIX_MODES.has(mixMode)) throw new Error('Invalid mixMode.');
+  if (mixMode === 'preserve_background') {
+    const prefix = `${projectPrefix(input.projectId)}separation/`;
+    if (
+      typeof input.backgroundObjectKey !== 'string' ||
+      !input.backgroundObjectKey.startsWith(prefix) ||
+      input.backgroundObjectKey.includes('..') ||
+      !input.backgroundObjectKey.endsWith('/background.wav')
+    ) {
+      throw new Error('Background object is missing or outside the project.');
+    }
+  } else if (input.backgroundObjectKey !== undefined) {
+    throw new Error('Background object is only valid for preserve_background mix mode.');
+  }
+  return {
+    targetLanguage: input.targetLanguage,
+    exportId: input.exportId,
+    mixMode,
+    ...(mixMode === 'preserve_background' ? { backgroundObjectKey: input.backgroundObjectKey } : {}),
+  };
 }
 
 export function validateRenderExportInput(input) {
@@ -80,7 +106,16 @@ export function buildAtempoChain(sourceDurationMs, targetDurationMs) {
   return filters.join(',');
 }
 
-export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clips, clipPaths, clipDurationsMs }) {
+export function buildRenderExportArgs({
+  sourcePath,
+  outputPath,
+  durationMs,
+  clips,
+  clipPaths,
+  clipDurationsMs,
+  mixMode = 'dubbed_only',
+  backgroundPath,
+}) {
   if (typeof sourcePath !== 'string' || !sourcePath || typeof outputPath !== 'string' || !outputPath) {
     throw new Error('Source and output paths are required.');
   }
@@ -95,12 +130,28 @@ export function buildRenderExportArgs({ sourcePath, outputPath, durationMs, clip
   )) {
     throw new Error('Clip durations must align with local clip files.');
   }
+  if (!MIX_MODES.has(mixMode)) throw new Error('Invalid render mix mode.');
+  if (mixMode === 'preserve_background' && (typeof backgroundPath !== 'string' || !backgroundPath)) {
+    throw new Error('Background path is required for preserve_background render.');
+  }
+  if (mixMode === 'dubbed_only' && backgroundPath !== undefined) {
+    throw new Error('Background path is only valid for preserve_background render.');
+  }
 
   const durationSeconds = seconds(durationMs);
-  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath, '-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo'];
+  const args = ['-nostdin', '-y', '-v', 'error', '-i', sourcePath];
+  if (mixMode === 'preserve_background') {
+    args.push('-i', backgroundPath);
+  } else {
+    args.push('-f', 'lavfi', '-t', durationSeconds, '-i', 'anullsrc=r=48000:cl=stereo');
+  }
   for (const path of clipPaths) args.push('-i', path);
 
-  const filters = [`[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]`];
+  const baseFilter = mixMode === 'preserve_background'
+    ? `[1:a]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,` +
+      `atrim=duration=${durationSeconds},apad=whole_dur=${durationSeconds},asetpts=PTS-STARTPTS[base]`
+    : `[1:a]aresample=48000,asetpts=PTS-STARTPTS[base]`;
+  const filters = [baseFilter];
   const labels = ['[base]'];
   clips.forEach((clip, index) => {
     const inputIndex = index + 2;
