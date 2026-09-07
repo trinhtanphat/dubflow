@@ -102,7 +102,8 @@ async function put(
   body: Uint8Array,
   headers: Record<string, string> = validHeaders,
 ) {
-  return app.request(path, { method: 'PUT', headers, body }, env);
+  const bodyBuffer = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+  return app.request(path, { method: 'PUT', headers, body: bodyBuffer }, env);
 }
 
 describe('client-generated PCM voice route', () => {
