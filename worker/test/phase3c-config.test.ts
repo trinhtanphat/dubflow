@@ -1,4 +1,3 @@
-// @ts-expect-error This Vitest-only config check runs in Node; worker production types intentionally omit Node globals.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
