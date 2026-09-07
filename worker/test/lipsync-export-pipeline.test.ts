@@ -18,6 +18,18 @@ function durableWorkflowStep() {
   };
 }
 
+function secretSafeWorkflowStep() {
+  return {
+    do: vi.fn(async (_name: string, callback: () => Promise<unknown>) => {
+      const result = await callback();
+      if (result && typeof result === 'object' && 'token' in result) {
+        throw new TypeError('Workflow step persisted a plaintext provider-media token.');
+      }
+      return result;
+    }),
+  };
+}
+
 function harness(options: { providerFails?: boolean; completedLipSync?: boolean } = {}) {
   const usage = new Map<string, any>();
   const usageEvents: any[] = [];
@@ -147,6 +159,13 @@ describe('Phase 4E durable visual lip-sync export orchestration', () => {
     await runExportPipeline(lipSyncParams as never, h.deps, durableWorkflowStep() as never);
     expect(h.deps.fetchImpl).toHaveBeenCalledTimes(1);
     expect(h.deps.bucket.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('never persists plaintext provider-media bearer tokens as durable step results', async () => {
+    const h = harness();
+    await runExportPipeline(lipSyncParams as never, h.deps, secretSafeWorkflowStep() as never);
+    expect(h.deps.makeProviderMediaToken).toHaveBeenCalledTimes(2);
+    expect(h.deps.lipSync.render).toHaveBeenCalledTimes(1);
   });
 
   it('starts visual processing only after the normal dubbed artifact exists and publishes canonical R2 output', async () => {
