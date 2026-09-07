@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
+import { checkReadiness } from '../src/routes/readiness';
 import { createAsrProvider, asrCapabilities } from '../src/services/asr/router';
 import { WorkersAITranslationProvider } from '../src/services/translation/workers-ai';
 import { ContextualWorkersAITranslationProvider } from '../src/services/translation/contextual';
@@ -23,6 +24,11 @@ function aiSpy() {
 }
 
 const context = { revision: 1, style: 'neutral' as const, glossary: [] };
+const unavailableDb = {
+  prepare() {
+    throw new Error('db unavailable');
+  },
+};
 
 describe('Workers AI paid opt-in', () => {
   it('fails ASR closed before invoking Workers AI when opt-in is absent', async () => {
@@ -83,5 +89,21 @@ describe('Workers AI paid opt-in', () => {
     await expect(provider.translateBatch([{ id: 'segment-1', text: 'hello' }], 'en', 'vi', context))
       .resolves.toEqual([{ id: 'segment-1', text: 'xin chao', provider: 'workers-ai-contextual' }]);
     expect(spy.calls()).toBe(1);
+  });
+
+  it('reports Workers AI disabled in readiness without changing infrastructure readiness semantics', async () => {
+    const disabled = await (checkReadiness as any)(unavailableDb, undefined, undefined, undefined, undefined);
+    expect(disabled).toMatchObject({
+      database: 'unavailable',
+      asr: { provider: 'unavailable' },
+      inference: { workersAI: 'disabled' },
+    });
+
+    const enabled = await (checkReadiness as any)(unavailableDb, undefined, undefined, undefined, 'true');
+    expect(enabled).toMatchObject({
+      database: 'unavailable',
+      asr: { provider: 'workers-ai-whisper-large-v3-turbo' },
+      inference: { workersAI: 'enabled' },
+    });
   });
 });
