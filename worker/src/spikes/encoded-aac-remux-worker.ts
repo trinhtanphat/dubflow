@@ -11,12 +11,16 @@ export default {
     const source = url.searchParams.get('source') ?? '';
     try {
       const chunks = await extractR2LongFormAudioChunks(source, QUALIFICATION_DURATION_MS);
+      const firstChunkBytes = new Uint8Array(chunks[0]?.audio ?? new ArrayBuffer(0));
       return Response.json({
         ok: true,
         chunkCount: chunks.length,
         offsetsMs: chunks.map((chunk) => chunk.offsetMs),
         durationsMs: chunks.map((chunk) => chunk.durationMs),
         byteLengths: chunks.map((chunk) => chunk.audio.byteLength),
+        firstBoxType: firstChunkBytes.byteLength >= 8
+          ? new TextDecoder().decode(firstChunkBytes.slice(4, 8))
+          : null,
       });
     } catch (error) {
       return Response.json({
