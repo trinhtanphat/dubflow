@@ -28,7 +28,7 @@ const available = {
 };
 
 function render(overrides: Record<string, unknown> = {}) {
-  return renderToStaticMarkup(<BatchExportPanelView {...({
+  const props = {
     projectId: 'project/1',
     currentTargetLanguage: 'vi',
     enabledLanguages: ['vi'],
@@ -50,7 +50,8 @@ function render(overrides: Record<string, unknown> = {}) {
     onBatchExport: vi.fn(),
     onRetryFailed: vi.fn(),
     ...overrides,
-  } as never)} />);
+  } as unknown as Parameters<typeof BatchExportPanelView>[0];
+  return renderToStaticMarkup(<BatchExportPanelView {...props} />);
 }
 
 describe('Phase 4E Studio visual mode UX', () => {
