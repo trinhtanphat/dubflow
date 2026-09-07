@@ -15,6 +15,13 @@ function columns(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
 }
 
+test('preserves D1 migration filenames that have already been deployed to production', () => {
+  const files = migrationFiles();
+  assert.ok(files.includes('0012_visual_lipsync.sql'), 'the shipped visual-lipsync migration filename must remain immutable');
+  assert.ok(files.includes('0012_stream_media.sql'), 'the shipped Stream migration filename must remain immutable');
+  assert.ok(!files.includes('0013_visual_lipsync.sql'), 'a shipped migration must not be renumbered under a new filename');
+});
+
 test('migration chain adds nullable Stream source and per-export render provenance without rewriting existing rows', () => {
   const db = new DatabaseSync(':memory:');
   try {
