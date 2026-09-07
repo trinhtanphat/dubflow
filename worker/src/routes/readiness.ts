@@ -95,8 +95,9 @@ export async function checkReadiness(
   db: ReadinessDatabaseLike,
   deepgramApiKey?: string,
   mediaConfig?: MediaReadinessConfig,
+  paidDeepgramAsrEnabled?: string,
 ): Promise<ReadinessResult> {
-  const asr = asrCapabilities(deepgramApiKey);
+  const asr = asrCapabilities(deepgramApiKey, paidDeepgramAsrEnabled);
   const media = mediaStatus(mediaConfig);
   try {
     const row = await db.prepare(`

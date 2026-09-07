@@ -21,7 +21,31 @@ const fullSchema = {
 };
 
 describe('checkReadiness', () => {
-  it('reports ready and configured chunk-scoped diarization only after the current production schema exists', async () => {
+  it('reports ready and configured chunk-scoped diarization only after paid Deepgram ASR is explicitly enabled', async () => {
+    const db = {
+      prepare() {
+        return {
+          async first<T>() {
+            return fullSchema as T;
+          },
+        };
+      },
+    };
+
+    await expect(checkReadiness(db, ' dg-secret ', undefined, 'true')).resolves.toEqual({
+      ready: true,
+      service: 'dubflow',
+      database: 'ready',
+      schemaRevision: 14,
+      asr: {
+        provider: 'deepgram-nova-3',
+        speakerDiarization: 'configured',
+        speakerIdentityScope: 'chunk',
+      },
+    });
+  });
+
+  it('keeps the service ready on Workers AI when only the Deepgram secret exists', async () => {
     const db = {
       prepare() {
         return {
@@ -38,9 +62,9 @@ describe('checkReadiness', () => {
       database: 'ready',
       schemaRevision: 14,
       asr: {
-        provider: 'deepgram-nova-3',
-        speakerDiarization: 'configured',
-        speakerIdentityScope: 'chunk',
+        provider: 'workers-ai-whisper-large-v3-turbo',
+        speakerDiarization: 'unavailable',
+        speakerIdentityScope: 'none',
       },
     });
   });
@@ -97,7 +121,7 @@ describe('checkReadiness', () => {
       },
     };
 
-    await expect(checkReadiness(db, 'dg-secret')).resolves.toEqual({
+    await expect(checkReadiness(db, 'dg-secret', undefined, 'true')).resolves.toEqual({
       ready: false,
       service: 'dubflow',
       database: 'missing-schema',
@@ -121,7 +145,7 @@ describe('checkReadiness', () => {
       },
     };
 
-    await expect(checkReadiness(db, 'dg-secret')).resolves.toEqual({
+    await expect(checkReadiness(db, 'dg-secret', undefined, 'true')).resolves.toEqual({
       ready: false,
       service: 'dubflow',
       database: 'missing-schema',
