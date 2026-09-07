@@ -19,7 +19,7 @@ import { createJobRoutes } from './routes/jobs';
 import { createMediaRoutes } from './routes/media';
 import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
-import { createStreamSourceRoutes } from './routes/stream-source';
+import { createMediaSourceRoutes } from './routes/media-source';
 import { createProviderMediaRoutes } from './routes/provider-media';
 
 const app = new Hono<WorkerHonoEnv>();
@@ -39,7 +39,7 @@ app.get('/api/ready', async (c) => {
   });
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });
-app.route('/api/stream-source', createStreamSourceRoutes());
+app.route('/api/media-source', createMediaSourceRoutes());
 app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
@@ -50,7 +50,7 @@ app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
 app.route('/api/projects', createVoiceCloneRoutes());
 app.route('/api/projects', languageRoutes);
-app.route('/api/projects', translationVariantRoutes);
+app.route('/api/projects', translationVariantRoutes());
 app.route('/api/projects', createTranslationRoutes());
 app.route('/api/projects', createTranslationContextRoutes());
 app.route('/api/projects', createJobRoutes());
