@@ -33,11 +33,10 @@ describe('Studio local Vietnamese voice export ordering', () => {
     expect(events).toEqual(['prepare', 'batch']);
   });
 
-  it('never loads local Piper for subtitles, non-Vietnamese targets, unsupported browsers, or hybrid audio modes', async () => {
+  it('never loads local Piper for subtitles, non-Vietnamese targets, or hybrid audio modes', async () => {
     const cases = [
       { targetLanguages: ['vi'] as const, output: 'subtitles' as const, audioMode: 'dubbed_only' as const, localSupported: true },
       { targetLanguages: ['ja'] as const, output: 'dubbed' as const, audioMode: 'dubbed_only' as const, localSupported: true },
-      { targetLanguages: ['vi'] as const, output: 'dubbed' as const, audioMode: 'dubbed_only' as const, localSupported: false },
       { targetLanguages: ['vi'] as const, output: 'dubbed' as const, audioMode: 'duck_original' as const, localSupported: true },
       { targetLanguages: ['vi'] as const, output: 'dubbed' as const, audioMode: 'separated_background' as const, localSupported: true },
     ];
@@ -55,6 +54,21 @@ describe('Studio local Vietnamese voice export ordering', () => {
       expect(prepare).not.toHaveBeenCalled();
       expect(launch).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('fails Vietnamese dubbed_only closed before launch when local Piper is unsupported', async () => {
+    const prepare = vi.fn(async () => {});
+    const launch = vi.fn(async () => 'must-not-run');
+
+    await expect(launchWithLocalVietnameseVoice({
+      projectId: 'p1',
+      targetLanguages: ['vi'],
+      output: 'dubbed',
+      audioMode: 'dubbed_only',
+      localSupported: false,
+    }, launch, prepare)).rejects.toThrow(/Piper|local/i);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(launch).not.toHaveBeenCalled();
   });
 
   it('does not launch export when local cache preparation fails', async () => {
