@@ -48,6 +48,23 @@ test('Workers Builds hard-pins account 2403 before generating its zero-container
   assert.match(deployScript, /delete\s+source\.durable_objects\b/);
 });
 
+test('Workers Builds generated production config contains no paid Container or Durable Object lifecycle state', async () => {
+  const scriptUrl = new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url);
+  const { prepareWorkersBuildConfig, PRODUCTION_CONFIG_PATH } = await import(scriptUrl.href);
+  const productionConfigUrl = new URL(`../${PRODUCTION_CONFIG_PATH}`, import.meta.url);
+
+  try {
+    prepareWorkersBuildConfig();
+    const production = JSON.parse(fs.readFileSync(productionConfigUrl, 'utf8'));
+    assert.equal(production.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
+    assert.equal(Object.hasOwn(production, 'containers'), false, 'production config must not deploy Containers');
+    assert.equal(Object.hasOwn(production, 'durable_objects'), false, 'production config must not bind Container Durable Objects');
+    assert.equal(Object.hasOwn(production, 'exports'), false, 'production config must not declare Durable Object lifecycle exports');
+  } finally {
+    fs.rmSync(productionConfigUrl, { force: true });
+  }
+});
+
 test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {
   assert.doesNotMatch(pkg.scripts.build, /cloudflare-workers-build-migrate/i);
   assert.doesNotMatch(pkg.scripts.build, /wrangler\s+d1\s+migrations\s+apply/i);
