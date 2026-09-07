@@ -3,6 +3,7 @@ import type { TargetLanguage } from '../translation/languageVariantsApi';
 import { LANGUAGE_LABELS } from '../translation/TargetLanguagesPanel';
 import {
   exportMediaUrl,
+  visualExportMediaUrl,
   type DubbedAudioMode,
   type ExportAttemptDto,
   type ExportCapabilitiesDto,
@@ -214,7 +215,9 @@ export function BatchExportPanelView({
           const attempt = attempts[result.targetLanguage];
           const lipStatus = visualStatus(result, attempt);
           const standardObjectKey = attempt?.exportObjectKey ?? result.exportObjectKey ?? null;
+          const visualObjectKey = attempt?.lipSyncObjectKey ?? result.lipSyncObjectKey ?? null;
           const visualFailed = lipStatus === 'failed';
+          const visualCompleted = lipStatus === 'completed' && Boolean(visualObjectKey);
           return (
             <div key={`${result.targetLanguage}:${result.exportId}`} className={`batch-export__result is-${visualFailed ? 'failed' : result.status}`}>
               <span>{LANGUAGE_LABELS[result.targetLanguage]}</span>
@@ -227,6 +230,11 @@ export function BatchExportPanelView({
               {visualFailed && standardObjectKey && projectId && (
                 <a className="batch-export__fallback-link" href={exportMediaUrl(projectId, result.targetLanguage, 'dubbed')}>
                   Tải video dubbed chuẩn
+                </a>
+              )}
+              {visualCompleted && projectId && (
+                <a className="batch-export__visual-link" href={visualExportMediaUrl(projectId, result.targetLanguage)}>
+                  Tải video lip-sync
                 </a>
               )}
             </div>
