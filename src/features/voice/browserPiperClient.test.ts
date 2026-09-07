@@ -97,13 +97,17 @@ describe('BrowserPiperClient', () => {
     await expect(promise).resolves.toEqual(new Uint8Array([5, 6]));
   });
 
-  it('rejects initialization and synthesis errors without retrying', async () => {
+  it('preserves initialization failure code so Studio can fail the client lane closed', async () => {
     const worker = new FakeWorker();
     const factory = vi.fn(() => worker);
     const client = new BrowserPiperClient(factory);
     const promise = client.synthesize('lỗi');
     worker.emit({ type: 'error', code: 'PIPER_INIT_FAILED', message: 'model unavailable' });
-    await expect(promise).rejects.toThrow(/model unavailable/i);
+    await expect(promise).rejects.toMatchObject({
+      name: 'BrowserPiperError',
+      code: 'PIPER_INIT_FAILED',
+      message: 'model unavailable',
+    });
     expect(factory).toHaveBeenCalledTimes(1);
     expect(worker.messages).toEqual([{ type: 'init' }]);
   });
