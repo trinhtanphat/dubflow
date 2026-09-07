@@ -92,8 +92,35 @@ jobs:
             --window-size=1364,767 \
             --screenshot="$RUNNER_TEMP/yupvox-1364x767-reference.png" \
             http://127.0.0.1:5173/
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=1366,768 \
+            --screenshot="$RUNNER_TEMP/yupvox-1366x768-reference.png" \
+            http://127.0.0.1:5173/
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=1440,900 \
+            --screenshot="$RUNNER_TEMP/yupvox-1440x900-reference.png" \
+            http://127.0.0.1:5173/
+          "$CHROME" \
+            --headless=new \
+            --disable-gpu \
+            --no-sandbox \
+            --hide-scrollbars \
+            --window-size=1920,1080 \
+            --screenshot="$RUNNER_TEMP/yupvox-1920x1080-reference.png" \
+            http://127.0.0.1:5173/
           test -s "$RUNNER_TEMP/yupvox-v2-2-reference.png"
           test -s "$RUNNER_TEMP/yupvox-1364x767-reference.png"
+          test -s "$RUNNER_TEMP/yupvox-1366x768-reference.png"
+          test -s "$RUNNER_TEMP/yupvox-1440x900-reference.png"
+          test -s "$RUNNER_TEMP/yupvox-1920x1080-reference.png"
 
       - name: Upload reference screenshot
         uses: actions/upload-artifact@v4
@@ -102,5 +129,8 @@ jobs:
           path: |
             ${{ runner.temp }}/yupvox-v2-2-reference.png
             ${{ runner.temp }}/yupvox-1364x767-reference.png
+            ${{ runner.temp }}/yupvox-1366x768-reference.png
+            ${{ runner.temp }}/yupvox-1440x900-reference.png
+            ${{ runner.temp }}/yupvox-1920x1080-reference.png
           if-no-files-found: error
           retention-days: 14

@@ -50,6 +50,19 @@ test('uses a compact-height reference layout instead of clipping the timeline at
   assert.match(referenceCss, /\.studio-pro-shell\.reference-fidelity \.reference-drop-zone\s*\{[^}]*\n\s*height:\s*96px/s);
 });
 
+test('prevents the short-desktop video preview from overflowing into the timeline', () => {
+  assert.match(referenceCss, /@media\s*\(min-width:\s*1280px\)\s*and\s*\(max-height:\s*820px\)[\s\S]*?\.studio-pro-shell\.reference-fidelity \.center-stage\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(referenceCss, /@media\s*\(min-width:\s*1280px\)\s*and\s*\(max-height:\s*820px\)[\s\S]*?\.studio-pro-shell\.reference-fidelity \.reference-video-frame\s*\{[^}]*min-height:\s*0[^}]*aspect-ratio:\s*auto/s);
+  assert.match(referenceCss, /@media\s*\(min-width:\s*1280px\)\s*and\s*\(max-height:\s*820px\)[\s\S]*?\.studio-pro-shell\.reference-fidelity \.video-stage\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/s);
+});
+
+test('captures regression screenshots at common short and full desktop sizes', () => {
+  for (const [width, height] of [[1366, 768], [1440, 900], [1920, 1080]]) {
+    assert.match(ci, new RegExp(`--window-size=${width},${height}`));
+    assert.match(ci, new RegExp(`yupvox-${width}x${height}-reference\\.png`));
+  }
+});
+
 test('gives Chinese source text an explicit CJK fallback contract', () => {
   assert.match(videoStage, /className="subtitle-source"\s+lang="zh-CN"/);
   assert.match(scriptInspector, /aria-label="Lời thoại gốc"[\s\S]*?lang="zh-CN"/);
