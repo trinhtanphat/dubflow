@@ -17,6 +17,7 @@ type R2SourceMediaServiceDeps = {
   projects: R2SourceProjectStore;
   publicOrigin: string;
   signingSecret: string;
+  durationProbe?: (sourceObjectKey: string) => Promise<number | null>;
   nowSeconds?: () => number;
 };
 
@@ -51,6 +52,11 @@ export class R2SourceMediaService {
     const secret = this.deps.signingSecret.trim();
     if (!secret) throw new Error('MEDIA_SOURCE_SIGNING_UNAVAILABLE: Media source signing secret is missing.');
 
+    const storedDurationMs = boundedDuration(project.durationMs);
+    const probedDurationMs = storedDurationMs === null && this.deps.durationProbe
+      ? boundedDuration(await this.deps.durationProbe(sourceObjectKey))
+      : null;
+
     const expires = this.nowSeconds() + SOURCE_URL_TTL_SECONDS;
     const signature = await createMediaSourceToken(secret, projectId, sourceObjectKey, expires);
     const url = new URL(`/api/media-source/${encodeURIComponent(projectId)}`, origin);
@@ -60,7 +66,7 @@ export class R2SourceMediaService {
 
     return {
       sourceId: sourceObjectKey,
-      durationMs: boundedDuration(project.durationMs),
+      durationMs: storedDurationMs ?? probedDurationMs,
       audioUrl: url.toString(),
     };
   }
