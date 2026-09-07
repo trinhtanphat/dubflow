@@ -54,8 +54,15 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         projects,
         jobs: new JobRepository(this.env.DB),
         sourceMedia,
-        asr: createAsrProvider(this.env.AI, this.env.DEEPGRAM_API_KEY),
-        asrProviderId: asrCapabilities(this.env.DEEPGRAM_API_KEY).provider,
+        asr: createAsrProvider(
+          this.env.AI,
+          this.env.DEEPGRAM_API_KEY,
+          this.env.PAID_DEEPGRAM_ASR_ENABLED,
+        ),
+        asrProviderId: asrCapabilities(
+          this.env.DEEPGRAM_API_KEY,
+          this.env.PAID_DEEPGRAM_ASR_ENABLED,
+        ).provider,
         segments: new SegmentRepository(this.env.DB),
         translationContext: contextStore,
         translationRouter,
