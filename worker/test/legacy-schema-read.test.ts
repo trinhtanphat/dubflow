@@ -138,6 +138,7 @@ describe('legacy production schema read compatibility', () => {
         ttsAudioSeconds: 0,
         renderSeconds: 0,
         dialogueSeparationSeconds: 0,
+        lipSyncVideoSeconds: 0,
       },
       providers: {
         'deepgram-nova-3': {
@@ -146,6 +147,7 @@ describe('legacy production schema read compatibility', () => {
           ttsAudioSeconds: 0,
           renderSeconds: 0,
           dialogueSeparationSeconds: 0,
+          lipSyncVideoSeconds: 0,
         },
       },
     });
