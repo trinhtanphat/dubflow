@@ -51,6 +51,14 @@ test('the complete migration chain upgrades an initial production database witho
     assert.ok(columns(db, 'usage_events').includes('phase'));
     assert.ok(columns(db, 'usage_events').includes('operation_key'));
     assert.ok(columns(db, 'project_exports').includes('output'));
+    assert.ok(columns(db, 'project_exports').includes('lip_sync_requested'));
+    assert.ok(columns(db, 'project_exports').includes('lip_sync_provider'));
+    assert.ok(columns(db, 'project_exports').includes('lip_sync_status'));
+    assert.ok(columns(db, 'project_exports').includes('lip_sync_object_key'));
+    assert.deepEqual(
+      columns(db, 'provider_media_grants'),
+      ['id', 'project_id', 'object_key', 'token_hash', 'expires_at', 'consumed_at', 'created_at'],
+    );
 
     assert.deepEqual(
       { ...db.prepare(`

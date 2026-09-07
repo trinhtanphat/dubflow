@@ -7,22 +7,22 @@ test('deployment probe requires HTTP 200 and the exact current schema revision',
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11 };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 };
     },
   });
   assert.deepEqual(await probeDeployment(fetchOk), {
     ok: true,
     status: 200,
-    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11 },
+    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 },
   });
 });
 
-test('deployment probe rejects the previous schema revision after Phase 4D migration 0011', async () => {
+test('deployment probe rejects the previous schema revision after Phase 4E migration 0012', async () => {
   const fetchStaleRevision = async () => ({
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 10 };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11 };
     },
   });
   const result = await probeDeployment(fetchStaleRevision);

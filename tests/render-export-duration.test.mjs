@@ -93,6 +93,13 @@ test('separated_background uses only the staged background bed plus dubbed clips
   assert.match(graph, /amix=inputs=3/);
 });
 
+test('container extracts the final dubbed audio sidecar as 48kHz stereo PCM WAV', () => {
+  assert.match(server, /pathname === '\/extract-export-audio'/);
+  assert.match(server, /projects\/\$\{input\.projectId\}\/exports\/\$\{input\.targetLanguage\}\/\$\{input\.exportId\}\.audio\.wav/);
+  assert.match(server, /'-vn'[\s\S]*'-ar', '48000'[\s\S]*'-ac', '2'[\s\S]*'-c:a', 'pcm_s16le'/);
+  assert.match(server, /uploadFile\(audioObjectKey, output, 'audio\/wav'\)/);
+});
+
 test('container image includes the render helper and probes every downloaded dubbed clip', () => {
   assert.match(dockerfile, /COPY\s+render-export\.mjs\s+\/app\/render-export\.mjs/);
   assert.match(server, /clipDurationsMs\.push\(await durationMs\(path\)\)/);

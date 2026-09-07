@@ -5,7 +5,8 @@ export type UsageKind =
   | 'translation_character'
   | 'tts_audio_second'
   | 'dialogue_separation_second'
-  | 'render_second';
+  | 'render_second'
+  | 'lip_sync_video_second';
 
 export type UsagePhase = 'started' | 'completed';
 
@@ -31,6 +32,7 @@ export type UsageTotals = {
   ttsAudioSeconds: number;
   dialogueSeparationSeconds: number;
   renderSeconds: number;
+  lipSyncVideoSeconds: number;
 };
 
 export type UsageSummary = {
@@ -77,6 +79,7 @@ const USAGE_KINDS = new Set<UsageKind>([
   'tts_audio_second',
   'dialogue_separation_second',
   'render_second',
+  'lip_sync_video_second',
 ]);
 
 function fromRow(row: UsageRow): UsageEvent {
@@ -102,6 +105,7 @@ function emptyTotals(): UsageTotals {
     ttsAudioSeconds: 0,
     dialogueSeparationSeconds: 0,
     renderSeconds: 0,
+    lipSyncVideoSeconds: 0,
   };
 }
 
@@ -110,6 +114,7 @@ function addUnits(totals: UsageTotals, kind: UsageKind, units: number): void {
   else if (kind === 'translation_character') totals.translationCharacters += units;
   else if (kind === 'tts_audio_second') totals.ttsAudioSeconds += units;
   else if (kind === 'dialogue_separation_second') totals.dialogueSeparationSeconds += units;
+  else if (kind === 'lip_sync_video_second') totals.lipSyncVideoSeconds += units;
   else totals.renderSeconds += units;
 }
 

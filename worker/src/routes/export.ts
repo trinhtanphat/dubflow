@@ -9,6 +9,7 @@ import { SegmentTranslationRepository, type SegmentTranslation } from '../db/seg
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { parseDubbedAudioMode, type DubbedAudioMode } from '../domain/audio-mode';
 import { isTargetLanguage, type ExportOutput, type TargetLanguage } from '../domain/language';
+import { parseVisualMode, type VisualMode } from '../domain/visual-mode';
 import { errorBody } from '../http/json';
 import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
@@ -84,6 +85,24 @@ function parseAudioTreatment(output: ExportOutput, value: unknown): DubbedAudioM
     };
   }
   return audioMode;
+}
+
+function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode | ExportValidationError {
+  const visualMode = parseVisualMode(value);
+  if (!visualMode || (output === 'subtitles' && visualMode === 'lip_sync')) {
+    return {
+      status: 400,
+      code: 'VISUAL_MODE_INVALID',
+      message: output === 'subtitles'
+        ? 'Subtitle exports do not accept visual lip-sync.'
+        : 'Unsupported visual export mode.',
+    };
+  }
+  return visualMode;
+}
+
+function visualLipSyncAvailable(env: Env): boolean {
+  return Boolean(env.SYNC_API_KEY?.trim());
 }
 
 function separationCapabilityError(capabilities: DialogueSeparationCapabilities): ExportValidationError | null {
@@ -248,10 +267,19 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     requestId: string | undefined,
     legacy: boolean,
     audioMode: DubbedAudioMode,
+    visualMode: VisualMode,
   ) {
     const exportsStore = makeExports(env);
     const jobs = makeJobs(env);
-    const attempt = await exportsStore.create(projectId, userId, targetLanguage, output, batchId, audioMode);
+    const attempt = await exportsStore.create(
+      projectId,
+      userId,
+      targetLanguage,
+      output,
+      batchId,
+      audioMode,
+      visualMode === 'lip_sync',
+    );
     const job = await jobs.create(projectId, legacy ? 'export' : `export:${targetLanguage}:${output}`);
     if (legacy) await makeProjects(env).setStatus(projectId, userId, 'processing');
     try {
@@ -264,6 +292,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
           targetLanguage,
           output,
           audioMode,
+          visualMode,
           requestId,
         },
       });
@@ -274,6 +303,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         jobId: job.id,
         workflowId: instance.id,
         status: 'queued' as const,
+        audioMode,
+        visualMode,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
@@ -288,6 +319,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         status: 'failed' as const,
         code: 'EXPORT_WORKFLOW_START_FAILED',
         message,
+        audioMode,
+        visualMode,
       };
     }
   }
@@ -298,12 +331,17 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     output: ExportOutput,
     legacy: boolean,
     audioMode: DubbedAudioMode,
+    visualMode: VisualMode,
   ) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     try {
       const validated = await validateTarget(c.env, projectId, userId, targetLanguage, output);
       if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+
+      if (visualMode === 'lip_sync' && !visualLipSyncAvailable(c.env)) {
+        return c.json(errorBody('LIP_SYNC_UNAVAILABLE', 'Visual lip-sync is unavailable.'), 503);
+      }
 
       if (audioMode === 'separated_background') {
         const capabilityError = await requireSeparatedCapability(c.env);
@@ -325,6 +363,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         c.get('requestId'),
         legacy,
         audioMode,
+        visualMode,
       );
       if (launched.status === 'failed') {
         return c.json(errorBody(launched.code, launched.message), 503);
@@ -360,7 +399,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
     const exportsStore = makeExports(c.env);
     const jobs = makeJobs(c.env);
-    const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null, 'dubbed_only');
+    const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null, 'dubbed_only', false);
     const job = await jobs.create(projectId, 'export');
     await projects.setStatus(projectId, userId, 'processing');
     try {
@@ -373,6 +412,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
           targetLanguage: 'vi',
           output: 'dubbed',
           audioMode: 'dubbed_only',
+          visualMode: 'standard',
           requestId: c.get('requestId'),
         },
       });
@@ -398,13 +438,21 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     } catch {
       separation = await new UnavailableDialogueSeparationProvider().capabilities();
     }
-    return c.json({ duckOriginal: true, separation });
+    const lipSyncAvailable = visualLipSyncAvailable(c.env);
+    return c.json({
+      duckOriginal: true,
+      separation,
+      visualLipSync: {
+        available: lipSyncAvailable,
+        provider: lipSyncAvailable ? 'sync-labs' : null,
+      },
+    });
   });
 
   routes.post('/:id/exports/batch', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
-    let payload: { targetLanguages?: unknown; output?: unknown; audioMode?: unknown };
+    let payload: { targetLanguages?: unknown; output?: unknown; audioMode?: unknown; visualMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -416,7 +464,12 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     if (typeof audioTreatment !== 'string') {
       return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
     }
+    const visualTreatment = parseVisualTreatment(output, payload.visualMode);
+    if (typeof visualTreatment !== 'string') {
+      return c.json(errorBody(visualTreatment.code, visualTreatment.message), visualTreatment.status);
+    }
     const audioMode = audioTreatment;
+    const visualMode = visualTreatment;
     if (!Array.isArray(payload.targetLanguages) || payload.targetLanguages.length === 0) {
       return c.json(errorBody('EXPORT_TARGETS_INVALID', 'At least one target language is required.'), 400);
     }
@@ -433,6 +486,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       const result = await validateTarget(c.env, projectId, userId, target, output);
       if ('code' in result) return c.json(errorBody(result.code, result.message), result.status);
       validated.push(result.targetLanguage);
+    }
+
+    if (visualMode === 'lip_sync' && !visualLipSyncAvailable(c.env)) {
+      return c.json(errorBody('LIP_SYNC_UNAVAILABLE', 'Visual lip-sync is unavailable.'), 503);
     }
 
     if (audioMode === 'separated_background') {
@@ -458,13 +515,14 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
         c.get('requestId'),
         false,
         audioMode,
+        visualMode,
       ));
     }
     return c.json({ batchId, exports: results }, 202);
   });
 
   routes.post('/:id/exports/:language', async (c) => {
-    let payload: { output?: unknown; audioMode?: unknown };
+    let payload: { output?: unknown; audioMode?: unknown; visualMode?: unknown };
     try {
       payload = await c.req.json();
     } catch {
@@ -476,7 +534,11 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     if (typeof audioTreatment !== 'string') {
       return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
     }
-    return startSingle(c, c.req.param('language'), output, false, audioTreatment);
+    const visualTreatment = parseVisualTreatment(output, payload.visualMode);
+    if (typeof visualTreatment !== 'string') {
+      return c.json(errorBody(visualTreatment.code, visualTreatment.message), visualTreatment.status);
+    }
+    return startSingle(c, c.req.param('language'), output, false, audioTreatment, visualTreatment);
   });
 
   routes.get('/:id/exports/:language', async (c) => {

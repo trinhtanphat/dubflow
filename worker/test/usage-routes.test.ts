@@ -11,6 +11,7 @@ const summary: UsageSummary = {
     ttsAudioSeconds: 35.5,
     dialogueSeparationSeconds: 42,
     renderSeconds: 150,
+    lipSyncVideoSeconds: 0,
   },
   providers: {
     'deepgram-nova-3': {
@@ -19,6 +20,7 @@ const summary: UsageSummary = {
       ttsAudioSeconds: 0,
       dialogueSeparationSeconds: 0,
       renderSeconds: 0,
+      lipSyncVideoSeconds: 0,
     },
     elevenlabs: {
       asrAudioSeconds: 0,
@@ -26,6 +28,7 @@ const summary: UsageSummary = {
       ttsAudioSeconds: 35.5,
       dialogueSeparationSeconds: 0,
       renderSeconds: 0,
+      lipSyncVideoSeconds: 0,
     },
   },
 };

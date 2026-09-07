@@ -28,7 +28,7 @@ describe('Phase 4D batch export frontend api', () => {
 
     expect(fetchMock.mock.calls[0]).toEqual([
       '/api/projects/project%2F1/exports/ja',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ output: 'dubbed', audioMode: 'duck_original' }) }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ output: 'dubbed', audioMode: 'duck_original', visualMode: 'standard' }) }),
     ]);
     expect(fetchMock.mock.calls[1]).toEqual([
       '/api/projects/project%2F1/exports/ja',
@@ -38,7 +38,7 @@ describe('Phase 4D batch export frontend api', () => {
       '/api/projects/project%2F1/exports/batch',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ targetLanguages: ['vi'], output: 'dubbed', audioMode: 'separated_background' }),
+        body: JSON.stringify({ targetLanguages: ['vi'], output: 'dubbed', audioMode: 'separated_background', visualMode: 'standard' }),
       }),
     ]);
   });
@@ -50,7 +50,7 @@ describe('Phase 4D batch export frontend api', () => {
     const api = await import('./batchExportApi');
     await api.startLanguageExport('p1', 'vi', 'dubbed');
     expect(vi.mocked(fetch).mock.calls[0]?.[1]).toEqual(expect.objectContaining({
-      body: JSON.stringify({ output: 'dubbed', audioMode: 'dubbed_only' }),
+      body: JSON.stringify({ output: 'dubbed', audioMode: 'dubbed_only', visualMode: 'standard' }),
     }));
   });
 
@@ -63,6 +63,10 @@ describe('Phase 4D batch export frontend api', () => {
         backgroundStem: false,
         dialogueStem: false,
         qualification: 'unavailable',
+      },
+      visualLipSync: {
+        available: false,
+        provider: null,
       },
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(capabilities));

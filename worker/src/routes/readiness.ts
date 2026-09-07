@@ -12,7 +12,7 @@ export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
-  schemaRevision: 11 | null;
+  schemaRevision: 12 | null;
   asr: AsrCapabilities;
 };
 
@@ -26,9 +26,11 @@ type ReadinessSchemaRow = {
   project_source_generation_column: number;
   project_exports_audio_mode_column: number;
   project_audio_stems_table: number;
+  project_exports_lip_sync_status_column: number;
+  provider_media_grants_table: number;
 };
 
-const CURRENT_SCHEMA_REVISION = 11 as const;
+const CURRENT_SCHEMA_REVISION = 12 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   if (!row) return false;
@@ -41,7 +43,9 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
     Number(row.project_exports_output_column) === 1 &&
     Number(row.project_source_generation_column) === 1 &&
     Number(row.project_exports_audio_mode_column) === 1 &&
-    Number(row.project_audio_stems_table) === 1
+    Number(row.project_audio_stems_table) === 1 &&
+    Number(row.project_exports_lip_sync_status_column) === 1 &&
+    Number(row.provider_media_grants_table) === 1
   );
 }
 
@@ -85,7 +89,15 @@ export async function checkReadiness(db: ReadinessDatabaseLike, deepgramApiKey?:
         EXISTS(
           SELECT 1 FROM sqlite_master
           WHERE type = 'table' AND name = 'project_audio_stems'
-        ) AS project_audio_stems_table
+        ) AS project_audio_stems_table,
+        EXISTS(
+          SELECT 1 FROM pragma_table_info('project_exports')
+          WHERE name = 'lip_sync_status'
+        ) AS project_exports_lip_sync_status_column,
+        EXISTS(
+          SELECT 1 FROM sqlite_master
+          WHERE type = 'table' AND name = 'provider_media_grants'
+        ) AS provider_media_grants_table
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {

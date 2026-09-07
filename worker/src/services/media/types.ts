@@ -26,6 +26,12 @@ export type RenderExportOptions = {
 export interface MediaProcessor {
   probe(objectKey: string): Promise<{ durationMs: number }>;
   extractAudioChunks(projectId: string, objectKey: string): Promise<AudioChunk[]>;
+  extractExportAudio(
+    projectId: string,
+    exportObjectKey: string,
+    targetLanguage: TargetLanguage,
+    exportId: string,
+  ): Promise<{ audioObjectKey: string }>;
   renderExport(
     projectId: string,
     objectKey: string,

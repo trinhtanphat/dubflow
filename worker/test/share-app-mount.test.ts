@@ -19,7 +19,7 @@ function env() {
   } as never;
 }
 
-describe('Phase 3C sharing app mounts', () => {
+describe('Phase 3C sharing and provider-media app mounts', () => {
   it('mounts owner share management under /api/projects', async () => {
     const response = await app.fetch(
       new Request('https://dubflow.test/api/projects/p1/shares'),
@@ -44,6 +44,22 @@ describe('Phase 3C sharing app mounts', () => {
       error: true,
       code: 'SHARE_NOT_FOUND',
       message: 'Share not found.',
+    });
+  });
+
+  it('mounts provider media bearer reads under /api without falling through to assets', async () => {
+    const response = await app.fetch(
+      new Request('https://dubflow.test/api/provider-media/grant-1?token=wrong'),
+      env(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+    await expect(response.json()).resolves.toEqual({
+      error: true,
+      code: 'PROVIDER_MEDIA_NOT_FOUND',
+      message: 'Provider media not found.',
     });
   });
 });
