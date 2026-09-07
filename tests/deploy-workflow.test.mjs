@@ -23,6 +23,13 @@ test('Cloudflare Workers Builds is the only production deployment lane', () => {
   assert.match(policy, /must not deploy/i);
 });
 
+test('CI validates the exact generated Workers Builds production config before merge', () => {
+  assert.match(ciWorkflow, /cloudflare-workers-build-deploy\.mjs/);
+  assert.match(ciWorkflow, /prepareWorkersBuildConfig/);
+  assert.match(ciWorkflow, /wrangler\s+deploy\s+--dry-run\s+--config\s+\.wrangler-production\.json/i);
+  assert.match(ciWorkflow, /(?:trap[^\n]*|rm\s+-f\s+)\.wrangler-production\.json/i);
+});
+
 test('Workers Builds production lane is explicitly container-free on account 2403', () => {
   const policy = fs.readFileSync(policyUrl, 'utf8');
   assert.match(policy, /container-free/i);
