@@ -146,6 +146,7 @@ function translationEnv(db: TranslationDb, model = '@cf/example/context-model'):
     CONTEXT_TRANSLATION_MODEL: model,
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-key',
     PAID_GOOGLE_TRANSLATE_ENABLED: 'true',
+    PAID_WORKERS_AI_ENABLED: 'true',
   } as unknown as Env;
 }
 
