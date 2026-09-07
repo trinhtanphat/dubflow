@@ -40,9 +40,11 @@ test('Phase 4E migration persists visual state and short-lived provider grant au
 test('Phase 4E provider boundary and admission stay explicit and fail closed', () => {
   assert.match(syncLabs, /class\s+SyncLabsLipSyncProvider/);
   assert.match(exportRoute, /SYNC_API_KEY/);
+  assert.match(exportRoute, /SYNC_LIPSYNC_QUALIFIED/);
   assert.match(exportRoute, /LIP_SYNC_UNAVAILABLE/);
   assert.match(exportRoute, /visualLipSync/);
-  assert.match(exportRoute, /provider:\s*lipSyncAvailable\s*\?\s*['"]sync-labs['"]/);
+  assert.match(exportRoute, /qualification:\s*qualified\s*\?\s*['"]qualified['"]\s*:\s*['"]unqualified['"]/);
+  assert.match(exportRoute, /visualMode\s*===\s*['"]lip_sync['"]\s*&&\s*!visualLipSyncAvailable/);
 });
 
 test('Phase 4E provider media access is token-hashed, bounded and never canonical provider state', () => {
