@@ -19,7 +19,10 @@ export function dubbedAvailability(
   targetLanguage: TargetLanguage,
   clientVoiceAvailable = false,
 ): { allowed: boolean; reason: string } {
-  if (targetLanguage === 'vi' && clientVoiceAvailable) return { allowed: true, reason: '' };
+  if (targetLanguage === 'vi') {
+    if (clientVoiceAvailable) return { allowed: true, reason: '' };
+    return { allowed: false, reason: 'Giọng Việt cục bộ chưa khả dụng trong trình duyệt này.' };
+  }
   if (!capabilities?.configured) return { allowed: false, reason: 'Provider giọng chưa được cấu hình.' };
   if (capabilities.languages === 'unknown') return { allowed: false, reason: 'Khả năng giọng cho ngôn ngữ này chưa xác nhận (unqualified).' };
   if (!capabilities.languages.includes(targetLanguage)) return { allowed: false, reason: 'Provider giọng không hỗ trợ ngôn ngữ này.' };
