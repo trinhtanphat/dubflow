@@ -3,6 +3,7 @@ import type { TargetLanguage } from '../translation/languageVariantsApi';
 
 export type ExportOutput = 'dubbed' | 'subtitles';
 export type DubbedAudioMode = 'dubbed_only' | 'duck_original' | 'separated_background';
+export type VisualMode = 'standard' | 'lip_sync';
 export type SeparationQualification = 'qualified' | 'unqualified' | 'unavailable';
 
 export type ExportCapabilitiesDto = {
@@ -13,6 +14,10 @@ export type ExportCapabilitiesDto = {
     backgroundStem: boolean;
     dialogueStem: boolean;
     qualification: SeparationQualification;
+  };
+  visualLipSync: {
+    available: boolean;
+    provider: string | null;
   };
 };
 
@@ -26,6 +31,7 @@ export type ExportLaunchDto = {
   code?: string;
   message?: string;
   audioMode?: DubbedAudioMode;
+  visualMode?: VisualMode;
 };
 
 export type BatchExportLaunchDto = {
@@ -37,8 +43,8 @@ function projectPath(projectId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}`;
 }
 
-function launchBody(output: ExportOutput, audioMode: DubbedAudioMode) {
-  return output === 'dubbed' ? { output, audioMode } : { output };
+function launchBody(output: ExportOutput, audioMode: DubbedAudioMode, visualMode: VisualMode) {
+  return output === 'dubbed' ? { output, audioMode, visualMode } : { output };
 }
 
 export function fetchExportCapabilities(projectId: string) {
@@ -50,10 +56,11 @@ export function startLanguageExport(
   targetLanguage: TargetLanguage,
   output: ExportOutput,
   audioMode: DubbedAudioMode = 'dubbed_only',
+  visualMode: VisualMode = 'standard',
 ) {
   return apiFetch<ExportLaunchDto>(
     `${projectPath(projectId)}/exports/${encodeURIComponent(targetLanguage)}`,
-    { method: 'POST', body: JSON.stringify(launchBody(output, audioMode)) },
+    { method: 'POST', body: JSON.stringify(launchBody(output, audioMode, visualMode)) },
   );
 }
 
@@ -62,9 +69,10 @@ export function startBatchExport(
   targetLanguages: TargetLanguage[],
   output: ExportOutput,
   audioMode: DubbedAudioMode = 'dubbed_only',
+  visualMode: VisualMode = 'standard',
 ) {
   const body = output === 'dubbed'
-    ? { targetLanguages, output, audioMode }
+    ? { targetLanguages, output, audioMode, visualMode }
     : { targetLanguages, output };
   return apiFetch<BatchExportLaunchDto>(
     `${projectPath(projectId)}/exports/batch`,
