@@ -8,6 +8,7 @@ import { withProviderTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
 import { LipSyncProviderError, type LipSyncProvider } from '../services/lipsync/types';
 import type { MediaProcessor } from '../services/media/types';
+import { isJobCancelledError } from './jobCancellation';
 
 const GRANT_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_PROVIDER_MEDIA_ORIGIN = 'https://yupvox.qs3d.site';
@@ -237,6 +238,7 @@ export async function runVisualLipSync(
 
     return canonicalKey;
   } catch (error) {
+    if (isJobCancelledError(error)) throw error;
     const normalized = normalizeLipSyncError(error);
     try {
       await deps.exports.setLipSyncState(
