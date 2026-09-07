@@ -23,6 +23,7 @@ const api = read('src/features/export/batchExportApi.ts');
 const deployScript = read('scripts/cloudflare-workers-build-deploy.mjs');
 const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
+const viteConfig = read('vite.config.ts');
 const pkg = JSON.parse(read('package.json'));
 
 test('Phase 4E migration persists visual state and short-lived provider grant authority', () => {
@@ -108,4 +109,10 @@ test('Phase 4E keeps GitHub Actions CI-only and the repository acceptance gate w
   for (const line of wranglerDeployLines) assert.match(line, /--dry-run/i);
   assert.match(deployScript, /delete\s+source\.containers/);
   assert.match(pkg.scripts['verify:deploy-config'], /phase4e-lipsync-acceptance\.test\.mjs/);
+});
+
+test('build manifest retains every Vite React plugin imported by the build config', () => {
+  assert.match(viteConfig, /from\s+['"]@vitejs\/plugin-react['"]/);
+  assert.equal(typeof pkg.devDependencies?.['@vitejs/plugin-react'], 'string');
+  assert.ok(pkg.devDependencies['@vitejs/plugin-react'].trim().length > 0);
 });
