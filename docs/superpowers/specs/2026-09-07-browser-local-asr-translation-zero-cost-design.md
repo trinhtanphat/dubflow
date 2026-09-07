@@ -199,3 +199,7 @@ After merge/deploy, #91 remains OPEN until a real authorized browser production 
 12. frontend build SHA, backend version, gateway version, model IDs/revisions and project/job/export IDs are recorded.
 
 Only terminal real-media evidence closes #91. Only after #91 PASS may #128 be refreshed/revalidated for merge.
+
+## Spec self-review
+
+The approved spec has no TODO/TBD placeholders. Model/revision pins, the `PUT /api/projects/:id/client-inference/vi` contract, v1 limits, project-unique speaker identity, atomic D1 boundary, append-only migration rule, and hard zero-cost denylist are consistent with the replacement implementation plan. The superseded backend prepared-ASR path is explicitly excluded from the final architecture.
