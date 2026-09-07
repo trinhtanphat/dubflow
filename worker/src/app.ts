@@ -38,7 +38,7 @@ app.get('/api/ready', async (c) => {
     publicOrigin: c.env.PUBLIC_ORIGIN,
     sourceSigningSecret: c.env.MEDIA_SOURCE_SIGNING_SECRET ?? c.env.STREAM_SOURCE_SIGNING_SECRET,
     remuxReady,
-  }, c.env.PAID_DEEPGRAM_ASR_ENABLED);
+  }, c.env.PAID_DEEPGRAM_ASR_ENABLED, c.env.PAID_WORKERS_AI_ENABLED);
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });
 app.route('/api/media-source', createMediaSourceRoutes());
