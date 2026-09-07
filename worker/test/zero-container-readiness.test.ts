@@ -30,13 +30,19 @@ function schemaDb() {
   };
 }
 
+const voiceReady = {
+  elevenLabsApiKey: 'elevenlabs-secret',
+  elevenLabsDefaultVoiceId: 'voice-id',
+};
+
 describe('R2-only media readiness', () => {
-  it('reports schema 14 ready with R2, public origin, signing secret, and remux capability only', async () => {
+  it('reports schema 14 ready with R2/remux and configured standard dubbing voice', async () => {
     const result = await checkReadiness(schemaDb(), 'dg-secret', {
       r2: {},
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
       remuxReady: true,
+      ...voiceReady,
     });
 
     expect(result).toMatchObject({
@@ -44,6 +50,7 @@ describe('R2-only media readiness', () => {
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'ready', remux: 'ready' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
     });
   });
 
@@ -52,6 +59,7 @@ describe('R2-only media readiness', () => {
       r2: {},
       sourceSigningSecret: 'source-secret',
       remuxReady: true,
+      ...voiceReady,
     });
 
     expect(result).toMatchObject({
@@ -59,6 +67,7 @@ describe('R2-only media readiness', () => {
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'unavailable', remux: 'ready' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
     });
   });
 
@@ -68,6 +77,7 @@ describe('R2-only media readiness', () => {
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
       remuxReady: false,
+      ...voiceReady,
     });
 
     expect(result).toMatchObject({
@@ -75,6 +85,34 @@ describe('R2-only media readiness', () => {
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'ready', remux: 'unavailable' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
+    });
+  });
+
+  it('fails closed when ElevenLabs API key or default voice id is missing', async () => {
+    const base = {
+      r2: {},
+      publicOrigin: 'https://yupvox.qs3d.site',
+      sourceSigningSecret: 'source-secret',
+      remuxReady: true,
+    };
+
+    const missingKey = await checkReadiness(schemaDb(), 'dg-secret', {
+      ...base,
+      elevenLabsDefaultVoiceId: 'voice-id',
+    });
+    expect(missingKey).toMatchObject({
+      ready: false,
+      voice: { provider: 'elevenlabs', status: 'unavailable' },
+    });
+
+    const missingVoice = await checkReadiness(schemaDb(), 'dg-secret', {
+      ...base,
+      elevenLabsApiKey: 'elevenlabs-secret',
+    });
+    expect(missingVoice).toMatchObject({
+      ready: false,
+      voice: { provider: 'elevenlabs', status: 'unavailable' },
     });
   });
 });
