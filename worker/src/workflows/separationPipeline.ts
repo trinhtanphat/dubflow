@@ -7,7 +7,7 @@ import {
   type DialogueSeparationProvider,
   type SeparationResult,
 } from '../services/separation/types';
-import { assertJobActive, type JobStatusReader } from './jobCancellation';
+import { assertJobActive } from './jobCancellation';
 
 export type SeparationWorkflowParams = {
   projectId: string;
@@ -16,7 +16,13 @@ export type SeparationWorkflowParams = {
   requestId?: string;
 };
 
-type SeparationJobs = JobStatusReader & Pick<JobStore, 'getForProject' | 'setProgress' | 'complete' | 'fail'>;
+type SeparationJobs = Pick<JobStore, 'setProgress' | 'complete' | 'fail'> & {
+  getForProject(
+    projectId: string,
+    jobId: string,
+    userId: string,
+  ): Promise<Pick<DubbingJob, 'status' | 'id' | 'retryCount'> | null>;
+};
 type SeparationStems = Pick<AudioStemRepository, 'latestCompleted' | 'begin' | 'complete' | 'fail'>;
 type SeparationUsage = Pick<UsageStore, 'getByOperation' | 'record'>;
 
