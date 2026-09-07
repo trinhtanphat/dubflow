@@ -19,7 +19,7 @@ import { enforceRateLimit } from '../security/rate-limit';
 import { syncLabsLipSyncCapability } from '../services/lipsync/qualification';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
 import type { DialogueSeparationCapabilities, DialogueSeparationProvider } from '../services/separation/types';
-import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
+import { createVoiceProvider } from '../services/voice/provider';
 import type { VoiceCapabilities } from '../services/voice/types';
 
 export type ExportStore = Pick<ProjectExportRepository, 'create' | 'latest' | 'latestCompleted' | 'fail'>;
@@ -50,10 +50,7 @@ type ValidatedTarget = {
 };
 
 function voiceCapabilities(env: Env): VoiceCapabilities {
-  return new ElevenLabsVoiceProvider(
-    env.ELEVENLABS_API_KEY ?? '',
-    { defaultVoiceId: env.ELEVENLABS_DEFAULT_VOICE_ID },
-  ).capabilities();
+  return createVoiceProvider(env).capabilities();
 }
 
 function readableBucket(env: Env): R2ReadableBucketLike {

@@ -17,7 +17,7 @@ import { SyncLabsLipSyncProvider } from '../services/lipsync/sync-labs';
 import { PcmSoundtrackService } from '../services/media/pcm-soundtrack';
 import { R2Mp4RemuxPublisher } from '../services/media/mp4-remux';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
-import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
+import { createVoiceProvider } from '../services/voice/provider';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
@@ -53,10 +53,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         providerMediaOrigin: 'https://yupvox.qs3d.site',
         fetchImpl: fetch,
         bucket: this.env.MEDIA,
-        voice: new ElevenLabsVoiceProvider(
-          this.env.ELEVENLABS_API_KEY ?? '',
-          { defaultVoiceId: this.env.ELEVENLABS_DEFAULT_VOICE_ID },
-        ),
+        voice: createVoiceProvider(this.env),
         soundtrack,
         publisher,
         usage: new UsageRepository(this.env.DB),
