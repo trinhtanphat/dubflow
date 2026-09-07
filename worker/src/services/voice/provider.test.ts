@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createVoiceProvider } from './provider';
-import { VoiceProviderError } from './types';
 
 const fakeAi = () => ({ run: vi.fn() });
 
@@ -18,7 +17,7 @@ describe('createVoiceProvider paid TTS admission', () => {
       text: 'xin chao',
       language: 'vi',
       outputFormat: 'pcm_24000',
-    })).rejects.toMatchObject<Partial<VoiceProviderError>>({ code: 'VOICE_PROVIDER_UNCONFIGURED' });
+    })).rejects.toMatchObject({ code: 'VOICE_PROVIDER_UNCONFIGURED' });
     expect(ai.run).not.toHaveBeenCalled();
   });
 
@@ -27,7 +26,7 @@ describe('createVoiceProvider paid TTS admission', () => {
       ALLOW_PAID_TTS: 'true',
       ELEVENLABS_API_KEY: 'configured-key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'configured-voice',
-    });
+    } as any);
 
     expect(provider.capabilities()).toMatchObject({
       provider: 'elevenlabs',
@@ -39,7 +38,7 @@ describe('createVoiceProvider paid TTS admission', () => {
     const provider = createVoiceProvider({
       ALLOW_PAID_TTS: 'true',
       AI: fakeAi(),
-    });
+    } as any);
 
     expect(provider.capabilities()).toMatchObject({
       provider: 'xai/grok-tts',
