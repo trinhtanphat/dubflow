@@ -22,11 +22,13 @@ The required backend flow is:
 3. Merge the fully qualified change into `main`.
 4. Cloudflare Workers Builds detects the new `main` commit for the account-6666 `dubflow` project.
 5. Cloudflare Workers Builds builds the repository.
-6. Cloudflare deploys the backend using `wrangler.jsonc`.
+6. Cloudflare deploys the backend from the account-6666 backend configuration.
 
 `wrangler.jsonc` must target account `6c5207813df3d5b83b9508125e0e9e12`, keep `workers_dev = true`, and must not contain the `yupvox.qs3d.site` custom-domain route. The backend account does not own the `qs3d.site` zone.
 
 The Cloudflare build command may remain `npm run build`. A direct deploy command `npx wrangler deploy` is valid for the account-6666 backend because the checked-in backend config no longer claims the account-2403 custom domain and no longer declares paid Containers.
+
+When the repository-owned Workers Builds deploy runner `scripts/cloudflare-workers-build-deploy.mjs` is used, it delegates config generation to the pure `scripts/cloudflare-workers-build-config.mjs` module. That generator writes `.wrangler-production.json` from `wrangler.jsonc` while defensively removing `containers`, `durable_objects`, top-level `exports`, and `routes` before deployment. The generator does not change the backend account; account 6666 remains the source-of-truth target from `wrangler.jsonc`.
 
 ## Public gateway
 
@@ -39,6 +41,8 @@ Do not guess or commit an account subdomain. Resolve the exact backend `workers.
 ## GitHub Actions responsibility
 
 GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform Wrangler dry-runs, typecheck the gateway, and capture test artifacts/screenshots.
+
+CI must dry-run both the checked-in backend `wrangler.jsonc` and the exact generated `.wrangler-production.json`. CI may invoke the pure config generator to create the temporary generated file, but it must not invoke the Workers Builds deployment runner or perform a non-dry-run deployment. The generated file must be cleaned up after qualification.
 
 GitHub Actions **must not deploy production**. Production deployment stays in Cloudflare; do not add a GitHub production deployment workflow as a workaround for Cloudflare configuration failures.
 
@@ -75,8 +79,9 @@ CI must reject the following regressions:
 - a custom-domain route reappearing in backend `wrangler.jsonc`;
 - the gateway account drifting away from `trinhtanphat2403`;
 - the public hostname moving out of `wrangler.gateway.jsonc`;
-- paid Container bindings reappearing in production config;
-- GitHub Actions becoming a production deployment lane;
+- paid Container bindings or dormant Durable Object lifecycle `exports` reappearing in the generated backend production config;
+- CI stopping validation of the exact generated `.wrangler-production.json`;
+- GitHub Actions invoking the production deployment runner or becoming a production deployment lane;
 - a stale readiness payload being treated as qualified production evidence.
 
 This policy is intentional and should be treated as a repository-level requirement.

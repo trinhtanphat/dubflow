@@ -22,7 +22,7 @@ const pipeline = source('worker/src/workflows/separationPipeline.ts');
 const exportPipeline = source('worker/src/workflows/exportPipeline.ts');
 const wranglerText = source('wrangler.jsonc');
 const wrangler = JSON.parse(wranglerText);
-const deployScript = source('scripts/cloudflare-workers-build-deploy.mjs');
+const productionConfigGenerator = source('scripts/cloudflare-workers-build-config.mjs');
 const deploymentStatus = source('docs/deployment-status.md');
 
 test('Phase 4D exposes explicit separation status and prepare APIs without implicit Studio work', () => {
@@ -81,8 +81,9 @@ test('Phase 4D keeps the optional Demucs source adapter but does not bind, expor
 });
 
 test('Phase 4D production remains fail-closed with Containers disabled', () => {
-  assert.match(deployScript, /delete\s+source\.containers\b/);
-  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.containers\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.durable_objects\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.exports\b/);
   assert.match(deploymentStatus, /Phase 4D/i);
   assert.match(deploymentStatus, /UNQUALIFIED/i);
   assert.match(deploymentStatus, /Containers.*disabled|disabled.*Containers/is);
