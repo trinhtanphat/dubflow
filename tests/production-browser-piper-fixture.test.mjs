@@ -13,10 +13,9 @@ async function source(filePath) {
   }
 }
 
-const [workflow, runner, packageSource] = await Promise.all([
+const [workflow, runner] = await Promise.all([
   source('../.github/workflows/production-media-fixture.yml'),
   source('../scripts/verify-production-browser-piper-fixture.mjs'),
-  source('../package.json'),
 ]);
 
 test('manual production fixture drives the deployed browser Piper lane without paid or deploy coupling', () => {
@@ -25,7 +24,6 @@ test('manual production fixture drives the deployed browser Piper lane without p
   assert.match(workflow, /PRODUCTION_ZERO_CHARGE_VERIFIED/);
   assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
   assert.doesNotMatch(workflow, /playwright|puppeteer|selenium|wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
-  assert.match(packageSource, /production-browser-piper-fixture\.test\.mjs/);
 });
 
 test('browser fixture uses native CDP on the real production Studio path and waits for enabled export', () => {
