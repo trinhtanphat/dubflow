@@ -422,6 +422,10 @@ describe('Phase 4D export audio treatment admission', () => {
     await expect(response.json()).resolves.toEqual({
       duckOriginal: true,
       separation: unavailableSeparation,
+      visualLipSync: {
+        available: false,
+        provider: null,
+      },
     });
     expect(h.calls.separationCapabilities).toBe(1);
 
