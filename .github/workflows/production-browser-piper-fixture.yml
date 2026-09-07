@@ -1,0 +1,95 @@
+name: Production Browser Piper Fixture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-browser-piper-fixture
+  cancel-in-progress: false
+
+jobs:
+  verify-production-browser-piper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install fixture media tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
+
+      - name: Generate deterministic H.264 speech fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          espeak-ng -s 135 -w "$RUNNER_TEMP/production-browser-piper-fixture.wav" \
+            'Hello from DubFlow browser Piper production fixture. This verifies zero cost speech recognition, translation, local Vietnamese voice generation, and final video export.'
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i 'testsrc=size=320x180:rate=24:duration=12' \
+            -i "$RUNNER_TEMP/production-browser-piper-fixture.wav" \
+            -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 3.0 -preset veryfast \
+            -c:a aac -b:a 96k -shortest -movflags +faststart \
+            "$RUNNER_TEMP/production-browser-piper-fixture.mp4"
+          test -s "$RUNNER_TEMP/production-browser-piper-fixture.mp4"
+
+      - name: Locate Chromium browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$CHROME" ]; then
+            echo 'No Chromium-compatible browser found on runner.' >&2
+            exit 1
+          fi
+          echo "CHROME_BIN=$CHROME" >> "$GITHUB_ENV"
+
+      - name: Verify deployed browser Piper R2-only media path
+        env:
+          PRODUCTION_MEDIA_FIXTURE_PATH: ${{ runner.temp }}/production-browser-piper-fixture.mp4
+          PRODUCTION_MEDIA_OUTPUT_PATH: ${{ runner.temp }}/production-browser-piper-output.mp4
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+        run: node scripts/verify-production-browser-piper-fixture.mjs
+
+      - name: Prove H.264 video and AAC dubbed soundtrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/production-browser-piper-output.mp4"
+          video_codec="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$RUNNER_TEMP/production-browser-piper-output.mp4")"
+          audio_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$RUNNER_TEMP/production-browser-piper-output.mp4")"
+          test "$video_codec" = "h264"
+          test "$audio_codec" = "aac"
+
+          ffmpeg -hide_banner -loglevel error -y \
+            -i "$RUNNER_TEMP/production-browser-piper-fixture.mp4" \
+            -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb -f h264 \
+            "$RUNNER_TEMP/production-browser-piper-source-video.h264"
+          ffmpeg -hide_banner -loglevel error -y \
+            -i "$RUNNER_TEMP/production-browser-piper-output.mp4" \
+            -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb -f h264 \
+            "$RUNNER_TEMP/production-browser-piper-output-video.h264"
+          test -s "$RUNNER_TEMP/production-browser-piper-source-video.h264"
+          test -s "$RUNNER_TEMP/production-browser-piper-output-video.h264"
+          source_video_sha="$(sha256sum "$RUNNER_TEMP/production-browser-piper-source-video.h264" | awk '{print $1}')"
+          output_video_sha="$(sha256sum "$RUNNER_TEMP/production-browser-piper-output-video.h264" | awk '{print $1}')"
+          test "$source_video_sha" = "$output_video_sha"
+
+      - name: Upload qualified production fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-browser-piper-${{ github.sha }}
+          path: ${{ runner.temp }}/production-browser-piper-output.mp4
+          if-no-files-found: error
+          retention-days: 7
