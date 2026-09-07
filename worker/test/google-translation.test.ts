@@ -19,6 +19,22 @@ describe('Google Cloud Translation provider', () => {
     );
   });
 
+  it('fails closed before network calls when only a Google API key is configured', async () => {
+    let called = false;
+    const provider = new GoogleCloudTranslationProvider('secret-key', async () => {
+      called = true;
+      return Response.json({ data: { translations: [{ translatedText: 'x' }] } });
+    });
+
+    expect(provider).toHaveProperty(
+      'capabilities',
+      { contextual: false, available: false, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
+    );
+    await expect(provider.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi'))
+      .rejects.toMatchObject({ code: 'GOOGLE_TRANSLATE_PAID_OPT_IN_REQUIRED' });
+    expect(called).toBe(false);
+  });
+
   it('uses the official v2 endpoint, preserves order/ids, and decodes entities', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const fakeFetch: typeof fetch = async (input, init) => {
@@ -57,7 +73,7 @@ describe('Google Cloud Translation provider', () => {
   });
 
   it('fails closed if a direct raw-provider call would discard active context', async () => {
-    const provider = new GoogleCloudTranslationProvider('secret-key', async () => Response.json({ data: { translations: [{ translatedText: 'x' }] } }));
+    const provider = new GoogleCloudTranslationProvider('secret-key', async () => Response.json({ data: { translations: [{ translatedText: 'x' }] }));
     await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'vi', activeContext))
       .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
   });
