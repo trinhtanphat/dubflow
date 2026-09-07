@@ -27,6 +27,25 @@ describe('Sync Labs visual lip-sync provider', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('keeps a qualified API key unavailable without explicit paid opt-in and fails before network work', async () => {
+    const modulePath = '../src/services/lipsync/sync-labs';
+    const loaded = await import(/* @vite-ignore */ modulePath).catch(() => null);
+    expect(loaded).not.toBeNull();
+    if (!loaded) return;
+
+    const fetchImpl = vi.fn();
+    const provider = new loaded.SyncLabsLipSyncProvider({
+      apiKey: 'secret-key',
+      fetchImpl,
+      paidEnabled: undefined,
+    } as any);
+    expect(provider.available).toBe(false);
+    await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
+      code: 'LIP_SYNC_UNAVAILABLE',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('submits exact video/audio URL inputs with sync-3 and polls wait=true through PROCESSING to COMPLETED', async () => {
     const modulePath = '../src/services/lipsync/sync-labs';
     const loaded = await import(/* @vite-ignore */ modulePath).catch(() => null);
