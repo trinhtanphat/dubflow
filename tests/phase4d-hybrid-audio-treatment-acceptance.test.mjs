@@ -18,6 +18,7 @@ const readiness = source('worker/src/routes/readiness.ts');
 const ci = source('.github/workflows/ci.yml');
 const readme = source('README.md');
 const deploymentStatus = source('docs/deployment-status.md');
+const wrangler = source('wrangler.jsonc');
 
 test('Phase 4D persists the canonical source generation, audio mode, and reusable stem schema', () => {
   assert.match(migration, /source_generation/i);
@@ -41,7 +42,7 @@ test('Phase 4D locks deterministic ducking and separated-background rendering co
   assert.match(render, /separated_background/);
 });
 
-test('Phase 4D separation stays fail-closed with stable errors and an unavailable production adapter', () => {
+test('Phase 4D separation keeps stable fail-closed errors and an unavailable fallback adapter', () => {
   for (const code of [
     'DIALOGUE_SEPARATION_UNAVAILABLE',
     'DIALOGUE_SEPARATION_UNQUALIFIED',
@@ -50,7 +51,8 @@ test('Phase 4D separation stays fail-closed with stable errors and an unavailabl
   ]) assert.match(separationTypes, new RegExp(code));
   assert.match(unavailable, /qualification:\s*'unavailable'/);
   assert.match(unavailable, /configured:\s*false/);
-  assert.match(exportWorkflow, /new UnavailableDialogueSeparationProvider\(\)/);
+  assert.match(exportWorkflow, /createDialogueSeparationProvider\(this\.env\)/);
+  assert.match(wrangler, /"SEPARATION_RUNTIME_QUALIFIED"\s*:\s*"false"/);
 });
 
 test('Phase 4D exposes capability admission and honest Studio treatment labels', () => {
