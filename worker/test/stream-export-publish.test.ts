@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { StreamMediaService } from '../src/services/media/stream';
 
-function readyVideo(uid = 'stream-existing') {
+function readyVideo(uid: string) {
   return {
     id: uid,
     readyToStream: true,
@@ -12,10 +12,11 @@ function readyVideo(uid = 'stream-existing') {
 }
 
 describe('StreamMediaService dubbed export publication', () => {
-  it('copies a signed R2 soundtrack, selects it, generates MP4, and streams the exact export key back to R2', async () => {
+  it('creates a private render asset, copies soundtrack, selects it, and streams the exact export key back to R2', async () => {
     const apiCalls: Array<{ method: string; url: string; body?: unknown }> = [];
     const downloadGenerate: string[] = [];
     const puts: Array<{ key: string; bytes: string; contentType?: string }> = [];
+    const persisted: Array<{ sourceKey: string; videoUid: string }> = [];
     let audioCopied = false;
     let audioPoll = 0;
     let downloadPoll = 0;
@@ -23,20 +24,29 @@ describe('StreamMediaService dubbed export publication', () => {
     const project = {
       id: 'p1',
       sourceObjectKey: 'projects/p1/source/a.mp4',
-      streamVideoUid: 'stream-existing',
+      streamVideoUid: 'shared-source',
       streamSourceObjectKey: 'projects/p1/source/a.mp4',
       streamReadyAt: '2026-09-07T00:00:00Z',
     };
     const projects = {
       async getByIdForUser() { return project; },
-      async setStreamProvenance() { throw new Error('must reuse matching Stream provenance'); },
+      async setStreamProvenance() { throw new Error('export must not mutate shared project provenance'); },
+    };
+    const exportAssets = {
+      async get() { return { streamVideoUid: null, streamSourceObjectKey: null }; },
+      async setStreamProvenance(_projectId: string, _exportId: string, _userId: string, sourceKey: string, videoUid: string) {
+        persisted.push({ sourceKey, videoUid });
+      },
     };
     const stream = {
-      async upload() { throw new Error('must not re-upload matching source'); },
+      async upload(url: string) {
+        expect(new URL(url).searchParams.get('render')).toBe('e1');
+        return { id: 'render-e1', readyToStream: false, status: { state: 'queued' } };
+      },
       video(id: string) {
-        expect(id).toBe('stream-existing');
+        expect(id).toBe('render-e1');
         return {
-          async details() { return readyVideo(); },
+          async details() { return readyVideo(id); },
           downloads: {
             async generate(type?: string) { downloadGenerate.push(type ?? 'default'); },
             async get() {
@@ -94,6 +104,7 @@ describe('StreamMediaService dubbed export publication', () => {
 
     const service = new StreamMediaService({
       projects: projects as never,
+      exportAssets: exportAssets as never,
       stream: stream as never,
       bucket: bucket as never,
       publicOrigin: 'https://yupvox.qs3d.site',
@@ -115,8 +126,9 @@ describe('StreamMediaService dubbed export publication', () => {
       exportObjectKey: 'projects/p1/exports/vi/e1.mp4',
     })).resolves.toEqual({ exportObjectKey: 'projects/p1/exports/vi/e1.mp4', audioTrackUid: 'audio-1' });
 
+    expect(persisted).toEqual([{ sourceKey: project.sourceObjectKey, videoUid: 'render-e1' }]);
     const copy = apiCalls.find((call) => call.method === 'POST');
-    expect(copy?.url).toBe('https://api.cloudflare.com/client/v4/accounts/account-1/stream/stream-existing/audio/copy');
+    expect(copy?.url).toBe('https://api.cloudflare.com/client/v4/accounts/account-1/stream/render-e1/audio/copy');
     expect(copy?.body).toMatchObject({ label: 'dubflow-vi-e1' });
     const soundtrackUrl = new URL((copy?.body as { url: string }).url);
     expect(soundtrackUrl.origin + soundtrackUrl.pathname).toBe('https://yupvox.qs3d.site/api/stream-source/p1');
@@ -126,20 +138,21 @@ describe('StreamMediaService dubbed export publication', () => {
     expect(puts).toEqual([{ key: 'projects/p1/exports/vi/e1.mp4', bytes: 'mp4-data', contentType: 'video/mp4' }]);
   });
 
-  it('reuses the export audio track label on workflow retry instead of copying a duplicate track', async () => {
+  it('reuses the private render asset and audio track on workflow retry instead of creating duplicates', async () => {
     const methods: string[] = [];
     const project = {
       id: 'p1',
       sourceObjectKey: 'projects/p1/source/a.mp4',
-      streamVideoUid: 'stream-existing',
+      streamVideoUid: 'shared-source',
       streamSourceObjectKey: 'projects/p1/source/a.mp4',
       streamReadyAt: '2026-09-07T00:00:00Z',
     };
     const stream = {
-      async upload() { throw new Error('must reuse source'); },
-      video() {
+      async upload() { throw new Error('retry must reuse durable render asset'); },
+      video(id: string) {
+        expect(id).toBe('render-existing');
         return {
-          async details() { return readyVideo(); },
+          async details() { return readyVideo(id); },
           downloads: {
             async generate() {},
             async get() { return { default: { status: 'ready', url: 'https://videodelivery.net/retry.mp4' } }; },
@@ -170,6 +183,10 @@ describe('StreamMediaService dubbed export publication', () => {
     };
     const service = new StreamMediaService({
       projects: { async getByIdForUser() { return project; }, async setStreamProvenance() {} } as never,
+      exportAssets: {
+        async get() { return { streamVideoUid: 'render-existing', streamSourceObjectKey: project.sourceObjectKey }; },
+        async setStreamProvenance() { throw new Error('retry must not replace render provenance'); },
+      } as never,
       stream: stream as never,
       bucket: { async put() { return { key: 'out', size: 9 }; } } as never,
       publicOrigin: 'https://yupvox.qs3d.site',
@@ -185,6 +202,7 @@ describe('StreamMediaService dubbed export publication', () => {
       soundtrackObjectKey: 'projects/p1/soundtracks/vi/e1.wav', targetLanguage: 'vi', exportId: 'e1',
       exportObjectKey: 'projects/p1/exports/vi/e1.mp4',
     })).resolves.toMatchObject({ audioTrackUid: 'audio-existing' });
+    expect(methods.every((entry) => !entry.includes('/stream/shared-source/'))).toBe(true);
     expect(methods.some((entry) => entry.includes('POST') && entry.endsWith('/audio/copy'))).toBe(false);
   });
 });
