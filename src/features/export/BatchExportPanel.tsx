@@ -17,7 +17,9 @@ import './batch-export.css';
 export function dubbedAvailability(
   capabilities: VoiceCapabilities | null,
   targetLanguage: TargetLanguage,
+  localVietnameseVoiceAvailable = false,
 ): { allowed: boolean; reason: string } {
+  if (targetLanguage === 'vi' && localVietnameseVoiceAvailable) return { allowed: true, reason: '' };
   if (!capabilities?.configured) return { allowed: false, reason: 'Provider giọng chưa được cấu hình.' };
   if (capabilities.languages === 'unknown') return { allowed: false, reason: 'Khả năng giọng cho ngôn ngữ này chưa xác nhận (unqualified).' };
   if (!capabilities.languages.includes(targetLanguage)) return { allowed: false, reason: 'Provider giọng không hỗ trợ ngôn ngữ này.' };
@@ -81,6 +83,7 @@ type Props = {
   visualMode?: VisualMode;
   exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
+  localVietnameseVoiceAvailable?: boolean;
   busy: boolean;
   results: ExportLaunchDto[];
   attempts?: Partial<Record<TargetLanguage, AttemptView>>;
@@ -132,6 +135,7 @@ export function BatchExportPanelView({
   visualMode = 'standard',
   exportCapabilities,
   voiceCapabilities,
+  localVietnameseVoiceAvailable = false,
   busy,
   results,
   attempts = {},
@@ -144,7 +148,7 @@ export function BatchExportPanelView({
   onBatchExport,
   onRetryFailed,
 }: Props) {
-  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
+  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage, localVietnameseVoiceAvailable);
   const separated = separatedBackgroundAvailability(exportCapabilities);
   const visual = visualLipSyncAvailability(exportCapabilities);
   const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
@@ -153,7 +157,7 @@ export function BatchExportPanelView({
   const selectedBlocked = output === 'dubbed' && (
     treatmentBlocked
     || visualBlocked
-    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
+    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language, localVietnameseVoiceAvailable).allowed)
   );
   const allSucceeded = results.length > 0 && results.every((result) => isCompleted(result, attempts[result.targetLanguage]));
 
