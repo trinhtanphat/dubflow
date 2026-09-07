@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
-import { SegmentTranslationRepository } from '../src/db/segment-translations';
+import {
+  SegmentTranslationPersistenceError,
+  SegmentTranslationRepository,
+} from '../src/db/segment-translations';
 import type { TargetLanguage } from '../src/domain/language';
 
 type Row = {
@@ -51,6 +54,16 @@ class TranslationStatement implements D1StatementLike {
       row.voice_status = 'pending';
       row.dubbed_object_key = null;
       row.version += 1;
+      return { meta: { changes: 1 } };
+    }
+    if (/UPDATE segment_translations[\s\S]*voice_status = 'completed'[\s\S]*AND version = \?/i.test(this.sql)) {
+      const [objectKey, segmentId, projectId, target, userId, expectedVersion] = this.values as [string, string, string, TargetLanguage, string, number];
+      const row = this.db.rows.get(target);
+      if (!row || row.segment_id !== segmentId || row.project_id !== projectId || userId !== this.db.project.user_id || row.version !== expectedVersion) {
+        return { meta: { changes: 0 } };
+      }
+      row.voice_status = 'completed';
+      row.dubbed_object_key = objectKey;
       return { meta: { changes: 1 } };
     }
     if (/INSERT INTO segment_translations/i.test(this.sql)) {
@@ -142,5 +155,22 @@ describe('segment translation repository', () => {
     await repo.invalidateForSourceSegment('p1', 's1', 'u1');
     expect([...db.rows.values()].every((row) => row.translation_status === 'pending' && row.voice_status === 'pending' && row.dubbed_object_key === null)).toBe(true);
     expect(db.invalidatedAll).toBe(true);
+  });
+
+  it('marks voice completed only for the exact current translation version', async () => {
+    const db = new TranslationMemoryDb();
+    const repo = new SegmentTranslationRepository(db);
+    const objectKey = 'projects/p1/voices/vi/s1/2.pcm';
+
+    const updated = await repo.setVoiceResultForVersion('p1', 's1', 'u1', 'vi', 2, objectKey);
+    expect(updated.version).toBe(2);
+    expect(updated.voiceStatus).toBe('completed');
+    expect(updated.dubbedObjectKey).toBe(objectKey);
+
+    await repo.updateText('p1', 's1', 'u1', 'vi', 2, 'bản mới');
+    await expect(repo.setVoiceResultForVersion('p1', 's1', 'u1', 'vi', 2, objectKey)).rejects.toMatchObject({
+      code: 'TRANSLATION_VARIANT_CONFLICT',
+    } satisfies Partial<SegmentTranslationPersistenceError>);
+    expect((await repo.get('p1', 's1', 'u1', 'vi'))?.voiceStatus).toBe('pending');
   });
 });

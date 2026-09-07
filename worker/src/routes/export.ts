@@ -19,6 +19,7 @@ import { enforceRateLimit } from '../security/rate-limit';
 import { syncLabsLipSyncCapability } from '../services/lipsync/qualification';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
 import type { DialogueSeparationCapabilities, DialogueSeparationProvider } from '../services/separation/types';
+import { targetVoiceObjectKey } from '../services/voice/object-key';
 import { createVoiceProvider } from '../services/voice/provider';
 import type { VoiceCapabilities } from '../services/voice/types';
 
@@ -163,6 +164,7 @@ function translationsComplete(
 ): boolean {
   if (sourceSegments.length === 0 || variants.length !== sourceSegments.length) return false;
   const bySegment = new Map(variants.map((variant) => [variant.segmentId, variant]));
+  if (bySegment.size !== variants.length) return false;
   return sourceSegments.every((segment) => {
     const variant = bySegment.get(segment.id);
     return Boolean(
@@ -170,6 +172,32 @@ function translationsComplete(
       && variant.translationStatus === 'completed'
       && variant.translatedText.trim(),
     );
+  });
+}
+
+export function clientVoiceArtifactsComplete(
+  projectId: string,
+  targetLanguage: TargetLanguage,
+  sourceSegments: Array<{ id: string }>,
+  variants: SegmentTranslation[],
+): boolean {
+  if (!translationsComplete(sourceSegments, variants)) return false;
+  const sourceIds = new Set(sourceSegments.map((segment) => segment.id));
+  if (sourceIds.size !== sourceSegments.length) return false;
+  const bySegment = new Map(variants.map((variant) => [variant.segmentId, variant]));
+  if (bySegment.size !== variants.length) return false;
+
+  return sourceSegments.every((segment) => {
+    const variant = bySegment.get(segment.id);
+    if (!variant || variant.targetLanguage !== targetLanguage) return false;
+    if (!Number.isInteger(variant.version) || variant.version < 1) return false;
+    return variant.voiceStatus === 'completed'
+      && variant.dubbedObjectKey === targetVoiceObjectKey(
+        projectId,
+        targetLanguage,
+        segment.id,
+        variant.version,
+      );
   });
 }
 
@@ -197,7 +225,6 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   const getVoiceCapabilities = deps.getVoiceCapabilities ?? voiceCapabilities;
   const makeSeparation = deps.makeSeparation ?? (() => new UnavailableDialogueSeparationProvider());
   const makeBatchId = deps.makeBatchId ?? (() => crypto.randomUUID());
-  const voiceConfigured = (env: Env) => getVoiceCapabilities(env).configured !== false;
 
   async function validateTarget(
     env: Env,
@@ -241,7 +268,7 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       };
     }
 
-    if (output === 'dubbed') {
+    if (output === 'dubbed' && !clientVoiceArtifactsComplete(projectId, targetLanguage, sourceSegments, variants)) {
       const voiceError = voiceTargetError(getVoiceCapabilities(env), targetLanguage);
       if (voiceError) return voiceError;
     }
@@ -393,9 +420,6 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before export.'), 400);
     if (!['needs_review', 'completed'].includes(project.status)) {
       return c.json(errorBody('PROJECT_NOT_EXPORTABLE', 'Project must finish dubbing review before export.'), 409);
-    }
-    if (!voiceConfigured(c.env)) {
-      return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'The dubbing voice provider is not configured.'), 503);
     }
 
     const validated = await validateTarget(c.env, projectId, userId, 'vi', 'dubbed');
