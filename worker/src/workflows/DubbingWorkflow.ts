@@ -7,6 +7,7 @@ import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
+import { paidWorkersAiEnabled } from '../services/paid-provider-policy';
 import { createR2MediaSource } from '../services/media/r2-mediabunny-source';
 import { assertRemuxableSource } from '../services/media/r2-remux';
 import { R2SourceMediaService } from '../services/media/r2-source';
@@ -21,12 +22,14 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
   async run(event: WorkflowEvent<DubbingWorkflowParams>, step: WorkflowStep) {
     const projects = new ProjectRepository(this.env.DB);
     const contextStore = new TranslationContextRepository(this.env.DB);
+    const workersAIEnabled = paidWorkersAiEnabled(this.env.PAID_WORKERS_AI_ENABLED);
     const translationRouter = new TranslationRouter(
-      new WorkersAITranslationProvider(this.env.AI),
+      new WorkersAITranslationProvider(this.env.AI, workersAIEnabled),
       new GoogleCloudTranslationProvider(this.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? ''),
       new ContextualWorkersAITranslationProvider(
         this.env.AI,
         this.env.CONTEXT_TRANSLATION_MODEL ?? '',
+        workersAIEnabled,
       ),
     );
     const sourceMedia = new R2SourceMediaService({
@@ -58,10 +61,12 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
           this.env.AI,
           this.env.DEEPGRAM_API_KEY,
           this.env.PAID_DEEPGRAM_ASR_ENABLED,
+          this.env.PAID_WORKERS_AI_ENABLED,
         ),
         asrProviderId: asrCapabilities(
           this.env.DEEPGRAM_API_KEY,
           this.env.PAID_DEEPGRAM_ASR_ENABLED,
+          this.env.PAID_WORKERS_AI_ENABLED,
         ).provider,
         segments: new SegmentRepository(this.env.DB),
         translationContext: contextStore,

@@ -9,6 +9,7 @@ import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
+import { paidWorkersAiEnabled } from '../services/paid-provider-policy';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
 import { TranslationRouter } from '../services/translation/router';
@@ -21,12 +22,14 @@ import {
 export class LanguageTranslationWorkflow extends WorkflowEntrypoint<Env, LanguageTranslationWorkflowParams> {
   async run(event: WorkflowEvent<LanguageTranslationWorkflowParams>, step: WorkflowStep) {
     const translationContext = new TranslationContextRepository(this.env.DB);
+    const workersAIEnabled = paidWorkersAiEnabled(this.env.PAID_WORKERS_AI_ENABLED);
     const translationRouter = new TranslationRouter(
-      new WorkersAITranslationProvider(this.env.AI),
+      new WorkersAITranslationProvider(this.env.AI, workersAIEnabled),
       new GoogleCloudTranslationProvider(this.env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? ''),
       new ContextualWorkersAITranslationProvider(
         this.env.AI,
         this.env.CONTEXT_TRANSLATION_MODEL ?? '',
+        workersAIEnabled,
       ),
     );
 

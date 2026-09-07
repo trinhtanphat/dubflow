@@ -86,6 +86,7 @@ function translationEnv(points: AnalyticsPoint[], run: Env['AI']['run']): Env {
     ANALYTICS: analytics(points),
     RATE_LIMIT_TRANSLATE: { async limit() { return { success: true }; } },
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-test-key',
+    PAID_WORKERS_AI_ENABLED: 'true',
   } as unknown as Env;
 }
 

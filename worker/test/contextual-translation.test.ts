@@ -41,21 +41,21 @@ describe('ContextualWorkersAITranslationProvider', () => {
   it('advertises contextual availability from model presence and rejects a blank model before AI', async () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
-    const unavailable = new ContextualWorkersAITranslationProvider(ai, '   ');
+    const unavailable = new ContextualWorkersAITranslationProvider(ai, '   ', true);
     expect(unavailable.capabilities).toEqual({ contextual: true, available: false, targets });
 
     await expect(unavailable.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi', context))
       .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_UNAVAILABLE' });
     expect(ai.calls).toHaveLength(0);
 
-    expect(new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model').capabilities)
+    expect(new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true).capabilities)
       .toEqual({ contextual: true, available: true, targets });
   });
 
   it('rejects targets outside the Phase 4C set before an AI call', async () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
-    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
 
     await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'fr', context))
       .rejects.toMatchObject({ code: 'TRANSLATION_TARGET_UNSUPPORTED' });
@@ -70,7 +70,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
       { response: '{"translations":"wrong"}' },
     ]) {
       const ai = new FakeAI(response);
-      const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+      const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
       await expect(provider.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi', context))
         .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_INVALID' });
     }
@@ -91,7 +91,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
 
     for (const translations of invalidRows) {
       const ai = new FakeAI({ response: JSON.stringify({ translations }) });
-      const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+      const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
       await expect(provider.translateBatch(items, 'en', 'vi', context))
         .rejects.toMatchObject({ code: 'CONTEXT_TRANSLATION_ID_MISMATCH' });
     }
@@ -100,7 +100,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
   it('rejects a serialized contextual request above 128 KiB before AI', async () => {
     const { ContextualWorkersAITranslationProvider } = await providerModule();
     const ai = new FakeAI({ response: '{"translations":[]}' });
-    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
     const oversized = 'x'.repeat(MAX_CONTEXT_PAYLOAD_BYTES);
 
     await expect(provider.translateBatch([{ id: 'a', text: oversized }], 'en', 'vi', context))
@@ -115,7 +115,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
         translations: [{ id: 'a', text: 'Bản dịch' }],
       }),
     });
-    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
     await provider.translateBatch([{ id: 'a', text: 'SECRET_SOURCE_TOKEN' }], 'en', 'vi', context);
 
     expect(ai.calls).toHaveLength(1);
@@ -142,7 +142,7 @@ describe('ContextualWorkersAITranslationProvider', () => {
         ],
       }),
     });
-    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model');
+    const provider = new ContextualWorkersAITranslationProvider(ai, '@cf/example/context-model', true);
 
     await expect(provider.translateBatch([
       { id: 'b', text: 'Second' },

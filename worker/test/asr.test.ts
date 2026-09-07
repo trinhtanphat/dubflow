@@ -15,7 +15,7 @@ class FakeAI implements AiBinding {
 describe('Workers AI ASR', () => {
   it('uses whisper-large-v3-turbo in transcribe mode with VAD and optional language', async () => {
     const ai = new FakeAI();
-    const provider = new WorkersAIAsrProvider(ai);
+    const provider = new WorkersAIAsrProvider(ai, true);
     const audio = new Uint8Array([1, 2, 3]).buffer;
     const result = await provider.transcribe(audio, { sourceLanguage: 'zh' });
     expect(ai.calls[0]).toMatchObject({
@@ -27,7 +27,7 @@ describe('Workers AI ASR', () => {
 
   it('omits language when auto detection is requested', async () => {
     const ai = new FakeAI();
-    const provider = new WorkersAIAsrProvider(ai);
+    const provider = new WorkersAIAsrProvider(ai, true);
     await provider.transcribe(new ArrayBuffer(0), { sourceLanguage: 'auto' });
     expect('language' in ai.calls[0].input).toBe(false);
   });

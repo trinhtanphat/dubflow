@@ -17,7 +17,7 @@ class CapturingAI implements AiBinding {
 describe('Workers AI turbo ASR payload', () => {
   it('sends whisper-large-v3-turbo audio as base64 instead of a raw ArrayBuffer', async () => {
     const ai = new CapturingAI();
-    const provider = new WorkersAIAsrProvider(ai);
+    const provider = new WorkersAIAsrProvider(ai, true);
 
     await provider.transcribe(new Uint8Array([1, 2, 3]).buffer, { sourceLanguage: 'en' });
 

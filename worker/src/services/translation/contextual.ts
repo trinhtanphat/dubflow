@@ -81,8 +81,9 @@ export class ContextualWorkersAITranslationProvider implements TranslationProvid
   constructor(
     private readonly ai: AiBinding,
     private readonly model: string,
+    private readonly enabled = false,
   ) {
-    this.capabilities = { contextual: true, available: Boolean(model.trim()), targets: TARGET_LANGUAGES };
+    this.capabilities = { contextual: true, available: enabled && Boolean(model.trim()), targets: TARGET_LANGUAGES };
   }
 
   async translateBatch(
@@ -91,6 +92,12 @@ export class ContextualWorkersAITranslationProvider implements TranslationProvid
     target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
+    if (!this.enabled) {
+      throw new TranslationProviderError(
+        'WORKERS_AI_PAID_OPT_IN_REQUIRED',
+        'Workers AI contextual translation requires explicit paid opt-in.',
+      );
+    }
     const model = this.model.trim();
     if (!model) {
       throw new TranslationProviderError(
