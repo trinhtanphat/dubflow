@@ -57,7 +57,8 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
       throw new VoiceProviderError('VOICE_LANGUAGE_UNVERIFIED', 'This YupVox ElevenLabs integration is currently qualified for Vietnamese dubbing only.');
     }
 
-    const response = await this.fetcher(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+    const outputFormat = input.outputFormat ?? 'mp3_44100_128';
+    const response = await this.fetcher(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${encodeURIComponent(outputFormat)}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

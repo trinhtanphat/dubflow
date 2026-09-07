@@ -4,9 +4,8 @@ import test from 'node:test';
 
 const read = (path) => readFileSync(path, 'utf8');
 
-const audioChunks = read('containers/ffmpeg/audio-chunks.mjs');
-const mediaTypes = read('worker/src/services/media/types.ts');
-const mediaContainer = read('worker/src/services/media/container.ts');
+const streamMedia = read('worker/src/services/media/stream.ts');
+const deepgram = read('worker/src/services/asr/deepgram.ts');
 const stitch = read('worker/src/services/asr/stitch.ts');
 const reconcile = read('worker/src/services/asr/reconcile.ts');
 const pipeline = read('worker/src/workflows/pipeline.ts');
@@ -23,15 +22,15 @@ function assertInOrder(source, markers) {
   }
 }
 
-test('Phase 4A pins fixed overlapping media chunks and strict Worker metadata', () => {
-  assert.match(audioChunks, /AUDIO_CHUNK_MS\s*=\s*300_000/);
-  assert.match(audioChunks, /AUDIO_CHUNK_OVERLAP_MS\s*=\s*15_000/);
-  assert.match(audioChunks, /chunkMs\s*-\s*overlapMs/);
-  assert.match(mediaTypes, /overlapBeforeMs:\s*number/);
-  assert.match(mediaTypes, /overlapAfterMs:\s*number/);
-  assert.match(mediaContainer, /chunk\.overlapBeforeMs/);
-  assert.match(mediaContainer, /chunk\.overlapAfterMs/);
-  assert.doesNotMatch(mediaContainer, /chunkSeconds/);
+test('Phase 4A diarization now enters through Stream remote ASR without FFmpeg chunk extraction', () => {
+  assert.match(streamMedia, /prepareSource\(/);
+  assert.match(deepgram, /transcribeUrl\(/);
+  assert.match(pipeline, /sourceMedia\.prepareSource|sourceMedia!\.prepareSource/);
+  assert.match(pipeline, /transcribeUrl\(source\.audioUrl/);
+  assert.match(pipeline, /source\.durationMs\s*\/\s*1000/);
+  assert.match(pipeline, /overlapBeforeMs:\s*0/);
+  assert.match(pipeline, /overlapAfterMs:\s*0/);
+  assert.doesNotMatch(pipeline, /ContainerMediaProcessor|FFMPEG_CONTAINER/);
 });
 
 test('Phase 4A locks conservative deterministic stitch and rerun reconciliation thresholds', () => {
@@ -43,8 +42,7 @@ test('Phase 4A locks conservative deterministic stitch and rerun reconciliation 
   assert.doesNotMatch(stitch + reconcile, /embedding|voiceprint|biometric/i);
 });
 
-test('Phase 4A stitches only after ASR and before destructive replacement while preserving provider usage units', () => {
-  assert.match(pipeline, /chunk\.durationMs\s*\/\s*1000/);
+test('Phase 4A reconciles speaker identity after ASR and before destructive replacement', () => {
   assertInOrder(pipeline, [
     'stitchInputs.push',
     'load existing speaker coverage',

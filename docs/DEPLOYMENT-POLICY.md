@@ -4,87 +4,62 @@
 
 `main` is the only production source of truth for DubFlow backend and public gateway configuration.
 
-Production is split across two Cloudflare accounts:
+Production is intentionally split across two Cloudflare accounts:
 
-- `trinhtanphat6666` (`6c5207813df3d5b83b9508125e0e9e12`) owns the **DubFlow backend** Worker and its D1/R2/Workers AI/Analytics/Workflow/rate-limit resources.
+- `trinhtanphat6666` (`6c5207813df3d5b83b9508125e0e9e12`) owns the **DubFlow backend** Worker and its D1/R2/Workers AI/Analytics/Workflow/rate-limit/Stream resources.
 - `trinhtanphat2403` (`50afb4fd3c4c7a1f3e1bdb7f22d4af7f`) owns the `qs3d.site` zone and the thin **gateway** Worker for `yupvox.qs3d.site`.
 
-Administrative access across both accounts does not merge account-scoped Worker resources with zone ownership. The detailed topology and runbook are in `docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md`.
+Administrative access across both accounts does not merge account-scoped Worker resources with zone ownership.
 
 ## Backend production lane
 
-Cloudflare Workers Builds remains the backend production deployment lane for `dubflow` in `trinhtanphat6666`.
+Cloudflare Workers Builds is the only production deployment lane for the DubFlow backend. It watches `main` in account `trinhtanphat6666`, automatically builds the repository, and automatically deploys the backend from that same admitted `main` commit.
 
-The required backend flow is:
+The backend `wrangler.jsonc` must target account `6c5207813df3d5b83b9508125e0e9e12`, keep `workers_dev = true`, and must not claim `yupvox.qs3d.site`. Backend D1/R2/Workers AI/Analytics/Workflows/rate limits and Cloudflare Stream stay with that backend account.
 
-1. Change code in Git.
-2. Commit and push the change.
-3. Merge the fully qualified change into `main`.
-4. Cloudflare Workers Builds detects the new `main` commit for the account-6666 `dubflow` project.
-5. Cloudflare Workers Builds builds the repository.
-6. Cloudflare deploys the backend from the account-6666 backend configuration.
+The repository-owned Workers Builds deploy command is `node scripts/cloudflare-workers-build-deploy.mjs`. The deployment phase owns Worker upload, remote D1 migration application, and readiness verification.
 
-`wrangler.jsonc` must target account `6c5207813df3d5b83b9508125e0e9e12`, keep `workers_dev = true`, and must not contain the `yupvox.qs3d.site` custom-domain route. The backend account does not own the `qs3d.site` zone.
-
-The Cloudflare build command may remain `npm run build`. A direct deploy command `npx wrangler deploy` is valid for the account-6666 backend because the checked-in backend config no longer claims the account-2403 custom domain and no longer declares paid Containers.
-
-When the repository-owned Workers Builds deploy runner `scripts/cloudflare-workers-build-deploy.mjs` is used, it delegates config generation to the pure `scripts/cloudflare-workers-build-config.mjs` module. That generator writes `.wrangler-production.json` from `wrangler.jsonc` while defensively removing `containers`, `durable_objects`, top-level `exports`, and `routes` before deployment. The generator does not change the backend account; account 6666 remains the source-of-truth target from `wrangler.jsonc`.
+That deploy runner delegates temporary production-config generation to the pure `scripts/cloudflare-workers-build-config.mjs` module. The generator writes `.wrangler-production.json` from `wrangler.jsonc` while defensively removing `containers`, `durable_objects`, top-level `exports`, and `routes`. It never changes the backend account or removes the zero-container Stream binding.
 
 ## Public gateway
 
-`wrangler.gateway.jsonc` is the only checked-in Wrangler config that may attach `yupvox.qs3d.site`.
+`wrangler.gateway.jsonc` is the only checked-in Wrangler config allowed to attach `yupvox.qs3d.site`.
 
-It targets `trinhtanphat2403` and deploys `dubflow-gateway`, which owns no DubFlow D1/R2/Workflow state. The gateway forwards requests to the exact account-6666 `workers.dev` origin supplied through `BACKEND_ORIGIN`.
+It targets account `trinhtanphat2403` and deploys `dubflow-gateway`, which owns no DubFlow D1/R2/Workflow state. It proxies to the exact verified account-6666 `workers.dev` origin supplied through `BACKEND_ORIGIN`. The gateway must fail closed when that origin is absent, invalid, or points back to the public hostname.
 
 `BACKEND_ORIGIN` is runtime configuration and must not be hard-coded into source. Because normal Wrangler/Workers Builds deployments can otherwise replace runtime variables that are not present in the checked-in config, `wrangler.gateway.jsonc` must keep `keep_vars = true` so an operator-configured `BACKEND_ORIGIN` survives automatic gateway deployments.
-
-Do not guess or commit an account subdomain. Resolve the exact backend `workers.dev` URL from a successful backend deployment, verify it, and then configure `BACKEND_ORIGIN` for the gateway. If the variable is absent or invalid, the gateway must fail closed rather than loop or proxy to an unknown origin.
 
 ## GitHub Actions responsibility
 
 GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform Wrangler dry-runs, typecheck the gateway, and capture test artifacts/screenshots.
 
-CI must dry-run both the checked-in backend `wrangler.jsonc` and the exact generated `.wrangler-production.json`. CI may invoke the pure config generator to create the temporary generated file, but it must not invoke the Workers Builds deployment runner or perform a non-dry-run deployment. The generated file must be cleaned up after qualification.
+CI must dry-run both the checked-in backend `wrangler.jsonc` and the exact generated `.wrangler-production.json`. CI may invoke only the pure config generator to create that temporary file; it must not invoke the Workers Builds deployment runner, remote migrations, readiness mutation, or any non-dry-run production deployment. The generated file is removed after qualification.
 
-GitHub Actions **must not deploy production**. Production deployment stays in Cloudflare; do not add a GitHub production deployment workflow as a workaround for Cloudflare configuration failures.
+GitHub Actions **must not deploy production**. Do not add a production `wrangler deploy`, remote D1 migration, secret mutation, Cloudflare production API call, or alternate production deployment workflow to GitHub Actions.
 
 `.github/workflows/deploy-cloudflare.yml` must not exist.
 
-## Containers disabled
+## Zero-container Stream media runtime
 
-Cloudflare **Containers are disabled in production** for this topology because the production deployment intentionally avoids the paid Containers runtime.
+Cloudflare **Containers are disabled in production**. Production config must not declare `containers`, Container-backed `durable_objects`, Container exports, `FFMPEG_CONTAINER`, or `SEPARATOR_CONTAINER`.
 
-Production `wrangler.jsonc` must not declare `containers`, container-backed `durable_objects`, Container `exports`, `FFMPEG_CONTAINER`, or `SEPARATOR_CONTAINER` bindings.
+The active media path is zero-container: private R2 source -> Cloudflare Stream source preparation -> remote ASR -> translation/TTS -> Worker-native PCM/WAV soundtrack assembly -> Cloudflare Stream dubbed MP4 publishing. There is no hidden FFmpeg Container fallback.
 
-The FFmpeg/Demucs source adapters and Docker/test fixtures may remain in the repository as source-only implementation material. They are not production bindings and must not be described as a live Container runtime.
+The backend Worker requires its normal account-6666 Cloudflare Stream binding plus runtime secrets `CLOUDFLARE_STREAM_API_TOKEN` and `STREAM_SOURCE_SIGNING_SECRET`. Secret values are managed in Cloudflare and must never be committed to Git, tests, screenshots, logs, or documentation.
 
-**Containers Edit is not required** while Containers remain disabled.
+Cloudflare Workers Builds uses its configured deployment credential under **Settings > Builds**. No `Containers Edit` permission is required for this production path. If deployment authorization fails, fix the Cloudflare build credential and let the normal `main` build deploy again; do not add a GitHub deployment workaround.
 
-Without the container bindings, media paths that require FFmpeg/Demucs remain fail-closed and production runtime qualification for those capabilities stays **UNQUALIFIED**. Do not silently restore a paid runtime just to turn those capabilities green.
+## Repository guards
 
-## Failure handling
+CI must fail if any of these regressions return:
 
-If the account-6666 backend build/deploy fails, fix the backend source/configuration in this repository and merge the qualified fix to `main`; do not move D1/R2 state into the zone account as a shortcut.
-
-If the account-2403 gateway is wrong, roll back or update only the gateway and its `BACKEND_ORIGIN`; do not move the `qs3d.site` zone or duplicate production data.
-
-The public hostname and backend state are separate responsibilities:
-
-- public hostname / TLS / custom domain: account 2403;
-- application runtime and persisted D1/R2 state: account 6666.
-
-## Repository guard
-
-CI must reject the following regressions:
-
-- backend account drift away from `trinhtanphat6666`;
-- a custom-domain route reappearing in backend `wrangler.jsonc`;
-- the gateway account drifting away from `trinhtanphat2403`;
-- the public hostname moving out of `wrangler.gateway.jsonc`;
-- gateway runtime-variable preservation being disabled while `BACKEND_ORIGIN` remains operator-configured outside source;
-- paid Container bindings or dormant Durable Object lifecycle `exports` reappearing in the generated backend production config;
-- CI stopping validation of the exact generated `.wrangler-production.json`;
-- GitHub Actions invoking the production deployment runner or becoming a production deployment lane;
-- a stale readiness payload being treated as qualified production evidence.
+- backend `wrangler.jsonc` claims `yupvox.qs3d.site` or targets the gateway account;
+- `wrangler.gateway.jsonc` stops targeting account 2403 or stops owning the public custom domain;
+- gateway runtime-variable preservation is disabled while `BACKEND_ORIGIN` remains operator-configured outside source;
+- paid Container runtime bindings, dormant Durable Object lifecycle exports, or custom-domain routes survive into the generated backend production config;
+- the zero-container Stream binding disappears from the backend;
+- CI stops validating the exact generated `.wrangler-production.json`;
+- GitHub Actions invokes the production deployment runner or gains any production deployment path;
+- readiness accepts a stale schema revision.
 
 This policy is intentional and should be treated as a repository-level requirement.

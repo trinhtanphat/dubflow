@@ -70,6 +70,10 @@ function harness(syncApiKey?: string, qualified = false) {
   const env = {
     SYNC_API_KEY: syncApiKey,
     SYNC_LIPSYNC_QUALIFIED: qualified ? 'true' : undefined,
+    STREAM: {},
+    CLOUDFLARE_ACCOUNT_ID: 'account-6666',
+    STREAM_SOURCE_SIGNING_SECRET: 'stream-signing-secret',
+    CLOUDFLARE_STREAM_API_TOKEN: 'stream-write-token',
     RATE_LIMIT_EXPORT: limiter,
     RATE_LIMIT_BATCH_EXPORT: limiter,
     ANALYTICS: { writeDataPoint() {} },

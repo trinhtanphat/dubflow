@@ -16,7 +16,7 @@ test('deployment verifies, provisions, migrates, deploys and checks readiness in
   ]);
 });
 
-test('Workers Builds backend deploy applies remote D1 migrations before readiness verification', async () => {
+test('Workers Builds production deploy applies remote D1 migrations before readiness verification', async () => {
   const scriptUrl = new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url);
   assert.equal(
     fs.existsSync(scriptUrl),
@@ -32,16 +32,17 @@ test('Workers Builds backend deploy applies remote D1 migrations before readines
   ]);
 });
 
-test('checked-in backend production config is Workers-only and needs no container stripping', () => {
+test('Workers Builds production config keeps Stream and contains no FFmpeg Container runtime', () => {
   const wrangler = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
+  assert.deepEqual(wrangler.stream, { binding: 'STREAM' });
   assert.equal(wrangler.containers, undefined);
   assert.equal(wrangler.durable_objects, undefined);
-  assert.equal(wrangler.exports, undefined);
-  assert.ok(!wrangler.routes || wrangler.routes.length === 0);
-  assert.equal(wrangler.workers_dev, true);
+  assert.equal(wrangler.exports?.FfmpegContainer, undefined);
+  assert.doesNotMatch(deployScript, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg/);
 });
 
-test('Workers Builds generator strips dormant Durable Object lifecycle exports defense-in-depth', () => {
+test('Workers Builds generator strips dormant paid runtime and custom-domain fields defense-in-depth', () => {
   assert.match(workersBuildConfigGenerator, /delete\s+source\.containers\b/);
   assert.match(workersBuildConfigGenerator, /delete\s+source\.durable_objects\b/);
   assert.match(workersBuildConfigGenerator, /delete\s+source\.exports\b/);

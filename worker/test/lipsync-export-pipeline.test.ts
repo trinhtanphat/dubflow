@@ -34,7 +34,7 @@ function harness(options: { providerFails?: boolean; completedLipSync?: boolean 
   const usage = new Map<string, any>();
   const usageEvents: any[] = [];
   const standardKey = 'projects/p1/exports/ja/e1.mp4';
-  const audioKey = 'projects/p1/exports/ja/e1.audio.wav';
+  const audioKey = 'projects/p1/soundtracks/ja/e1.wav';
   const lipSyncKey = 'projects/p1/exports/ja/e1.lipsync.mp4';
   const exportState: any = {
     id: 'e1', projectId: 'p1', targetLanguage: 'ja', output: 'dubbed', batchId: null,
@@ -65,14 +65,14 @@ function harness(options: { providerFails?: boolean; completedLipSync?: boolean 
     segments: {
       list: vi.fn(async () => [{
         id: 's1', speakerId: null, startMs: 0, endMs: 1_000, translatedText: 'legacy',
-        voiceStatus: 'completed', dubbedObjectKey: 'projects/p1/dubbed/s1.mp3', version: 1,
+        voiceStatus: 'completed', dubbedObjectKey: 'projects/p1/dubbed/s1.pcm', version: 1,
       }]),
       setVoiceResult: vi.fn(async () => {}),
     },
     translations: {
       list: vi.fn(async () => [{
         segmentId: 's1', targetLanguage: 'ja', translatedText: 'こんにちは', translationStatus: 'completed',
-        voiceStatus: 'completed', dubbedObjectKey: 'projects/p1/voices/ja/s1/1.mp3', version: 1,
+        voiceStatus: 'completed', dubbedObjectKey: 'projects/p1/voices/ja/s1/1.pcm', version: 1,
       }]),
       setVoiceResult: vi.fn(async () => {}),
     },
@@ -97,10 +97,17 @@ function harness(options: { providerFails?: boolean; completedLipSync?: boolean 
       put: vi.fn(async () => ({ key: lipSyncKey, size: 3 })),
     },
     voice: { generate: vi.fn() },
+    soundtrack: {
+      durationSeconds: vi.fn(async () => 1),
+      storeSoundtrack: vi.fn(async () => audioKey),
+    },
+    publisher: {
+      publishDubbedExport: vi.fn(async () => ({ exportObjectKey: standardKey, audioTrackUid: 'stream-audio-1' })),
+    },
     media: {
       probe: vi.fn(async () => ({ durationMs: 10_000 })),
       renderExport: vi.fn(async () => ({ exportObjectKey: standardKey })),
-      extractExportAudio: vi.fn(async () => ({ audioObjectKey: audioKey })),
+      extractExportAudio: vi.fn(async () => ({ audioObjectKey: 'legacy-audio-should-not-be-used.wav' })),
     },
     providerMediaGrants: {
       create: vi.fn(async ({ objectKey }: any) => ({
@@ -152,6 +159,8 @@ describe('Phase 4E durable visual lip-sync export orchestration', () => {
     expect(h.deps.lipSync.render).not.toHaveBeenCalled();
     expect(h.deps.providerMediaGrants.create).not.toHaveBeenCalled();
     expect(h.deps.media.extractExportAudio).not.toHaveBeenCalled();
+    expect(h.deps.soundtrack.storeSoundtrack).toHaveBeenCalledTimes(1);
+    expect(h.deps.publisher.publishDubbedExport).toHaveBeenCalledTimes(1);
   });
 
   it('keeps provider download results serializable across durable Workflow step boundaries', async () => {
@@ -173,8 +182,13 @@ describe('Phase 4E durable visual lip-sync export orchestration', () => {
     await runExportPipeline(lipSyncParams as never, h.deps, workflowStep() as never);
 
     expect(h.deps.exports.complete).toHaveBeenCalledWith('p1', 'e1', 'dev-user', { exportObjectKey: h.standardKey });
-    expect(h.deps.media.extractExportAudio).toHaveBeenCalledWith('p1', h.standardKey, 'ja', 'e1');
+    expect(h.deps.media.extractExportAudio).not.toHaveBeenCalled();
+    expect(h.deps.soundtrack.storeSoundtrack).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'p1', targetLanguage: 'ja', exportId: 'e1', durationMs: 10_000,
+    }));
     expect(h.deps.providerMediaGrants.create).toHaveBeenCalledTimes(2);
+    expect(h.deps.providerMediaGrants.create).toHaveBeenNthCalledWith(1, expect.objectContaining({ objectKey: h.standardKey }));
+    expect(h.deps.providerMediaGrants.create).toHaveBeenNthCalledWith(2, expect.objectContaining({ objectKey: h.audioKey }));
     expect(h.deps.lipSync.render).toHaveBeenCalledWith({
       videoUrl: expect.stringMatching(/^https:\/\/yupvox\.qs3d\.site\/api\/provider-media\/grant-1\?token=/),
       audioUrl: expect.stringMatching(/^https:\/\/yupvox\.qs3d\.site\/api\/provider-media\/grant-2\?token=/),

@@ -17,3 +17,14 @@ test('deployment status documents the split public gateway and backend state own
   assert.match(policy, /must not deploy production/i);
   assert.match(policy, /main/);
 });
+
+test('deployment status describes schema-13 zero-container Stream and optional lip-sync paths', () => {
+  assert.match(status, /current zero-container source path/i);
+  assert.match(status, /Cloudflare Stream/i);
+  assert.match(status, /remote ASR/i);
+  assert.match(status, /PCM|WAV/i);
+  assert.match(status, /schema revision \*\*13\*\*|schema revision 13/i);
+  assert.match(status, /FFmpeg Container.*removed|removed.*FFmpeg Container/is);
+  assert.match(status, /soundtracks\/\{targetLanguage\}\/\{exportId\}\.wav/);
+  assert.match(status, /\.lipsync\.mp4/);
+});

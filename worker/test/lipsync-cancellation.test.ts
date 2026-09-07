@@ -14,7 +14,6 @@ describe('visual lip-sync cancellation boundary', () => {
       },
       providerMediaGrants: grants,
       lipSync: provider,
-      media: { extractExportAudio: vi.fn() },
       bucket: { put: vi.fn() },
       usage: {
         getByOperation: vi.fn(async () => null),
@@ -33,6 +32,7 @@ describe('visual lip-sync cancellation boundary', () => {
       targetLanguage: 'vi',
       exportId: 'e1',
       standardObjectKey: 'projects/p1/exports/vi/e1.mp4',
+      soundtrackObjectKey: 'projects/p1/soundtracks/vi/e1.wav',
       durationMs: 5_000,
     }, deps as never, step as never, ensureActive)).rejects.toBe(cancelled);
 

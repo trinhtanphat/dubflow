@@ -534,7 +534,11 @@ export function StudioShell({ state, dispatch, selectedSegment, selectedSpeaker 
 
       <main className="studio-grid" aria-label="DubFlow dubbing workspace">
         <aside className="left-rail" aria-label="Nguồn media và nhân vật">
-          <UploadPanel onProcessStarted={onProcessStarted} speakerSection={<SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />} />
+          <UploadPanel
+            job={cloudJob?.type === 'dubbing' ? cloudJob : null}
+            onProcessStarted={onProcessStarted}
+            speakerSection={<SpeakerList speakers={state.project.speakers} selectedSpeakerId={selectedSpeaker?.id} />}
+          />
           {cloudEditable && (
             <section className="panel translation-settings-host">
               <TranslationSettingsPanel projectId={state.project.id} />

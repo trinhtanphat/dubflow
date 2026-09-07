@@ -10,7 +10,7 @@ import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { parseDubbedAudioMode, type DubbedAudioMode } from '../domain/audio-mode';
 import { isTargetLanguage, type ExportOutput, type TargetLanguage } from '../domain/language';
 import { parseVisualMode, type VisualMode } from '../domain/visual-mode';
-import { errorBody } from '../http/json';
+import { errorBody, type ErrorBody } from '../http/json';
 import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
@@ -104,6 +104,20 @@ function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode 
 
 function visualLipSyncAvailable(env: Env): boolean {
   return syncLabsLipSyncCapability(env.SYNC_API_KEY, env.SYNC_LIPSYNC_QUALIFIED).available;
+}
+
+function streamExportAdmissionError(env: Env): ErrorBody | null {
+  if (!env.STREAM) return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
+  if (!env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
+    return errorBody('STREAM_ACCOUNT_UNAVAILABLE', 'Cloudflare account id is unavailable for Stream export.');
+  }
+  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
+    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
+  }
+  if (!env.CLOUDFLARE_STREAM_API_TOKEN?.trim()) {
+    return errorBody('STREAM_WRITE_UNAVAILABLE', 'Cloudflare Stream write token is unavailable.');
+  }
+  return null;
 }
 
 function separationCapabilityError(capabilities: DialogueSeparationCapabilities): ExportValidationError | null {
@@ -353,6 +367,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
       const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
       if (rateLimited) return rateLimited;
+      if (output === 'dubbed') {
+        const streamError = streamExportAdmissionError(c.env);
+        if (streamError) return c.json(streamError, 503);
+      }
 
       const launched = await launchValidated(
         c.env,
@@ -397,6 +415,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
+    const streamError = streamExportAdmissionError(c.env);
+    if (streamError) return c.json(streamError, 503);
 
     const exportsStore = makeExports(c.env);
     const jobs = makeJobs(c.env);
@@ -502,6 +522,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
+    if (output === 'dubbed') {
+      const streamError = streamExportAdmissionError(c.env);
+      if (streamError) return c.json(streamError, 503);
+    }
 
     const batchId = makeBatchId();
     const results = [];

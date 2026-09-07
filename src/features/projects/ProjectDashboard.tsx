@@ -18,6 +18,8 @@ export type ProjectDashboardProps = {
 };
 
 const activeStatuses = new Set<CloudJob['status']>(['queued', 'running', 'retrying']);
+const retiredContainerRuntimeError = /(?:Cannot read properties of undefined.*getByName|getByName)/i;
+const retiredContainerRuntimeMessage = 'Job cũ đã lỗi ở media runtime trước đây. Hãy thử lại để chạy bằng pipeline media hiện tại.';
 
 function progressLabel(progress: number): string {
   if (!Number.isFinite(progress)) return '0%';
@@ -35,6 +37,13 @@ function updatedLabel(value?: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function displayedJobError(job: CloudJob): string | null {
+  const message = job.errorMessage?.trim();
+  if (!message) return null;
+  if (retiredContainerRuntimeError.test(message)) return retiredContainerRuntimeMessage;
+  return message;
 }
 
 export function ProjectDashboard({
@@ -79,6 +88,7 @@ export function ProjectDashboard({
           const latestJob = jobsByProject[project.id]?.[0];
           const canRetry = latestJob?.status === 'failed';
           const canCancel = Boolean(latestJob && activeStatuses.has(latestJob.status));
+          const jobError = latestJob ? displayedJobError(latestJob) : null;
           return (
             <article className="project-card" key={project.id}>
               <div className="project-card__topline">
@@ -110,8 +120,8 @@ export function ProjectDashboard({
                       ? <span>Đã thử lại {latestJob.retryCount} lần</span>
                       : null}
                   </div>
-                  {latestJob.errorMessage ? (
-                    <p className="project-job__error" role="alert">{latestJob.errorMessage}</p>
+                  {jobError ? (
+                    <p className="project-job__error" role="alert">{jobError}</p>
                   ) : null}
                   {canRetry || canCancel ? (
                     <div className="project-job__actions">
