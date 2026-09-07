@@ -3,6 +3,7 @@ import type { ExportOutput, TargetLanguage } from '../domain/language';
 import type { DubbedAudioMode } from '../domain/audio-mode';
 
 export type ProjectExportStatus = 'pending' | 'exporting' | 'completed' | 'failed' | 'invalidated';
+export type LipSyncStatus = 'not_requested' | 'queued' | 'processing' | 'completed' | 'failed';
 
 export type ProjectExport = {
   id: string;
@@ -14,10 +15,14 @@ export type ProjectExport = {
   status: ProjectExportStatus;
   exportObjectKey: string | null;
   subtitleObjectKey: string | null;
+  lipSyncRequested: boolean;
+  lipSyncProvider: string | null;
+  lipSyncStatus: LipSyncStatus;
+  lipSyncObjectKey: string | null;
   errorCode: string | null;
   errorMessage: string | null;
-  streamVideoUid?: string | null;
-  streamSourceObjectKey?: string | null;
+  streamVideoUid: string | null;
+  streamSourceObjectKey: string | null;
 };
 
 type ProjectExportRow = {
@@ -30,11 +35,20 @@ type ProjectExportRow = {
   status: ProjectExportStatus;
   export_object_key: string | null;
   subtitle_object_key: string | null;
+  lip_sync_requested?: number | null;
+  lip_sync_provider?: string | null;
+  lip_sync_status?: LipSyncStatus | null;
+  lip_sync_object_key?: string | null;
   error_code: string | null;
   error_message: string | null;
   stream_video_uid?: string | null;
   stream_source_object_key?: string | null;
 };
+
+const EXPORT_COLUMNS = `e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
+  e.export_object_key, e.subtitle_object_key, e.lip_sync_requested, e.lip_sync_provider,
+  e.lip_sync_status, e.lip_sync_object_key, e.error_code, e.error_message,
+  e.stream_video_uid, e.stream_source_object_key`;
 
 function fromRow(row: ProjectExportRow): ProjectExport {
   return {
@@ -47,6 +61,10 @@ function fromRow(row: ProjectExportRow): ProjectExport {
     status: row.status,
     exportObjectKey: row.export_object_key,
     subtitleObjectKey: row.subtitle_object_key,
+    lipSyncRequested: row.lip_sync_requested === 1,
+    lipSyncProvider: row.lip_sync_provider ?? null,
+    lipSyncStatus: row.lip_sync_status ?? 'not_requested',
+    lipSyncObjectKey: row.lip_sync_object_key ?? null,
     errorCode: row.error_code,
     errorMessage: row.error_message,
     streamVideoUid: row.stream_video_uid ?? null,
@@ -81,14 +99,29 @@ export class ProjectExportRepository {
     output: ExportOutput,
     batchId: string | null = null,
     audioMode: DubbedAudioMode = 'dubbed_only',
+    lipSyncRequested = false,
   ): Promise<ProjectExport> {
     await this.assertProject(projectId, userId);
     const id = this.makeId();
     const effectiveAudioMode: DubbedAudioMode = output === 'subtitles' ? 'dubbed_only' : audioMode;
+    const effectiveLipSyncRequested = output === 'dubbed' && lipSyncRequested;
+    const lipSyncStatus: LipSyncStatus = effectiveLipSyncRequested ? 'queued' : 'not_requested';
     await this.db.prepare(
-      `INSERT INTO project_exports (id, project_id, target_language, output, batch_id, audio_mode, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-    ).bind(id, projectId, targetLanguage, output, batchId, effectiveAudioMode).run();
+      `INSERT INTO project_exports (
+         id, project_id, target_language, output, batch_id, audio_mode,
+         lip_sync_requested, lip_sync_status, status
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    ).bind(
+      id,
+      projectId,
+      targetLanguage,
+      output,
+      batchId,
+      effectiveAudioMode,
+      effectiveLipSyncRequested ? 1 : 0,
+      lipSyncStatus,
+    ).run();
     return {
       id,
       projectId,
@@ -99,6 +132,10 @@ export class ProjectExportRepository {
       status: 'pending',
       exportObjectKey: null,
       subtitleObjectKey: null,
+      lipSyncRequested: effectiveLipSyncRequested,
+      lipSyncProvider: null,
+      lipSyncStatus,
+      lipSyncObjectKey: null,
       errorCode: null,
       errorMessage: null,
       streamVideoUid: null,
@@ -108,9 +145,7 @@ export class ProjectExportRepository {
 
   async get(projectId: string, exportId: string, userId: string): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
-              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message,
-              e.stream_video_uid, e.stream_source_object_key
+      `SELECT ${EXPORT_COLUMNS}
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
        WHERE e.project_id = ? AND e.id = ? AND p.user_id = ?
@@ -126,9 +161,7 @@ export class ProjectExportRepository {
     output: ExportOutput,
   ): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
-              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message,
-              e.stream_video_uid, e.stream_source_object_key
+      `SELECT ${EXPORT_COLUMNS}
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
        WHERE e.project_id = ? AND e.target_language = ? AND e.output = ? AND p.user_id = ?
@@ -145,9 +178,7 @@ export class ProjectExportRepository {
     output: ExportOutput,
   ): Promise<ProjectExport | null> {
     const row = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
-              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message,
-              e.stream_video_uid, e.stream_source_object_key
+      `SELECT ${EXPORT_COLUMNS}
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
        WHERE e.project_id = ? AND e.target_language = ? AND e.output = ?
@@ -160,9 +191,7 @@ export class ProjectExportRepository {
 
   async listBatch(projectId: string, userId: string, batchId: string): Promise<ProjectExport[]> {
     const result = await this.db.prepare(
-      `SELECT e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
-              e.export_object_key, e.subtitle_object_key, e.error_code, e.error_message,
-              e.stream_video_uid, e.stream_source_object_key
+      `SELECT ${EXPORT_COLUMNS}
        FROM project_exports e
        JOIN projects p ON p.id = e.project_id
        WHERE e.project_id = ? AND e.batch_id = ? AND p.user_id = ?
@@ -199,6 +228,43 @@ export class ProjectExportRepository {
            error_code = NULL, error_message = NULL, updated_at = datetime('now')
        WHERE id = ? AND project_id = ?`,
     ).bind(keys.exportObjectKey ?? null, keys.subtitleObjectKey ?? null, exportId, projectId).run();
+  }
+
+  async setLipSyncState(
+    projectId: string,
+    exportId: string,
+    userId: string,
+    state: {
+      requested: boolean;
+      provider: string | null;
+      status: LipSyncStatus;
+      objectKey?: string | null;
+    },
+  ): Promise<void> {
+    await this.assertProject(projectId, userId);
+    if (!state.requested && (
+      state.provider !== null
+      || state.status !== 'not_requested'
+      || (state.objectKey ?? null) !== null
+    )) {
+      throw new Error('Unrequested lip-sync state must remain not_requested without provider artifacts.');
+    }
+    if (state.requested && state.status === 'not_requested') {
+      throw new Error('Requested lip-sync state cannot be not_requested.');
+    }
+    await this.db.prepare(
+      `UPDATE project_exports
+       SET lip_sync_requested = ?, lip_sync_provider = ?, lip_sync_status = ?, lip_sync_object_key = ?,
+           updated_at = datetime('now')
+       WHERE id = ? AND project_id = ?`,
+    ).bind(
+      state.requested ? 1 : 0,
+      state.provider,
+      state.status,
+      state.objectKey ?? null,
+      exportId,
+      projectId,
+    ).run();
   }
 
   async fail(projectId: string, exportId: string, userId: string, code: string, message: string): Promise<void> {
