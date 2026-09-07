@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { Hono } from 'hono';
 import type { Env } from '../src/env';
 import { createExportRoutes } from '../src/routes/export';
 
 const allowExport = { async limit() { return { success: true }; } };
 const analytics = { writeDataPoint() {} };
+const streamRuntime = {
+  STREAM: {},
+  CLOUDFLARE_ACCOUNT_ID: 'account',
+  STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
+  CLOUDFLARE_STREAM_API_TOKEN: 'stream-token',
+};
 
 function phase4cExportDeps(calls?: string[]) {
   return {
@@ -34,6 +39,10 @@ function phase4cExportDeps(calls?: string[]) {
   };
 }
 
+async function post(routes: ReturnType<typeof createExportRoutes>, env: Env, path: string) {
+  return routes.fetch(new Request(`https://yupvox.test${path}`, { method: 'POST' }), env);
+}
+
 describe('export route', () => {
   it('locks the project before creating the Workflow instance for an owned review-ready project', async () => {
     const calls: string[] = [];
@@ -55,13 +64,13 @@ describe('export route', () => {
       },
       async fail() {},
     };
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createExportRoutes({
+    const routes = createExportRoutes({
       makeProjects: () => projects as never,
       makeJobs: () => jobs as never,
       ...phase4cExportDeps(calls),
-    }));
+    });
     const env = {
+      ...streamRuntime,
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key',
@@ -71,7 +80,7 @@ describe('export route', () => {
       },
     } as unknown as Env;
 
-    const response = await app.request('/api/projects/project-1/export', { method: 'POST' }, env);
+    const response = await post(routes, env, '/project-1/export');
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ jobId: 'job-export-1', workflowId: 'workflow-export-1', status: 'queued' });
     expect(workflowCalls).toEqual([{ params: {
@@ -90,8 +99,7 @@ describe('export route', () => {
 
   it('restores needs_review and fails the durable job/export attempt when Workflow start fails after locking', async () => {
     const calls: string[] = [];
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createExportRoutes({
+    const routes = createExportRoutes({
       makeProjects: () => ({
         async getByIdForUser() { return { id: 'p1', userId: 'dev-user', status: 'needs_review', sourceObjectKey: 'projects/p1/source/a.mp4' }; },
         async setStatus(_id: string, _userId: string, status: string) { calls.push(`project:${status}`); },
@@ -101,15 +109,16 @@ describe('export route', () => {
         async fail(_id: string, code: string) { calls.push(`job:fail:${code}`); },
       }) as never,
       ...phase4cExportDeps(calls),
-    }));
+    });
     const env = {
+      ...streamRuntime,
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key', ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); throw new Error('workflow unavailable'); } },
     } as unknown as Env;
 
-    const response = await app.request('/api/projects/p1/export', { method: 'POST' }, env);
+    const response = await post(routes, env, '/p1/export');
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'EXPORT_WORKFLOW_START_FAILED' });
     expect(calls).toEqual([
@@ -125,17 +134,16 @@ describe('export route', () => {
 
   it('fails closed before creating a job when voice credentials are missing', async () => {
     let created = false;
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createExportRoutes({
+    const routes = createExportRoutes({
       makeProjects: () => ({
         async getByIdForUser() {
           return { id: 'p1', userId: 'dev-user', status: 'needs_review', sourceObjectKey: 'projects/p1/source/a.mp4' };
         },
       }) as never,
       makeJobs: () => ({ async create() { created = true; throw new Error('must not create'); } }) as never,
-    }));
+    });
 
-    const response = await app.request('/api/projects/p1/export', { method: 'POST' }, { EXPORT_WORKFLOW: { create: async () => ({ id: 'x' }) } } as unknown as Env);
+    const response = await post(routes, { EXPORT_WORKFLOW: { create: async () => ({ id: 'x' }) } } as unknown as Env, '/p1/export');
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: 'VOICE_PROVIDER_UNCONFIGURED' });
     expect(created).toBe(false);
@@ -143,21 +151,20 @@ describe('export route', () => {
 
   it('rejects projects that are not ready for review/export', async () => {
     let created = false;
-    const app = new Hono<{ Bindings: Env }>();
-    app.route('/api/projects', createExportRoutes({
+    const routes = createExportRoutes({
       makeProjects: () => ({
         async getByIdForUser() {
           return { id: 'p1', userId: 'dev-user', status: 'processing', sourceObjectKey: 'projects/p1/source/a.mp4' };
         },
       }) as never,
       makeJobs: () => ({ async create() { created = true; throw new Error('must not create'); } }) as never,
-    }));
+    });
     const env = {
       ELEVENLABS_API_KEY: 'key', ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
       EXPORT_WORKFLOW: { create: async () => ({ id: 'x' }) },
     } as unknown as Env;
 
-    const response = await app.request('/api/projects/p1/export', { method: 'POST' }, env);
+    const response = await post(routes, env, '/p1/export');
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: 'PROJECT_NOT_EXPORTABLE' });
     expect(created).toBe(false);

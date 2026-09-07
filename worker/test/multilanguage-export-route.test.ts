@@ -153,6 +153,10 @@ function harness(options: {
     RATE_LIMIT_EXPORT: allowedLimiter,
     RATE_LIMIT_BATCH_EXPORT: allowedLimiter,
     ANALYTICS: { writeDataPoint() {} },
+    STREAM: {},
+    CLOUDFLARE_ACCOUNT_ID: 'account',
+    STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
+    CLOUDFLARE_STREAM_API_TOKEN: 'stream-token',
     EXPORT_WORKFLOW: {
       async create(input: { params?: any }) {
         calls.workflow.push(input);
