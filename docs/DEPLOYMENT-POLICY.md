@@ -19,7 +19,7 @@ The canonical public deployment belongs only to Cloudflare account `50afb4fd3c4c
 
 ## GitHub Actions responsibility
 
-GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform `wrangler deploy --dry-run`, and capture test artifacts/screenshots.
+GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform source and generated-production `wrangler deploy --dry-run` validation, and capture test artifacts/screenshots.
 
 GitHub Actions must not deploy production. Do not add a production `wrangler deploy`, remote D1 migration, `wrangler secret put`, Cloudflare production API call, or a second production deployment workflow to GitHub Actions.
 
@@ -35,14 +35,16 @@ The repository-owned Workers Builds deploy command is `node scripts/cloudflare-w
 
 ## Container-free production lane
 
-Cloudflare Workers Builds production is intentionally **container-free**. `scripts/cloudflare-workers-build-deploy.mjs` generates `.wrangler-production.json` and removes `containers` plus their `durable_objects` bindings before Wrangler deploys production. This keeps the live deployment on Workers/Cloudflare-native resources without enabling paid Cloudflare Containers.
+Cloudflare Workers Builds production is intentionally **container-free** and carries no Container-backed Durable Object lifecycle state. `scripts/cloudflare-workers-build-deploy.mjs` generates `.wrangler-production.json` and removes `containers`, their `durable_objects` bindings, and the related top-level `exports` lifecycle declarations before Wrangler deploys production. This keeps the live deployment on Workers/Cloudflare-native resources without enabling paid Cloudflare Containers or retaining declarative Durable Object lifecycle state for the stripped classes.
 
-The checked-in `wrangler.jsonc` may retain optional container capability declarations for development, compatibility, or future qualification, but those declarations are not part of the Workers Builds production configuration. Do not change the production deploy script to publish Containers unless that production policy is explicitly changed later.
+The checked-in `wrangler.jsonc` may retain optional container capability declarations for development, compatibility, or future qualification, but those declarations are not part of the Workers Builds production configuration. Do not change the production deploy script to publish Containers or their Durable Object lifecycle declarations unless that production policy is explicitly changed later.
 
 The production deploy script also hard-pins account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f` when generating `.wrangler-production.json`. This is a defense-in-depth guard against accidental account drift in the checked-in source config.
 
+CI must validate both the checked-in source Wrangler configuration and the exact generated `.wrangler-production.json` with `wrangler deploy --dry-run`. A green source-config dry-run alone is not sufficient production-config evidence because Workers Builds deploys the generated file.
+
 ## Repository guard
 
-CI contains regression tests that fail if a GitHub production deployment workflow is reintroduced, if CI starts performing a non-dry-run Wrangler deploy, if the checked-in production account drifts away from account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`, if Workers Builds stops hard-pinning that account, if the production config stops stripping paid Container bindings, or if a stale HTTP 200 readiness payload lacks the exact current schema revision.
+CI contains regression tests that fail if a GitHub production deployment workflow is reintroduced, if CI starts performing a non-dry-run Wrangler deploy, if the checked-in production account drifts away from account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`, if Workers Builds stops hard-pinning that account, if the generated production config retains `containers`, `durable_objects`, or `exports`, if CI stops dry-running the exact generated production config, or if a stale HTTP 200 readiness payload lacks the exact current schema revision.
 
 This policy is intentional and should be treated as a repository-level requirement.
