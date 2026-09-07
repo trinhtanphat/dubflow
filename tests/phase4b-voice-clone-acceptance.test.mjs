@@ -31,18 +31,24 @@ test('Phase 4B uses a dedicated provider boundary and clone rate limit lane', ()
   assert.match(app, /app\.route\('\/api\/projects', createVoiceCloneRoutes\(\)\)/);
 });
 
-test('Phase 4B capability is explicit instead of a generic cloning claim', () => {
+test('Phase 4B capability is explicit and shares the production voice provider selector', () => {
   const api = read('src/features/voice/voiceApi.ts');
   const elevenLabsVoice = read('worker/src/services/voice/elevenlabs.ts');
   const workersAiVoice = read('worker/src/services/voice/workers-ai.ts');
+  const provider = read('worker/src/services/voice/provider.ts');
   const route = read('worker/src/routes/voice.ts');
   assert.match(api, /cloneEnrollment/);
   assert.match(api, /mode:\s*'ivc'/);
   assert.match(elevenLabsVoice, /cloneEnrollment/);
   assert.match(elevenLabsVoice, /mode:\s*'ivc'/);
   assert.match(workersAiVoice, /cloneEnrollment:[\s\S]*available:\s*false/);
-  assert.match(route, /provider\.capabilities\(\)/);
-  assert.match(route, /hasElevenLabsKey/);
+  assert.match(provider, /ElevenLabsVoiceProvider/);
+  assert.match(provider, /WorkersAIVoiceProvider/);
+  assert.match(provider, /GROK_TTS_MODEL/);
+  assert.match(provider, /verifiedLanguages:\s*\['vi'\]/);
+  assert.match(route, /createVoiceProvider/);
+  assert.match(route, /createVoiceProvider\(c\.env\)\.capabilities\(\)/);
+  assert.doesNotMatch(route, /new\s+WorkersAIVoiceProvider/);
 });
 
 test('Phase 4B documents consent and no-production boundary', () => {
