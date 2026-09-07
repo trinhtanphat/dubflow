@@ -9,6 +9,7 @@ import { SegmentTranslationRepository, type SegmentTranslation } from '../db/seg
 import type { R2ReadableBucketLike } from '../cloudflare/r2';
 import { parseDubbedAudioMode, type DubbedAudioMode } from '../domain/audio-mode';
 import { isTargetLanguage, type ExportOutput, type TargetLanguage } from '../domain/language';
+import { parseVisualMode, type VisualMode } from '../domain/visual-mode';
 import { errorBody, type ErrorBody } from '../http/json';
 import { MediaObjectNotFoundError, streamMediaObject } from '../http/media-stream';
 import { createTelemetry, emitTelemetry } from '../observability/telemetry';
@@ -86,6 +87,38 @@ function parseAudioTreatment(output: ExportOutput, value: unknown): DubbedAudioM
   return audioMode;
 }
 
+function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode | ExportValidationError {
+  const visualMode = parseVisualMode(value);
+  if (!visualMode || (output === 'subtitles' && visualMode === 'lip_sync')) {
+    return {
+      status: 400,
+      code: 'VISUAL_MODE_INVALID',
+      message: output === 'subtitles'
+        ? 'Subtitle exports do not accept visual lip-sync.'
+        : 'Unsupported visual export mode.',
+    };
+  }
+  return visualMode;
+}
+
+function visualLipSyncAvailable(env: Env): boolean {
+  return Boolean(env.SYNC_API_KEY?.trim());
+}
+
+function streamExportAdmissionError(env: Env): ErrorBody | null {
+  if (!env.STREAM) return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
+  if (!env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
+    return errorBody('STREAM_ACCOUNT_UNAVAILABLE', 'Cloudflare account id is unavailable for Stream export.');
+  }
+  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
+    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
+  }
+  if (!env.CLOUDFLARE_STREAM_API_TOKEN?.trim()) {
+    return errorBody('STREAM_WRITE_UNAVAILABLE', 'Cloudflare Stream write token is unavailable.');
+  }
+  return null;
+}
+
 function separationCapabilityError(capabilities: DialogueSeparationCapabilities): ExportValidationError | null {
   if (capabilities.qualification === 'unqualified') {
     return {
@@ -110,39 +143,44 @@ function separationCapabilityError(capabilities: DialogueSeparationCapabilities)
   return null;
 }
 
-function streamExportAdmissionError(env: Env): ErrorBody | null {
-  if (!env.STREAM) return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
-  if (!env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
-    return errorBody('STREAM_ACCOUNT_UNAVAILABLE', 'Cloudflare account id is unavailable for Stream export.');
-  }
-  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
-    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
-  }
-  if (!env.CLOUDFLARE_STREAM_API_TOKEN?.trim()) {
-    return errorBody('STREAM_WRITE_UNAVAILABLE', 'Cloudflare Stream write token is unavailable.');
-  }
-  return null;
-}
-
 function voiceTargetError(capabilities: VoiceCapabilities, targetLanguage: TargetLanguage): ExportValidationError | null {
   if (capabilities.configured === false) {
-    return { status: 503, code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'The dubbing voice provider is not configured.' };
+    return {
+      status: 503,
+      code: 'VOICE_PROVIDER_UNCONFIGURED',
+      message: 'The dubbing voice provider is not configured.',
+    };
   }
   if (capabilities.languages === 'unknown') {
-    return { status: 409, code: 'VOICE_LANGUAGE_UNQUALIFIED', message: `Voice language capability for ${targetLanguage} is not qualified.` };
+    return {
+      status: 409,
+      code: 'VOICE_LANGUAGE_UNQUALIFIED',
+      message: `Voice language capability for ${targetLanguage} is not qualified.`,
+    };
   }
   if (!capabilities.languages.includes(targetLanguage)) {
-    return { status: 400, code: 'VOICE_LANGUAGE_UNSUPPORTED', message: `The configured voice provider does not support ${targetLanguage}.` };
+    return {
+      status: 400,
+      code: 'VOICE_LANGUAGE_UNSUPPORTED',
+      message: `The configured voice provider does not support ${targetLanguage}.`,
+    };
   }
   return null;
 }
 
-function translationsComplete(sourceSegments: Array<{ id: string }>, variants: SegmentTranslation[]): boolean {
+function translationsComplete(
+  sourceSegments: Array<{ id: string }>,
+  variants: SegmentTranslation[],
+): boolean {
   if (sourceSegments.length === 0 || variants.length !== sourceSegments.length) return false;
   const bySegment = new Map(variants.map((variant) => [variant.segmentId, variant]));
   return sourceSegments.every((segment) => {
     const variant = bySegment.get(segment.id);
-    return Boolean(variant && variant.translationStatus === 'completed' && variant.translatedText.trim());
+    return Boolean(
+      variant
+      && variant.translationStatus === 'completed'
+      && variant.translatedText.trim(),
+    );
   });
 }
 
@@ -181,7 +219,9 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
   ): Promise<ValidatedTarget | ExportValidationError> {
     const project = await makeProjects(env).getByIdForUser(projectId, userId);
     if (!project) return { status: 404, code: 'PROJECT_NOT_FOUND', message: 'Project not found.' };
-    if (!isTargetLanguage(rawLanguage)) return { status: 400, code: 'TARGET_LANGUAGE_UNSUPPORTED', message: 'Unsupported target language.' };
+    if (!isTargetLanguage(rawLanguage)) {
+      return { status: 400, code: 'TARGET_LANGUAGE_UNSUPPORTED', message: 'Unsupported target language.' };
+    }
     const targetLanguage = rawLanguage;
     if (!project.sourceObjectKey && output === 'dubbed') {
       return { status: 400, code: 'SOURCE_MEDIA_REQUIRED', message: 'Upload source media before dubbed export.' };
@@ -189,18 +229,29 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     if (!['needs_review', 'completed'].includes(project.status)) {
       return { status: 409, code: 'PROJECT_NOT_EXPORTABLE', message: 'Project must finish dubbing review before export.' };
     }
+
     const config = await makeLanguages(env).getConfig(projectId, userId);
     if (!config) return { status: 404, code: 'PROJECT_NOT_FOUND', message: 'Project not found.' };
     if (!isEnabled(config, targetLanguage)) {
-      return { status: 409, code: 'PROJECT_LANGUAGE_NOT_ENABLED', message: `Target language ${targetLanguage} is not enabled for this project.` };
+      return {
+        status: 409,
+        code: 'PROJECT_LANGUAGE_NOT_ENABLED',
+        message: `Target language ${targetLanguage} is not enabled for this project.`,
+      };
     }
+
     const [sourceSegments, variants] = await Promise.all([
       makeSegments(env).list(projectId, userId),
       makeVariants(env).list(projectId, userId, targetLanguage),
     ]);
     if (!translationsComplete(sourceSegments, variants)) {
-      return { status: 409, code: 'TRANSLATION_VARIANTS_INCOMPLETE', message: `Completed non-empty ${targetLanguage} translations are required before export.` };
+      return {
+        status: 409,
+        code: 'TRANSLATION_VARIANTS_INCOMPLETE',
+        message: `Completed non-empty ${targetLanguage} translations are required before export.`,
+      };
     }
+
     if (output === 'dubbed') {
       const voiceError = voiceTargetError(getVoiceCapabilities(env), targetLanguage);
       if (voiceError) return voiceError;
@@ -212,7 +263,11 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     try {
       return separationCapabilityError(await makeSeparation(env).capabilities());
     } catch {
-      return { status: 503, code: 'DIALOGUE_SEPARATION_UNAVAILABLE', message: 'Dialogue separation capability could not be loaded.' };
+      return {
+        status: 503,
+        code: 'DIALOGUE_SEPARATION_UNAVAILABLE',
+        message: 'Dialogue separation capability could not be loaded.',
+      };
     }
   }
 
@@ -226,45 +281,114 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     requestId: string | undefined,
     legacy: boolean,
     audioMode: DubbedAudioMode,
+    visualMode: VisualMode,
   ) {
     const exportsStore = makeExports(env);
     const jobs = makeJobs(env);
-    const attempt = await exportsStore.create(projectId, userId, targetLanguage, output, batchId, audioMode);
+    const attempt = await exportsStore.create(
+      projectId,
+      userId,
+      targetLanguage,
+      output,
+      batchId,
+      audioMode,
+      visualMode === 'lip_sync',
+    );
     const job = await jobs.create(projectId, legacy ? 'export' : `export:${targetLanguage}:${output}`);
     if (legacy) await makeProjects(env).setStatus(projectId, userId, 'processing');
     try {
-      const instance = await env.EXPORT_WORKFLOW.create({ params: {
-        projectId, userId, jobId: job.id, exportId: attempt.id, targetLanguage, output, audioMode, requestId,
-      } });
-      return { targetLanguage, output, exportId: attempt.id, jobId: job.id, workflowId: instance.id, status: 'queued' as const };
+      const instance = await env.EXPORT_WORKFLOW.create({
+        params: {
+          projectId,
+          userId,
+          jobId: job.id,
+          exportId: attempt.id,
+          targetLanguage,
+          output,
+          audioMode,
+          visualMode,
+          requestId,
+        },
+      });
+      return {
+        targetLanguage,
+        output,
+        exportId: attempt.id,
+        jobId: job.id,
+        workflowId: instance.id,
+        status: 'queued' as const,
+        audioMode,
+        visualMode,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
       await jobs.fail(job.id, 'EXPORT_WORKFLOW_START_FAILED', message);
       await exportsStore.fail(projectId, attempt.id, userId, 'EXPORT_WORKFLOW_START_FAILED', message);
       if (legacy) await makeProjects(env).setStatus(projectId, userId, 'needs_review');
-      return { targetLanguage, output, exportId: attempt.id, jobId: job.id, status: 'failed' as const, code: 'EXPORT_WORKFLOW_START_FAILED', message };
+      return {
+        targetLanguage,
+        output,
+        exportId: attempt.id,
+        jobId: job.id,
+        status: 'failed' as const,
+        code: 'EXPORT_WORKFLOW_START_FAILED',
+        message,
+        audioMode,
+        visualMode,
+      };
     }
   }
 
-  async function startSingle(c: any, targetLanguage: string, output: ExportOutput, legacy: boolean, audioMode: DubbedAudioMode) {
+  async function startSingle(
+    c: any,
+    targetLanguage: string,
+    output: ExportOutput,
+    legacy: boolean,
+    audioMode: DubbedAudioMode,
+    visualMode: VisualMode,
+  ) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     try {
       const validated = await validateTarget(c.env, projectId, userId, targetLanguage, output);
       if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+
+      if (visualMode === 'lip_sync' && !visualLipSyncAvailable(c.env)) {
+        return c.json(errorBody('LIP_SYNC_UNAVAILABLE', 'Visual lip-sync is unavailable.'), 503);
+      }
+
       if (audioMode === 'separated_background') {
         const capabilityError = await requireSeparatedCapability(c.env);
-        if (capabilityError) return c.json(errorBody(capabilityError.code, capabilityError.message), capabilityError.status);
+        if (capabilityError) {
+          return c.json(errorBody(capabilityError.code, capabilityError.message), capabilityError.status);
+        }
       }
+
       const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
       if (rateLimited) return rateLimited;
       if (output === 'dubbed') {
         const streamError = streamExportAdmissionError(c.env);
         if (streamError) return c.json(streamError, 503);
       }
-      const launched = await launchValidated(c.env, projectId, userId, validated.targetLanguage, output, null, c.get('requestId'), legacy, audioMode);
-      if (launched.status === 'failed') return c.json(errorBody(launched.code, launched.message), 503);
-      if (legacy) return c.json({ jobId: launched.jobId, workflowId: launched.workflowId, status: 'queued' as const }, 202);
+
+      const launched = await launchValidated(
+        c.env,
+        projectId,
+        userId,
+        validated.targetLanguage,
+        output,
+        null,
+        c.get('requestId'),
+        legacy,
+        audioMode,
+        visualMode,
+      );
+      if (launched.status === 'failed') {
+        return c.json(errorBody(launched.code, launched.message), 503);
+      }
+      if (legacy) {
+        return c.json({ jobId: launched.jobId, workflowId: launched.workflowId, status: 'queued' as const }, 202);
+      }
       return c.json(launched, 202);
     } catch {
       return c.json(errorBody('EXPORT_START_FAILED', 'Unable to start export.'), 500);
@@ -278,23 +402,40 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const project = await projects.getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
     if (!project.sourceObjectKey) return c.json(errorBody('SOURCE_MEDIA_REQUIRED', 'Upload source media before export.'), 400);
-    if (!['needs_review', 'completed'].includes(project.status)) return c.json(errorBody('PROJECT_NOT_EXPORTABLE', 'Project must finish dubbing review before export.'), 409);
-    if (!voiceConfigured(c.env)) return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'The dubbing voice provider is not configured.'), 503);
+    if (!['needs_review', 'completed'].includes(project.status)) {
+      return c.json(errorBody('PROJECT_NOT_EXPORTABLE', 'Project must finish dubbing review before export.'), 409);
+    }
+    if (!voiceConfigured(c.env)) {
+      return c.json(errorBody('VOICE_PROVIDER_UNCONFIGURED', 'The dubbing voice provider is not configured.'), 503);
+    }
+
     const validated = await validateTarget(c.env, projectId, userId, 'vi', 'dubbed');
     if ('code' in validated) return c.json(errorBody(validated.code, validated.message), validated.status);
+
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
     const streamError = streamExportAdmissionError(c.env);
     if (streamError) return c.json(streamError, 503);
+
     const exportsStore = makeExports(c.env);
     const jobs = makeJobs(c.env);
-    const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null, 'dubbed_only');
+    const attempt = await exportsStore.create(projectId, userId, 'vi', 'dubbed', null, 'dubbed_only', false);
     const job = await jobs.create(projectId, 'export');
     await projects.setStatus(projectId, userId, 'processing');
     try {
-      const instance = await c.env.EXPORT_WORKFLOW.create({ params: {
-        projectId, userId, jobId: job.id, exportId: attempt.id, targetLanguage: 'vi', output: 'dubbed', audioMode: 'dubbed_only', requestId: c.get('requestId'),
-      } });
+      const instance = await c.env.EXPORT_WORKFLOW.create({
+        params: {
+          projectId,
+          userId,
+          jobId: job.id,
+          exportId: attempt.id,
+          targetLanguage: 'vi',
+          output: 'dubbed',
+          audioMode: 'dubbed_only',
+          visualMode: 'standard',
+          requestId: c.get('requestId'),
+        },
+      });
       return c.json({ jobId: job.id, workflowId: instance.id, status: 'queued' as const }, 202);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to start export Workflow.';
@@ -310,67 +451,127 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const projectId = c.req.param('id');
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
+
     let separation: DialogueSeparationCapabilities;
-    try { separation = await makeSeparation(c.env).capabilities(); }
-    catch { separation = await new UnavailableDialogueSeparationProvider().capabilities(); }
-    return c.json({ duckOriginal: true, separation });
+    try {
+      separation = await makeSeparation(c.env).capabilities();
+    } catch {
+      separation = await new UnavailableDialogueSeparationProvider().capabilities();
+    }
+    const lipSyncAvailable = visualLipSyncAvailable(c.env);
+    return c.json({
+      duckOriginal: true,
+      separation,
+      visualLipSync: {
+        available: lipSyncAvailable,
+        provider: lipSyncAvailable ? 'sync-labs' : null,
+      },
+    });
   });
 
   routes.post('/:id/exports/batch', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
-    let payload: { targetLanguages?: unknown; output?: unknown; audioMode?: unknown };
-    try { payload = await c.req.json(); }
-    catch { return c.json(errorBody('EXPORT_REQUEST_INVALID', 'Export body must be valid JSON.'), 400); }
+    let payload: { targetLanguages?: unknown; output?: unknown; audioMode?: unknown; visualMode?: unknown };
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json(errorBody('EXPORT_REQUEST_INVALID', 'Export body must be valid JSON.'), 400);
+    }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
     const audioTreatment = parseAudioTreatment(output, payload.audioMode);
-    if (typeof audioTreatment !== 'string') return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
+    if (typeof audioTreatment !== 'string') {
+      return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
+    }
+    const visualTreatment = parseVisualTreatment(output, payload.visualMode);
+    if (typeof visualTreatment !== 'string') {
+      return c.json(errorBody(visualTreatment.code, visualTreatment.message), visualTreatment.status);
+    }
     const audioMode = audioTreatment;
-    if (!Array.isArray(payload.targetLanguages) || payload.targetLanguages.length === 0) return c.json(errorBody('EXPORT_TARGETS_INVALID', 'At least one target language is required.'), 400);
-    if (payload.targetLanguages.some((target) => !isTargetLanguage(target))) return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'One or more target languages are unsupported.'), 400);
+    const visualMode = visualTreatment;
+    if (!Array.isArray(payload.targetLanguages) || payload.targetLanguages.length === 0) {
+      return c.json(errorBody('EXPORT_TARGETS_INVALID', 'At least one target language is required.'), 400);
+    }
+    if (payload.targetLanguages.some((target) => !isTargetLanguage(target))) {
+      return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'One or more target languages are unsupported.'), 400);
+    }
     const targets = payload.targetLanguages as TargetLanguage[];
-    if (new Set(targets).size !== targets.length) return c.json(errorBody('EXPORT_TARGETS_INVALID', 'Batch target languages must be unique.'), 400);
+    if (new Set(targets).size !== targets.length) {
+      return c.json(errorBody('EXPORT_TARGETS_INVALID', 'Batch target languages must be unique.'), 400);
+    }
+
     const validated: TargetLanguage[] = [];
     for (const target of targets) {
       const result = await validateTarget(c.env, projectId, userId, target, output);
       if ('code' in result) return c.json(errorBody(result.code, result.message), result.status);
       validated.push(result.targetLanguage);
     }
+
+    if (visualMode === 'lip_sync' && !visualLipSyncAvailable(c.env)) {
+      return c.json(errorBody('LIP_SYNC_UNAVAILABLE', 'Visual lip-sync is unavailable.'), 503);
+    }
+
     if (audioMode === 'separated_background') {
       const capabilityError = await requireSeparatedCapability(c.env);
-      if (capabilityError) return c.json(errorBody(capabilityError.code, capabilityError.message), capabilityError.status);
+      if (capabilityError) {
+        return c.json(errorBody(capabilityError.code, capabilityError.message), capabilityError.status);
+      }
     }
+
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
     if (output === 'dubbed') {
       const streamError = streamExportAdmissionError(c.env);
       if (streamError) return c.json(streamError, 503);
     }
+
     const batchId = makeBatchId();
     const results = [];
     for (const target of validated) {
-      results.push(await launchValidated(c.env, projectId, userId, target, output, batchId, c.get('requestId'), false, audioMode));
+      results.push(await launchValidated(
+        c.env,
+        projectId,
+        userId,
+        target,
+        output,
+        batchId,
+        c.get('requestId'),
+        false,
+        audioMode,
+        visualMode,
+      ));
     }
     return c.json({ batchId, exports: results }, 202);
   });
 
   routes.post('/:id/exports/:language', async (c) => {
-    let payload: { output?: unknown; audioMode?: unknown };
-    try { payload = await c.req.json(); }
-    catch { return c.json(errorBody('EXPORT_REQUEST_INVALID', 'Export body must be valid JSON.'), 400); }
+    let payload: { output?: unknown; audioMode?: unknown; visualMode?: unknown };
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json(errorBody('EXPORT_REQUEST_INVALID', 'Export body must be valid JSON.'), 400);
+    }
     const output = parseOutput(payload.output);
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
     const audioTreatment = parseAudioTreatment(output, payload.audioMode);
-    if (typeof audioTreatment !== 'string') return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
-    return startSingle(c, c.req.param('language'), output, false, audioTreatment);
+    if (typeof audioTreatment !== 'string') {
+      return c.json(errorBody(audioTreatment.code, audioTreatment.message), audioTreatment.status);
+    }
+    const visualTreatment = parseVisualTreatment(output, payload.visualMode);
+    if (typeof visualTreatment !== 'string') {
+      return c.json(errorBody(visualTreatment.code, visualTreatment.message), visualTreatment.status);
+    }
+    return startSingle(c, c.req.param('language'), output, false, audioTreatment, visualTreatment);
   });
 
   routes.get('/:id/exports/:language', async (c) => {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     const targetLanguage = c.req.param('language');
-    if (!isTargetLanguage(targetLanguage)) return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'Unsupported target language.'), 400);
+    if (!isTargetLanguage(targetLanguage)) {
+      return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'Unsupported target language.'), 400);
+    }
     const output = parseOutput(c.req.query('output') ?? 'dubbed');
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
@@ -384,7 +585,9 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const userId = getCurrentUserId();
     const projectId = c.req.param('id');
     const targetLanguage = c.req.param('language');
-    if (!isTargetLanguage(targetLanguage)) return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'Unsupported target language.'), 400);
+    if (!isTargetLanguage(targetLanguage)) {
+      return c.json(errorBody('TARGET_LANGUAGE_UNSUPPORTED', 'Unsupported target language.'), 400);
+    }
     const output = parseOutput(c.req.query('output') ?? 'dubbed');
     if (!output) return c.json(errorBody('EXPORT_OUTPUT_INVALID', 'Output must be dubbed or subtitles.'), 400);
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
@@ -392,15 +595,29 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const attempt = await makeExports(c.env).latestCompleted(projectId, userId, targetLanguage, output);
     const objectKey = attempt ? completedMediaKey(attempt, output) : null;
     if (!objectKey) return c.json(errorBody('EXPORT_NOT_READY', 'Requested export is not completed.'), 409);
+
     try {
-      const response = await streamMediaObject(makeBucket(c.env), objectKey, c.req.raw, `${project.id}-${targetLanguage}.${output === 'subtitles' ? 'srt' : 'mp4'}`);
+      const response = await streamMediaObject(
+        makeBucket(c.env),
+        objectKey,
+        c.req.raw,
+        `${project.id}-${targetLanguage}.${output === 'subtitles' ? 'srt' : 'mp4'}`,
+      );
       emitTelemetry(createTelemetry(c.env), {
-        name: 'export_download', requestId: c.get('requestId'), actorId: userId, projectId, accessMode: 'owner', httpStatus: response.status,
-        rangeRequest: Boolean(c.req.header('range')), status: response.status < 400 ? 'success' : 'rejected',
+        name: 'export_download',
+        requestId: c.get('requestId'),
+        actorId: userId,
+        projectId,
+        accessMode: 'owner',
+        httpStatus: response.status,
+        rangeRequest: Boolean(c.req.header('range')),
+        status: response.status < 400 ? 'success' : 'rejected',
       });
       return response;
     } catch (error) {
-      if (error instanceof MediaObjectNotFoundError) return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Export object not found.'), 404);
+      if (error instanceof MediaObjectNotFoundError) {
+        return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Export object not found.'), 404);
+      }
       throw error;
     }
   });
@@ -412,22 +629,39 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const projectId = c.req.param('id');
     const project = await makeProjects(c.env).getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
+
     let objectKey: string | null = null;
     try {
       const latest = await makeExports(c.env).latestCompleted(projectId, userId, 'vi', 'dubbed');
       objectKey = latest ? completedMediaKey(latest, 'dubbed') : null;
-    } catch {}
+    } catch {
+      // Legacy fallback remains readable while old project-level export state is reconciled.
+    }
     objectKey ??= project.exportObjectKey ?? null;
     if (!objectKey) return c.json(errorBody('EXPORT_NOT_READY', 'Final dubbing export is not ready.'), 409);
+
     try {
-      const response = await streamMediaObject(makeBucket(c.env), objectKey, c.req.raw, `${project.id}-dubbed.mp4`);
+      const response = await streamMediaObject(
+        makeBucket(c.env),
+        objectKey,
+        c.req.raw,
+        `${project.id}-dubbed.mp4`,
+      );
       emitTelemetry(createTelemetry(c.env), {
-        name: 'export_download', requestId: c.get('requestId'), actorId: userId, projectId, accessMode: 'owner', httpStatus: response.status,
-        rangeRequest: Boolean(c.req.header('range')), status: response.status < 400 ? 'success' : 'rejected',
+        name: 'export_download',
+        requestId: c.get('requestId'),
+        actorId: userId,
+        projectId,
+        accessMode: 'owner',
+        httpStatus: response.status,
+        rangeRequest: Boolean(c.req.header('range')),
+        status: response.status < 400 ? 'success' : 'rejected',
       });
       return response;
     } catch (error) {
-      if (error instanceof MediaObjectNotFoundError) return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Final export object not found.'), 404);
+      if (error instanceof MediaObjectNotFoundError) {
+        return c.json(errorBody('EXPORT_OBJECT_NOT_FOUND', 'Final export object not found.'), 404);
+      }
       throw error;
     }
   });
