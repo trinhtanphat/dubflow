@@ -37,7 +37,7 @@ describe('voice HTTP routes', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-key');
   });
 
-  it('reports the selected qualified Grok TTS fallback when ElevenLabs export configuration is absent', async () => {
+  it('reports the selected qualified Grok TTS fallback without claiming browser preview support', async () => {
     const routes = createVoiceRoutes(async () => new Response('audio'));
     const response = await routes.fetch(new Request('https://yupvox.test/capabilities'), voiceEnv({
       ELEVENLABS_API_KEY: undefined,
@@ -49,7 +49,7 @@ describe('voice HTTP routes', () => {
       configured: true,
       languages: ['vi'],
       cloning: false,
-      preview: true,
+      preview: false,
       cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: false },
     });
   });
