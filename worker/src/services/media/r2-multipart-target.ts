@@ -1,3 +1,5 @@
+import type { StreamTargetChunk } from 'mediabunny';
+
 type MultipartPart = {
   partNumber: number;
   etag: string;
@@ -39,24 +41,33 @@ export async function createR2MultipartWritable(
   let buffer = new Uint8Array(partSize);
   let bufferedBytes = 0;
   let partNumber = 1;
+  let expectedPosition = 0;
   let failed = false;
   let closed = false;
   let completed = false;
 
-  const abortWithStableError = async (cause?: unknown): Promise<never> => {
-    if (!failed) {
-      failed = true;
-      try {
-        await upload.abort();
-      } catch {
-        // Preserve the stable write error even if abort itself fails.
-      }
+  const abortUpload = async () => {
+    if (failed) return;
+    failed = true;
+    try {
+      await upload.abort();
+    } catch {
+      // Preserve the primary stable error when cleanup also fails.
     }
+  };
+
+  const abortWithStableError = async (cause?: unknown): Promise<never> => {
+    await abortUpload();
     const error = new Error('R2_EXPORT_WRITE_FAILED');
     if (cause !== undefined) {
       (error as Error & { cause?: unknown }).cause = cause;
     }
     throw error;
+  };
+
+  const abortWithRemuxError = async (message: string): Promise<never> => {
+    await abortUpload();
+    throw new Error(`MP4_REMUX_FAILED: ${message}`);
   };
 
   const uploadBufferedPart = async () => {
@@ -77,16 +88,23 @@ export async function createR2MultipartWritable(
     }
   };
 
-  const writable = new WritableStream<Uint8Array>({
+  const writable = new WritableStream<StreamTargetChunk>({
     async write(chunk) {
       if (failed || closed) {
         throw new Error('R2_EXPORT_WRITE_FAILED');
       }
+      if (chunk.type !== 'write' || chunk.position !== expectedPosition) {
+        await abortWithRemuxError(
+          `multipart target requires append-only writes at ${expectedPosition}, got ${chunk.position}`,
+        );
+      }
 
+      const data = chunk.data;
+      expectedPosition += data.byteLength;
       let offset = 0;
-      while (offset < chunk.byteLength) {
-        const writableBytes = Math.min(partSize - bufferedBytes, chunk.byteLength - offset);
-        buffer.set(chunk.subarray(offset, offset + writableBytes), bufferedBytes);
+      while (offset < data.byteLength) {
+        const writableBytes = Math.min(partSize - bufferedBytes, data.byteLength - offset);
+        buffer.set(data.subarray(offset, offset + writableBytes), bufferedBytes);
         bufferedBytes += writableBytes;
         offset += writableBytes;
         stats.maxBufferedBytes = Math.max(stats.maxBufferedBytes, bufferedBytes);
@@ -102,10 +120,7 @@ export async function createR2MultipartWritable(
       closed = true;
     },
     async abort() {
-      if (!failed) {
-        failed = true;
-        await upload.abort();
-      }
+      await abortUpload();
     },
   });
 
