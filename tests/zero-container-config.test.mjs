@@ -6,12 +6,14 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-const [wranglerText, packageText, indexSource, envSource, legacyExportSource] = await Promise.all([
+const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, exportWorkflow, exportDispatcher] = await Promise.all([
   read('wrangler.jsonc'),
   read('package.json'),
   read('worker/src/index.ts'),
   read('worker/src/env.ts'),
-  read('worker/src/workflows/legacyExportPipeline.ts'),
+  read('worker/src/workflows/DubbingWorkflow.ts'),
+  read('worker/src/workflows/ExportWorkflow.ts'),
+  read('worker/src/workflows/exportPipeline.ts'),
 ]);
 const wrangler = JSON.parse(wranglerText);
 const pkg = JSON.parse(packageText);
@@ -24,12 +26,14 @@ test('production config is Stream-based and contains no Container runtime bindin
   assert.doesNotMatch(wranglerText, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg/);
 });
 
-test('worker runtime and dependencies contain no hidden FFmpeg Container fallback', () => {
+test('production worker wiring and dependencies contain no hidden FFmpeg Container fallback', () => {
   assert.equal(pkg.dependencies?.['@cloudflare/containers'], undefined);
   assert.doesNotMatch(packageText, /containers\/ffmpeg|@cloudflare\/containers/);
   assert.doesNotMatch(indexSource, /ContainerProxy|FfmpegContainer|@cloudflare\/containers/);
   assert.doesNotMatch(envSource, /FFMPEG_CONTAINER|services\/media\/container|ContainerNamespaceLike/);
-  assert.doesNotMatch(legacyExportSource, /ffmpeg-container|renderExport\(/);
+  for (const source of [dubbingWorkflow, exportWorkflow, exportDispatcher]) {
+    assert.doesNotMatch(source, /ContainerMediaProcessor|FFMPEG_CONTAINER|services\/media\/container|ffmpeg-container/);
+  }
 });
 
 test('legacy FFmpeg Container implementation files are deleted', () => {
