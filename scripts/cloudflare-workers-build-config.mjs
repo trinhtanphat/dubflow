@@ -9,6 +9,7 @@ export function prepareWorkersBuildConfig() {
   delete source.containers;
   delete source.durable_objects;
   delete source.exports;
+  delete source.stream;
   delete source.routes;
   fs.writeFileSync(
     new URL(`../${PRODUCTION_CONFIG_PATH}`, import.meta.url),
