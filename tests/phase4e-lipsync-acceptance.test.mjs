@@ -6,7 +6,7 @@ function read(path) {
   return fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
-const migration = read('migrations/0013_visual_lipsync.sql');
+const migration = read('migrations/0012_visual_lipsync.sql');
 const exportRoute = read('worker/src/routes/export.ts');
 const visualRoute = read('worker/src/routes/visual-export-media.ts');
 const app = read('worker/src/app.ts');
