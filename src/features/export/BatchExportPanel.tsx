@@ -1,4 +1,5 @@
 import type { VoiceCapabilities } from '../voice/voiceApi';
+import type { ClientVoicePreloadState } from '../voice/clientVoicePreload';
 import type { TargetLanguage } from '../translation/languageVariantsApi';
 import { LANGUAGE_LABELS } from '../translation/TargetLanguagesPanel';
 import {
@@ -17,7 +18,13 @@ import './batch-export.css';
 export function dubbedAvailability(
   capabilities: VoiceCapabilities | null,
   targetLanguage: TargetLanguage,
+  localVietnameseSupported = false,
 ): { allowed: boolean; reason: string } {
+  if (targetLanguage === 'vi') {
+    return localVietnameseSupported
+      ? { allowed: true, reason: '' }
+      : { allowed: false, reason: 'Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.' };
+  }
   if (!capabilities?.configured) return { allowed: false, reason: 'Provider giọng chưa được cấu hình.' };
   if (capabilities.languages === 'unknown') return { allowed: false, reason: 'Khả năng giọng cho ngôn ngữ này chưa xác nhận (unqualified).' };
   if (!capabilities.languages.includes(targetLanguage)) return { allowed: false, reason: 'Provider giọng không hỗ trợ ngôn ngữ này.' };
@@ -81,6 +88,8 @@ type Props = {
   visualMode?: VisualMode;
   exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
+  clientVoicePreloadState?: ClientVoicePreloadState;
+  localVietnameseSupported?: boolean;
   busy: boolean;
   results: ExportLaunchDto[];
   attempts?: Partial<Record<TargetLanguage, AttemptView>>;
@@ -122,6 +131,20 @@ function isCompleted(result: ExportLaunchDto, attempt?: AttemptView) {
   return result.status === 'completed' || attempt?.status === 'completed';
 }
 
+function preloadLabel(state?: ClientVoicePreloadState): string {
+  if (!state || state.phase === 'idle' || state.phase === 'failed') return '';
+  if (state.phase === 'loading_model') {
+    return state.percent === null
+      ? 'Đang tải giọng Việt cục bộ…'
+      : `Đang tải giọng Việt cục bộ: ${state.percent}%`;
+  }
+  if (state.phase === 'synthesizing' || state.phase === 'uploading') {
+    return `Đang chuẩn bị giọng Việt ${Math.min(state.total, state.completed + 1)}/${state.total}`;
+  }
+  if (state.phase === 'verifying') return `Đang xác minh voice cache ${state.total}/${state.total}`;
+  return 'Giọng Việt cục bộ đã sẵn sàng.';
+}
+
 export function BatchExportPanelView({
   projectId = '',
   currentTargetLanguage,
@@ -132,6 +155,8 @@ export function BatchExportPanelView({
   visualMode = 'standard',
   exportCapabilities,
   voiceCapabilities,
+  clientVoicePreloadState,
+  localVietnameseSupported = false,
   busy,
   results,
   attempts = {},
@@ -144,7 +169,7 @@ export function BatchExportPanelView({
   onBatchExport,
   onRetryFailed,
 }: Props) {
-  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
+  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage, localVietnameseSupported);
   const separated = separatedBackgroundAvailability(exportCapabilities);
   const visual = visualLipSyncAvailability(exportCapabilities);
   const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
@@ -153,9 +178,10 @@ export function BatchExportPanelView({
   const selectedBlocked = output === 'dubbed' && (
     treatmentBlocked
     || visualBlocked
-    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
+    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language, localVietnameseSupported).allowed)
   );
   const allSucceeded = results.length > 0 && results.every((result) => isCompleted(result, attempts[result.targetLanguage]));
+  const localProgress = preloadLabel(clientVoicePreloadState);
 
   return (
     <section className="batch-export" data-testid="batch-export-panel" aria-label="Batch export">
@@ -197,6 +223,7 @@ export function BatchExportPanelView({
             </label>
             {!visual.allowed && <p className="batch-export__capability">{visual.reason}</p>}
           </div>
+          {localProgress && <p className="batch-export__capability" aria-live="polite">{localProgress}</p>}
         </>
       )}
       <div className="batch-export__languages">
