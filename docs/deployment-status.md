@@ -81,7 +81,7 @@ Phase 4E is **source/CI qualification only** for optional Sync Labs visual lip-s
 
 The visual provider receives a bounded HTTPS grant for the standard MP4 and a second bounded grant for `projects/{projectId}/soundtracks/{targetLanguage}/{exportId}.wav`. A successful result is stored separately as `.lipsync.mp4`. Provider failures do not destroy or relabel the already-completed standard MP4.
 
-Sync Labs remains optional and production runtime remains **UNQUALIFIED** until a real supported provider/media fixture completes end-to-end.
+Sync Labs remains optional and production runtime remains **UNQUALIFIED** until a real supported provider/media fixture completes end-to-end. `SYNC_API_KEY` configures the provider only; visual admission remains fail-closed unless `SYNC_LIPSYNC_QUALIFIED=true` is set after that real supported end-to-end fixture has been qualified.
 
 ## Studio reference qualification
 
