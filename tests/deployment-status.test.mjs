@@ -15,3 +15,13 @@ test('deployment status pins the public hostname to its state-owning Cloudflare 
   assert.match(policy, /must not deploy production/i);
   assert.match(policy, /main/);
 });
+
+test('deployment status describes the current schema-12 zero-container media path rather than the removed FFmpeg runtime', () => {
+  assert.match(status, /current zero-container source path/i);
+  assert.match(status, /Cloudflare Stream/i);
+  assert.match(status, /remote ASR/i);
+  assert.match(status, /PCM|WAV/i);
+  assert.match(status, /schema revision \*\*12\*\*|schema revision 12/i);
+  assert.match(status, /FFmpeg Container.*removed|removed.*FFmpeg Container/is);
+  assert.match(status, /300-second.*15-second.*historical|historical.*300-second.*15-second/is);
+});
