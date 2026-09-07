@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
+import { ClientInferenceRepository } from '../src/db/client-inference';
 import {
   LOCAL_INFERENCE_ASR,
   LOCAL_INFERENCE_TRANSLATION,
@@ -22,6 +24,64 @@ function validPayload() {
       { segmentId: 's2', translatedText: 'thế giới' },
     ],
   };
+}
+
+class FakeStatement implements D1StatementLike {
+  constructor(
+    private readonly owner: FakeD1,
+    readonly sql: string,
+    readonly values: unknown[] = [],
+  ) {}
+
+  bind(...values: unknown[]): D1StatementLike {
+    return new FakeStatement(this.owner, this.sql, values);
+  }
+
+  async run(): Promise<D1RunResultLike> {
+    return { changes: 1 };
+  }
+
+  async all<T>(): Promise<{ results?: T[] }> {
+    return { results: [] };
+  }
+
+  async first<T>(): Promise<T | null> {
+    if (this.sql.includes('FROM projects')) {
+      return {
+        id: 'p1',
+        source_language: 'en',
+        target_language: 'vi',
+        source_generation: 3,
+        source_object_key: 'projects/p1/source/current.mp4',
+        duration_ms: null,
+        size_bytes: 1024,
+        status: 'ready',
+        translation_context_revision: 1,
+      } as T;
+    }
+    if (this.sql.includes('FROM project_target_languages')) {
+      return { status: 'ready' } as T;
+    }
+    if (this.sql.includes('COUNT(*) AS busy_count')) {
+      return { busy_count: 0 } as T;
+    }
+    return null;
+  }
+}
+
+class FakeD1 implements D1DatabaseLike {
+  batchCalls = 0;
+  statements: FakeStatement[] = [];
+
+  prepare(sql: string): D1StatementLike {
+    return new FakeStatement(this, sql);
+  }
+
+  async batch(statements: D1StatementLike[]): Promise<unknown[]> {
+    this.batchCalls += 1;
+    this.statements = statements as FakeStatement[];
+    return statements.map(() => ({ changes: 1 }));
+  }
 }
 
 describe('browser-local client inference request validation', () => {
@@ -110,5 +170,16 @@ describe('browser-local client inference request validation', () => {
     const blank = validPayload();
     blank.translations[1].translatedText = '   ';
     expect(() => normalizeClientInferenceInput('p1', blank)).toThrow(LocalInferenceInputError);
+  });
+
+  it('accepts a valid browser duration when canonical duration is not known yet', async () => {
+    const db = new FakeD1();
+    const repository = new ClientInferenceRepository(db);
+    const result = await repository.commit('p1', 'u1', normalizeClientInferenceInput('p1', validPayload()));
+
+    expect(db.batchCalls).toBe(1);
+    expect(result.durationMs).toBe(4_000);
+    const projectWrite = db.statements.find((statement) => statement.sql.includes('UPDATE projects'));
+    expect(projectWrite?.values[0]).toBe(4_000);
   });
 });
