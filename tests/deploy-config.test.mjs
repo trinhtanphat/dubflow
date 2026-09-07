@@ -53,6 +53,7 @@ test('zone-owner gateway is the only config that attaches yupvox.qs3d.site', () 
   const gateway = JSON.parse(fs.readFileSync(gatewayConfigUrl, 'utf8'));
   assert.equal(gateway.account_id, zoneAccountId);
   assert.deepEqual(gateway.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
+  assert.equal(gateway.keep_vars, true, 'gateway deploys must preserve runtime BACKEND_ORIGIN configured outside source');
   assert.equal(gateway.containers, undefined);
   assert.equal(gateway.durable_objects, undefined);
   assert.equal(gateway.d1_databases, undefined);

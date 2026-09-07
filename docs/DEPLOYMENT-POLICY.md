@@ -36,6 +36,8 @@ When the repository-owned Workers Builds deploy runner `scripts/cloudflare-worke
 
 It targets `trinhtanphat2403` and deploys `dubflow-gateway`, which owns no DubFlow D1/R2/Workflow state. The gateway forwards requests to the exact account-6666 `workers.dev` origin supplied through `BACKEND_ORIGIN`.
 
+`BACKEND_ORIGIN` is runtime configuration and must not be hard-coded into source. Because normal Wrangler/Workers Builds deployments can otherwise replace runtime variables that are not present in the checked-in config, `wrangler.gateway.jsonc` must keep `keep_vars = true` so an operator-configured `BACKEND_ORIGIN` survives automatic gateway deployments.
+
 Do not guess or commit an account subdomain. Resolve the exact backend `workers.dev` URL from a successful backend deployment, verify it, and then configure `BACKEND_ORIGIN` for the gateway. If the variable is absent or invalid, the gateway must fail closed rather than loop or proxy to an unknown origin.
 
 ## GitHub Actions responsibility
@@ -79,6 +81,7 @@ CI must reject the following regressions:
 - a custom-domain route reappearing in backend `wrangler.jsonc`;
 - the gateway account drifting away from `trinhtanphat2403`;
 - the public hostname moving out of `wrangler.gateway.jsonc`;
+- gateway runtime-variable preservation being disabled while `BACKEND_ORIGIN` remains operator-configured outside source;
 - paid Container bindings or dormant Durable Object lifecycle `exports` reappearing in the generated backend production config;
 - CI stopping validation of the exact generated `.wrangler-production.json`;
 - GitHub Actions invoking the production deployment runner or becoming a production deployment lane;
