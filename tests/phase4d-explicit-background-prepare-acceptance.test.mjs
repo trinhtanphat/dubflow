@@ -20,7 +20,7 @@ const workflow = source('worker/src/workflows/SeparationWorkflow.ts');
 const pipeline = source('worker/src/workflows/separationPipeline.ts');
 const exportPipeline = source('worker/src/workflows/exportPipeline.ts');
 const wrangler = source('wrangler.jsonc');
-const deployScript = source('scripts/cloudflare-workers-build-deploy.mjs');
+const productionConfigGenerator = source('scripts/cloudflare-workers-build-config.mjs');
 const deploymentStatus = source('docs/deployment-status.md');
 
 test('Phase 4D exposes explicit separation status and prepare APIs without implicit Studio work', () => {
@@ -77,8 +77,9 @@ test('Phase 4D source adapter pins Demucs provenance behind a dedicated durable 
 });
 
 test('Phase 4D production remains fail-closed while Workers Builds strips container deployment', () => {
-  assert.match(deployScript, /delete\s+source\.containers\b/);
-  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.containers\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.durable_objects\b/);
+  assert.match(productionConfigGenerator, /delete\s+source\.exports\b/);
   assert.match(deploymentStatus, /Phase 4D/i);
   assert.match(deploymentStatus, /UNQUALIFIED/i);
 });
