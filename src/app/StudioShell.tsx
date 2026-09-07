@@ -10,6 +10,11 @@ import {
   type ExportOutput,
 } from '../features/export/batchExportApi';
 import {
+  getSeparationStatus,
+  prepareSeparation,
+  type SeparationStateDto,
+} from '../features/export/separationApi';
+import {
   getProjectLanguages,
   getTranslationVariants,
   patchProjectLanguages,
@@ -95,6 +100,8 @@ export function StudioShell(props: Props) {
   const [processingLanguage, setProcessingLanguage] = useState<TargetLanguage | null>(null);
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null);
   const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilitiesDto | null>(null);
+  const [separationState, setSeparationState] = useState<SeparationStateDto | null>(null);
+  const [separationBusy, setSeparationBusy] = useState(false);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
   const [audioMode, setAudioMode] = useState<DubbedAudioMode>('dubbed_only');
   const [exportBusy, setExportBusy] = useState(false);
@@ -155,6 +162,31 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject, projectId]);
+
+  useEffect(() => {
+    if (!isCloudProject) return;
+    let active = true;
+    getSeparationStatus(projectId).then((next) => {
+      if (active) setSeparationState(next);
+    }).catch(() => {
+      if (active) setSeparationState(null);
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
+
+  useEffect(() => {
+    if (!isCloudProject || separationState?.status !== 'processing') return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      getSeparationStatus(projectId).then((next) => {
+        if (active) setSeparationState(next);
+      }).catch(() => undefined);
+    }, 2000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isCloudProject, projectId, separationState?.status]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
@@ -276,6 +308,25 @@ export function StudioShell(props: Props) {
       : [...current, language]);
   };
 
+  const prepareBackground = async () => {
+    if (!isCloudProject || separationBusy) return;
+    setSeparationBusy(true);
+    setExportError('');
+    try {
+      const next = await prepareSeparation(projectId, separationState?.status === 'failed');
+      setSeparationState(next);
+    } catch (error) {
+      setExportError(message(error, 'Không thể chuẩn bị background audio.'));
+      try {
+        setSeparationState(await getSeparationStatus(projectId));
+      } catch {
+        // Preserve the actionable prepare error when status refresh also fails.
+      }
+    } finally {
+      setSeparationBusy(false);
+    }
+  };
+
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const exportCurrent = async () => {
@@ -355,12 +406,15 @@ export function StudioShell(props: Props) {
                 audioMode={audioMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
+                separationState={separationState}
+                separationBusy={separationBusy}
                 busy={exportBusy}
                 results={exportResults}
                 error={exportError}
                 onOutputChange={setExportOutput}
                 onAudioModeChange={setAudioMode}
                 onToggleLanguage={toggleSelected}
+                onPrepareSeparation={prepareBackground}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}
                 onRetryFailed={retryFailed}
