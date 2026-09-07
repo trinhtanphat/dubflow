@@ -357,6 +357,10 @@ export class StreamMediaService {
     if (!download.ok || !download.body) {
       throw new Error(`STREAM_DOWNLOAD_FAILED: Stream MP4 download failed (${download.status}).`);
     }
+    const contentType = download.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+    if (!contentType.startsWith('video/')) {
+      throw new Error('STREAM_DOWNLOAD_FAILED: Stream MP4 download returned non-video content.');
+    }
     await this.deps.bucket.put(input.exportObjectKey, download.body, {
       httpMetadata: { contentType: 'video/mp4' },
     });
