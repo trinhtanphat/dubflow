@@ -18,15 +18,16 @@ import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
   async run(event: WorkflowEvent<ExportWorkflowParams>, step: WorkflowStep) {
-    if (!this.env.STREAM) {
+    const subtitleOnly = event.payload.output === 'subtitles';
+    if (!subtitleOnly && !this.env.STREAM) {
       throw new Error('STREAM_BINDING_UNAVAILABLE: Cloudflare Stream binding is unavailable.');
     }
 
     const projects = new ProjectRepository(this.env.DB);
     const soundtrack = new PcmSoundtrackService(this.env.MEDIA);
-    const publisher = new StreamMediaService({
+    const publisher = subtitleOnly ? undefined : new StreamMediaService({
       projects,
-      stream: this.env.STREAM,
+      stream: this.env.STREAM!,
       bucket: this.env.MEDIA,
       publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
       signingSecret: this.env.STREAM_SOURCE_SIGNING_SECRET ?? '',
