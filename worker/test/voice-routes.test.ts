@@ -37,6 +37,23 @@ describe('voice HTTP routes', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-key');
   });
 
+  it('reports the actual ElevenLabs export provider when runtime voice configuration is missing', async () => {
+    const routes = createVoiceRoutes(async () => new Response('audio'));
+    const response = await routes.fetch(new Request('https://yupvox.test/capabilities'), voiceEnv({
+      ELEVENLABS_API_KEY: undefined,
+      ELEVENLABS_DEFAULT_VOICE_ID: undefined,
+    }));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      provider: 'elevenlabs',
+      configured: false,
+      languages: ['vi'],
+      cloning: false,
+      preview: false,
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: false },
+    });
+  });
+
   it('returns generated audio and emits sanitized provider success telemetry', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const points: AnalyticsPoint[] = [];
