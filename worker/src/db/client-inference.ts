@@ -77,14 +77,16 @@ export class ClientInferenceRepository {
       throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project source exceeds the browser-local inference size boundary.');
     }
     const currentDuration = project.duration_ms === null ? null : Number(project.duration_ms);
-    if (!Number.isFinite(currentDuration) || currentDuration === null || currentDuration <= 0 || currentDuration > LOCAL_INFERENCE_MAX_DURATION_MS) {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project source duration is unavailable or exceeds the browser-local inference duration boundary.');
-    }
-    if (Math.abs(currentDuration - input.durationMs) > LOCAL_INFERENCE_DURATION_TOLERANCE_MS) {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_SOURCE_CONFLICT', 'Project source duration changed before commit.', {
-        sourceGeneration: currentGeneration,
-        sourceObjectKey: currentObjectKey,
-      });
+    if (currentDuration !== null) {
+      if (!Number.isFinite(currentDuration) || currentDuration <= 0 || currentDuration > LOCAL_INFERENCE_MAX_DURATION_MS) {
+        throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project source duration exceeds the browser-local inference duration boundary.');
+      }
+      if (Math.abs(currentDuration - input.durationMs) > LOCAL_INFERENCE_DURATION_TOLERANCE_MS) {
+        throw new ClientInferenceCommitError('LOCAL_INFERENCE_SOURCE_CONFLICT', 'Project source duration changed before commit.', {
+          sourceGeneration: currentGeneration,
+          sourceObjectKey: currentObjectKey,
+        });
+      }
     }
     if (project.status === 'processing') {
       throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project is currently processing.');
@@ -217,7 +219,7 @@ export class ClientInferenceRepository {
       projectId,
       sourceGeneration: currentGeneration,
       sourceObjectKey: currentObjectKey,
-      durationMs: currentDuration,
+      durationMs: currentDuration ?? input.durationMs,
       speaker: { id: speakerId, label: 'Browser local', displayName: 'Speaker 1' },
       segments: input.segments.map((segment) => ({
         ...segment,
