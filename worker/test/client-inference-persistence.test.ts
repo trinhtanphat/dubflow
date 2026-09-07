@@ -156,23 +156,28 @@ describe('browser-local client inference atomic persistence', () => {
 
       expect(h.db.prepare(`SELECT id FROM segments WHERE project_id = 'p1' ORDER BY start_ms`).all())
         .toEqual([{ id: 's1' }, { id: 's2' }]);
+      expect(h.db.prepare(`SELECT id FROM speakers WHERE project_id = 'p1' ORDER BY id`).all())
+        .toEqual([{ id: 'browser-local:p1:speaker-1' }]);
       expect(h.db.prepare(`SELECT DISTINCT speaker_id FROM segments WHERE project_id = 'p1'`).all())
         .toEqual([{ speaker_id: 'browser-local:p1:speaker-1' }]);
-      expect(h.db.prepare(`SELECT translated_text, translation_engine, translation_status, voice_status, dubbed_object_key FROM segments WHERE id = 's1'`).get())
+      expect(h.db.prepare(`SELECT translated_text, translation_engine, translation_status, voice_status, dubbed_object_key, translation_context_revision FROM segments WHERE id = 's1'`).get())
         .toEqual({
           translated_text: 'Xin chào',
           translation_engine: 'browser-opus-mt',
           translation_status: 'completed',
           voice_status: 'pending',
           dubbed_object_key: null,
+          translation_context_revision: 1,
         });
-      expect(h.db.prepare(`SELECT translated_text, translation_engine, translation_status, voice_status, dubbed_object_key FROM segment_translations WHERE segment_id = 's1' AND target_language = 'vi'`).get())
+      expect(h.db.prepare(`SELECT translated_text, translation_engine, translation_status, voice_status, dubbed_object_key, translation_context_revision, context_revision FROM segment_translations WHERE segment_id = 's1' AND target_language = 'vi'`).get())
         .toEqual({
           translated_text: 'Xin chào',
           translation_engine: 'browser-opus-mt',
           translation_status: 'completed',
           voice_status: 'pending',
           dubbed_object_key: null,
+          translation_context_revision: 1,
+          context_revision: 1,
         });
       expect(h.db.prepare(`SELECT status FROM project_exports WHERE id = 'export-old'`).get())
         .toEqual({ status: 'invalidated' });
@@ -206,6 +211,69 @@ describe('browser-local client inference atomic persistence', () => {
         .toEqual([{ id: 'old-segment' }]);
     } finally {
       h.db.close();
+    }
+  });
+
+  it('rejects busy project, busy vi target and busy exports with zero writes', async () => {
+    const projectBusy = harness();
+    try {
+      projectBusy.db.exec(`UPDATE projects SET status = 'processing' WHERE id = 'p1'`);
+      await expect(projectBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+      });
+      expect(projectBusy.d1.batchCalls).toBe(0);
+    } finally {
+      projectBusy.db.close();
+    }
+
+    const targetBusy = harness();
+    try {
+      targetBusy.db.exec(`UPDATE project_target_languages SET status = 'translating' WHERE project_id = 'p1' AND target_language = 'vi'`);
+      await expect(targetBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+      });
+      expect(targetBusy.d1.batchCalls).toBe(0);
+    } finally {
+      targetBusy.db.close();
+    }
+
+    const exportBusy = harness();
+    try {
+      exportBusy.db.exec(`
+        INSERT INTO project_exports (
+          id, project_id, target_language, output, status, generation
+        ) VALUES ('export-busy', 'p1', 'vi', 'dubbed', 'pending', 4)
+      `);
+      await expect(exportBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+      });
+      expect(exportBusy.d1.batchCalls).toBe(0);
+    } finally {
+      exportBusy.db.close();
+    }
+  });
+
+  it('requires an enabled vi target and preserves canonical duration inside tolerance', async () => {
+    const missingTarget = harness();
+    try {
+      missingTarget.db.exec(`DELETE FROM project_target_languages WHERE project_id = 'p1' AND target_language = 'vi'`);
+      await expect(missingTarget.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
+        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+      });
+      expect(missingTarget.d1.batchCalls).toBe(0);
+    } finally {
+      missingTarget.db.close();
+    }
+
+    const duration = harness();
+    try {
+      const withinTolerance = { ...input(), durationMs: 4_500 };
+      const result = await duration.repository.commit('p1', 'u1', withinTolerance);
+      expect(result.durationMs).toBe(4_000);
+      expect(duration.db.prepare(`SELECT duration_ms FROM projects WHERE id = 'p1'`).get())
+        .toEqual({ duration_ms: 4000 });
+    } finally {
+      duration.db.close();
     }
   });
 
