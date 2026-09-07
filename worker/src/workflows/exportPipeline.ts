@@ -1,6 +1,8 @@
+import type { VisualMode } from '../domain/visual-mode';
 import { runExportPipeline as runLegacyExportPipeline } from './legacyExportPipeline';
 import type {
   ExportPipelineDeps as LegacyExportPipelineDeps,
+  ExportWorkflowParams as LegacyExportWorkflowParams,
   ExportWorkflowStepLike,
 } from './legacyExportPipeline';
 import {
@@ -11,23 +13,34 @@ import {
 
 export type {
   ExportClip,
-  ExportWorkflowParams,
   ExportWorkflowStepLike,
 } from './legacyExportPipeline';
+
+export type ExportWorkflowParams = LegacyExportWorkflowParams & {
+  visualMode?: VisualMode;
+};
 
 export type ExportPipelineDeps = Omit<LegacyExportPipelineDeps, 'media'> & {
   media?: LegacyExportPipelineDeps['media'];
   soundtrack?: ZeroContainerExportDeps['soundtrack'];
   publisher?: ZeroContainerExportDeps['publisher'];
+  providerMediaGrants?: ZeroContainerExportDeps['providerMediaGrants'];
+  lipSync?: ZeroContainerExportDeps['lipSync'];
+  makeProviderMediaToken?: ZeroContainerExportDeps['makeProviderMediaToken'];
+  providerMediaOrigin?: ZeroContainerExportDeps['providerMediaOrigin'];
+  fetchImpl?: ZeroContainerExportDeps['fetchImpl'];
 };
 
-type RunExportParams = Parameters<typeof runLegacyExportPipeline>[0];
+type RunExportParams = Parameters<typeof runLegacyExportPipeline>[0] & {
+  visualMode?: VisualMode;
+};
 
 type CandidateParams = RunExportParams & {
   exportId?: unknown;
   targetLanguage?: unknown;
   output?: unknown;
   audioMode?: unknown;
+  visualMode?: unknown;
 };
 
 function candidate(input: RunExportParams): CandidateParams {
@@ -39,7 +52,8 @@ function hasModernExportFields(input: RunExportParams): boolean {
   return value.exportId !== undefined
     || value.targetLanguage !== undefined
     || value.output !== undefined
-    || value.audioMode !== undefined;
+    || value.audioMode !== undefined
+    || value.visualMode !== undefined;
 }
 
 function shouldUseZeroContainer(input: RunExportParams, deps: ExportPipelineDeps): boolean {
