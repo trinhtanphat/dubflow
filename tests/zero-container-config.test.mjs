@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, exportWorkflow, exportDispatcher, studioShell] = await Promise.all([
+const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, exportWorkflow, exportDispatcher, studioShell, productionFixtureWorkflow] = await Promise.all([
   read('wrangler.jsonc'),
   read('package.json'),
   read('worker/src/index.ts'),
@@ -15,6 +15,7 @@ const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, expor
   read('worker/src/workflows/ExportWorkflow.ts'),
   read('worker/src/workflows/exportPipeline.ts'),
   read('src/app/StudioShellBase.tsx'),
+  read('.github/workflows/production-media-fixture.yml'),
 ]);
 const wrangler = JSON.parse(wranglerText);
 const pkg = JSON.parse(packageText);
@@ -68,5 +69,16 @@ test('legacy FFmpeg Container implementation files are deleted', () => {
     'containers/ffmpeg/server.mjs',
   ]) {
     assert.equal(existsSync(new URL(path, root)), false, `${path} must be deleted`);
+  }
+});
+
+test('production fixture reruns when direct ASR runtime wiring changes', () => {
+  for (const path of [
+    "worker/src/services/asr/workers-ai.ts",
+    "worker/src/services/asr/types.ts",
+    "worker/src/workflows/pipeline.ts",
+    "worker/src/workflows/DubbingWorkflow.ts",
+  ]) {
+    assert.match(productionFixtureWorkflow, new RegExp(`- ['\"]${path.replaceAll('/', '\\/')}['\"]`));
   }
 });
