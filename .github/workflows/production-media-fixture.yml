@@ -71,3 +71,17 @@ jobs:
           audio_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$RUNNER_TEMP/production-r2-output.mp4")"
           test "$video_codec" = "h264"
           test "$audio_codec" = "aac"
+
+          ffmpeg -hide_banner -loglevel error -y \
+            -i "$RUNNER_TEMP/production-r2-fixture.mp4" \
+            -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb -f h264 \
+            "$RUNNER_TEMP/production-r2-source-video.h264"
+          ffmpeg -hide_banner -loglevel error -y \
+            -i "$RUNNER_TEMP/production-r2-output.mp4" \
+            -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb -f h264 \
+            "$RUNNER_TEMP/production-r2-output-video.h264"
+          test -s "$RUNNER_TEMP/production-r2-source-video.h264"
+          test -s "$RUNNER_TEMP/production-r2-output-video.h264"
+          source_video_sha="$(sha256sum "$RUNNER_TEMP/production-r2-source-video.h264" | awk '{print $1}')"
+          output_video_sha="$(sha256sum "$RUNNER_TEMP/production-r2-output-video.h264" | awk '{print $1}')"
+          test "$source_video_sha" = "$output_video_sha"
