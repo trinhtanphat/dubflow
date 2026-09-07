@@ -20,6 +20,7 @@ export type ExportCapabilitiesDto = {
   visualLipSync: {
     available: boolean;
     provider: string | null;
+    qualification: SeparationQualification;
   };
 };
 
