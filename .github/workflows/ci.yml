@@ -35,12 +35,14 @@ jobs:
       - name: Verify source and production build
         run: npm run verify
 
-      - name: Wrangler source and production dry-runs
+      - name: Wrangler dry-run
+        run: npx wrangler deploy --dry-run
+
+      - name: Wrangler generated production dry-run
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler deploy --dry-run
-          node --input-type=module -e "import('./scripts/cloudflare-workers-build-deploy.mjs').then(({ prepareWorkersBuildConfig }) => prepareWorkersBuildConfig())"
+          node --input-type=module -e "import('./scripts/cloudflare-workers-build-config.mjs').then(({ prepareWorkersBuildConfig }) => prepareWorkersBuildConfig())"
           trap 'rm -f .wrangler-production.json' EXIT
           npx wrangler deploy --dry-run --config .wrangler-production.json
 
