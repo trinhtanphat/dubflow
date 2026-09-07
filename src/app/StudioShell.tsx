@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
   fetchExportCapabilities,
@@ -30,6 +30,13 @@ import {
   recoverProjectLanguagesConflict,
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
+import { BrowserPiperClient, BrowserPiperError, browserPiperAvailable } from '../features/voice/browserPiperClient';
+import {
+  isExactVietnameseVoiceCached,
+  preloadVietnameseVoices,
+  type ClientVoiceProgress,
+} from '../features/voice/clientVoicePreload';
+import { uploadVietnameseVoicePcm } from '../features/voice/clientVoiceApi';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
 import {
   Phase4CStudioProvider,
@@ -46,6 +53,7 @@ export {
 export { composeTargetSegment } from './phase4cStudioContext';
 
 type Props = ComponentProps<typeof BaseStudioShell>;
+type ClientVoiceState = 'available' | 'preparing' | 'unavailable';
 
 const FALLBACK_CONFIG: ProjectLanguageConfigDto = {
   revision: 1,
@@ -75,6 +83,10 @@ function replaceVariant(
   return rows.map((row) => row.segmentId === segmentId ? { ...row, translation } : row);
 }
 
+function vietnameseClientVoiceCacheComplete(projectId: string, rows: TranslationVariantDto[]): boolean {
+  return rows.length > 0 && rows.every((row) => isExactVietnameseVoiceCached(projectId, row));
+}
+
 function withRequestedTreatment(
   result: ExportLaunchDto,
   output: ExportOutput,
@@ -82,6 +94,18 @@ function withRequestedTreatment(
   visualMode: VisualMode,
 ): ExportLaunchDto {
   return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
+}
+
+function clientVoiceProgressLabel(progress: ClientVoiceProgress): string {
+  if (progress.stage === 'loading-model') {
+    if (progress.loaded !== undefined && progress.total && progress.total > 0) {
+      return `Đang tải giọng Việt: ${Math.min(100, Math.round(progress.loaded * 100 / progress.total))}%`;
+    }
+    return 'Đang tải giọng Việt cục bộ…';
+  }
+  if (progress.stage === 'synthesizing') return `Đang tạo giọng Việt ${progress.index}/${progress.total}`;
+  if (progress.stage === 'uploading') return `Đang lưu giọng Việt ${progress.index}/${progress.total}`;
+  return 'Đang xác minh voice cache tiếng Việt…';
 }
 
 export function acceptPolledExportAttempt(
@@ -125,6 +149,17 @@ export function StudioShell(props: Props) {
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportAttempts, setExportAttempts] = useState<Partial<Record<TargetLanguage, ExportAttemptDto>>>({});
   const [exportError, setExportError] = useState('');
+  const [clientVoiceState, setClientVoiceState] = useState<ClientVoiceState>(() => browserPiperAvailable() ? 'available' : 'unavailable');
+  const [clientVoiceCached, setClientVoiceCached] = useState(false);
+  const [clientVoiceStatus, setClientVoiceStatus] = useState('');
+  const piperClientRef = useRef<BrowserPiperClient | null>(null);
+
+  useEffect(() => {
+    return () => {
+      piperClientRef.current?.dispose();
+      piperClientRef.current = null;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (!isCloudProject) return;
@@ -146,13 +181,31 @@ export function StudioShell(props: Props) {
   }, [isCloudProject, projectId]);
 
   useEffect(() => {
+    if (!isCloudProject) {
+      setClientVoiceCached(false);
+      return;
+    }
+    let active = true;
+    getTranslationVariants(projectId, 'vi').then((rows) => {
+      if (active) setClientVoiceCached(vietnameseClientVoiceCacheComplete(projectId, rows));
+    }).catch(() => {
+      if (active) setClientVoiceCached(false);
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
+
+  useEffect(() => {
     if (!isCloudProject || currentLanguage === 'source') {
       setTargetSegments([]);
       return;
     }
     let active = true;
     getTranslationVariants(projectId, currentLanguage).then((result) => {
-      if (active) setTargetSegments(result);
+      if (!active) return;
+      setTargetSegments(result);
+      if (currentLanguage === 'vi') {
+        setClientVoiceCached(vietnameseClientVoiceCacheComplete(projectId, result));
+      }
     }).catch((error) => {
       if (active) setLanguageError(message(error, 'Không thể tải bản dịch ngôn ngữ đã chọn.'));
     });
@@ -254,6 +307,7 @@ export function StudioShell(props: Props) {
 
   const editTargetTranslation = (segmentId: string, text: string) => {
     if (!targetLanguage) return;
+    if (targetLanguage === 'vi') setClientVoiceCached(false);
     setTargetConflict('');
     setTargetDrafts((current) => ({ ...current, [`${targetLanguage}:${segmentId}`]: text }));
   };
@@ -270,6 +324,7 @@ export function StudioShell(props: Props) {
     try {
       const result = await patchTranslationVariant(projectId, targetLanguage, segmentId, row.translation.version, text);
       setTargetSegments((current) => replaceVariant(current, segmentId, result));
+      if (targetLanguage === 'vi') setClientVoiceCached(false);
       setTargetDrafts((current) => {
         const next = { ...current };
         delete next[`${targetLanguage}:${segmentId}`];
@@ -279,6 +334,7 @@ export function StudioShell(props: Props) {
     } catch (error) {
       if (error instanceof TranslationVariantConflictError) {
         setTargetSegments((current) => replaceVariant(current, segmentId, error.canonical));
+        if (targetLanguage === 'vi') setClientVoiceCached(false);
         setTargetDrafts((current) => {
           const next = { ...current };
           delete next[`${targetLanguage}:${segmentId}`];
@@ -338,6 +394,7 @@ export function StudioShell(props: Props) {
 
   const runLanguage = async (language: TargetLanguage) => {
     if (processingLanguage) return;
+    if (language === 'vi') setClientVoiceCached(false);
     setProcessingLanguage(language);
     setLanguageError('');
     try {
@@ -372,12 +429,65 @@ export function StudioShell(props: Props) {
 
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
+  const prepareVietnameseClientVoice = async () => {
+    setClientVoiceState('preparing');
+    setClientVoiceStatus('Đang chuẩn bị giọng Việt cục bộ…');
+    try {
+      const initial = await getTranslationVariants(projectId, 'vi');
+      if (vietnameseClientVoiceCacheComplete(projectId, initial)) {
+        if (currentLanguage === 'vi') setTargetSegments(initial);
+        setClientVoiceCached(true);
+        setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+        setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
+        return initial;
+      }
+      if (!browserPiperAvailable()) {
+        throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+      }
+      let useInitial = true;
+      const verified = await preloadVietnameseVoices(projectId, {
+        fetchVariants: async (id) => {
+          if (useInitial) {
+            useInitial = false;
+            return initial;
+          }
+          return getTranslationVariants(id, 'vi');
+        },
+        synthesize: (text, onProgress) => {
+          if (!browserPiperAvailable()) {
+            throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+          }
+          if (!piperClientRef.current) piperClientRef.current = new BrowserPiperClient();
+          return piperClientRef.current.synthesize(text, onProgress);
+        },
+        upload: uploadVietnameseVoicePcm,
+      }, (progress) => setClientVoiceStatus(clientVoiceProgressLabel(progress)));
+      if (currentLanguage === 'vi') setTargetSegments(verified);
+      setClientVoiceCached(true);
+      setClientVoiceState('available');
+      setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
+      return verified;
+    } catch (error) {
+      setClientVoiceCached(false);
+      if (error instanceof BrowserPiperError && error.code === 'PIPER_INIT_FAILED') {
+        piperClientRef.current?.dispose();
+        piperClientRef.current = null;
+        setClientVoiceState('unavailable');
+      } else {
+        setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+      }
+      setClientVoiceStatus('');
+      throw error;
+    }
+  };
+
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      if (exportOutput === 'dubbed' && exportTarget === 'vi') await prepareVietnameseClientVoice();
       const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, exportOutput, requestedMode, requestedVisualMode);
       clearAttempt(tagged.targetLanguage);
@@ -395,6 +505,7 @@ export function StudioShell(props: Props) {
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      if (exportOutput === 'dubbed' && selectedLanguages.includes('vi')) await prepareVietnameseClientVoice();
       const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode);
       const tagged = result.exports.map((item) => withRequestedTreatment(item, exportOutput, requestedMode, requestedVisualMode));
       setExportAttempts((current) => {
@@ -418,6 +529,7 @@ export function StudioShell(props: Props) {
     const requestedMode = requestedOutput === 'dubbed' ? (prior?.audioMode ?? audioMode) : 'dubbed_only';
     const requestedVisualMode = requestedOutput === 'dubbed' ? (prior?.visualMode ?? visualMode) : 'standard';
     try {
+      if (requestedOutput === 'dubbed' && language === 'vi') await prepareVietnameseClientVoice();
       const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, requestedOutput, requestedMode, requestedVisualMode);
       clearAttempt(language);
@@ -462,7 +574,10 @@ export function StudioShell(props: Props) {
                 visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
-                busy={exportBusy}
+                clientVoiceAvailable={clientVoiceState !== 'unavailable'}
+                clientVoiceCached={clientVoiceCached}
+                clientVoiceStatus={clientVoiceStatus}
+                busy={exportBusy || clientVoiceState === 'preparing'}
                 results={exportResults}
                 attempts={exportAttempts}
                 error={exportError}

@@ -17,7 +17,13 @@ import './batch-export.css';
 export function dubbedAvailability(
   capabilities: VoiceCapabilities | null,
   targetLanguage: TargetLanguage,
+  clientVoiceAvailable = false,
+  clientVoiceCached = false,
 ): { allowed: boolean; reason: string } {
+  if (targetLanguage === 'vi') {
+    if (clientVoiceAvailable || clientVoiceCached) return { allowed: true, reason: '' };
+    return { allowed: false, reason: 'Giọng Việt cục bộ chưa khả dụng trong trình duyệt này.' };
+  }
   if (!capabilities?.configured) return { allowed: false, reason: 'Provider giọng chưa được cấu hình.' };
   if (capabilities.languages === 'unknown') return { allowed: false, reason: 'Khả năng giọng cho ngôn ngữ này chưa xác nhận (unqualified).' };
   if (!capabilities.languages.includes(targetLanguage)) return { allowed: false, reason: 'Provider giọng không hỗ trợ ngôn ngữ này.' };
@@ -81,6 +87,9 @@ type Props = {
   visualMode?: VisualMode;
   exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
+  clientVoiceAvailable?: boolean;
+  clientVoiceCached?: boolean;
+  clientVoiceStatus?: string;
   busy: boolean;
   results: ExportLaunchDto[];
   attempts?: Partial<Record<TargetLanguage, AttemptView>>;
@@ -132,6 +141,9 @@ export function BatchExportPanelView({
   visualMode = 'standard',
   exportCapabilities,
   voiceCapabilities,
+  clientVoiceAvailable = false,
+  clientVoiceCached = false,
+  clientVoiceStatus = '',
   busy,
   results,
   attempts = {},
@@ -144,7 +156,7 @@ export function BatchExportPanelView({
   onBatchExport,
   onRetryFailed,
 }: Props) {
-  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
+  const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage, clientVoiceAvailable, clientVoiceCached);
   const separated = separatedBackgroundAvailability(exportCapabilities);
   const visual = visualLipSyncAvailability(exportCapabilities);
   const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
@@ -153,7 +165,12 @@ export function BatchExportPanelView({
   const selectedBlocked = output === 'dubbed' && (
     treatmentBlocked
     || visualBlocked
-    || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
+    || selectedLanguages.some((language) => !dubbedAvailability(
+      voiceCapabilities,
+      language,
+      clientVoiceAvailable,
+      language === 'vi' && clientVoiceCached,
+    ).allowed)
   );
   const allSucceeded = results.length > 0 && results.every((result) => isCompleted(result, attempts[result.targetLanguage]));
 
@@ -197,6 +214,7 @@ export function BatchExportPanelView({
             </label>
             {!visual.allowed && <p className="batch-export__capability">{visual.reason}</p>}
           </div>
+          {clientVoiceStatus && <p className="batch-export__capability" aria-live="polite">{clientVoiceStatus}</p>}
         </>
       )}
       <div className="batch-export__languages">
