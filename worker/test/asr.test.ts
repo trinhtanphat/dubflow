@@ -20,7 +20,12 @@ describe('Workers AI ASR', () => {
     const result = await provider.transcribe(audio, { sourceLanguage: 'zh' });
     expect(ai.calls[0]).toMatchObject({
       model: '@cf/openai/whisper-large-v3-turbo',
-      input: { audio, task: 'transcribe', language: 'zh', vad_filter: true },
+      input: {
+        audio: { body: audio, contentType: 'audio/wav' },
+        task: 'transcribe',
+        language: 'zh',
+        vad_filter: true,
+      },
     });
     expect(result.segments).toEqual([{ startMs: 500, endMs: 1250, text: 'hello' }]);
   });
