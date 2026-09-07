@@ -9,7 +9,7 @@ export type ClientVoiceUploadDto = {
   objectKey: string | null;
 };
 
-export function uploadVietnameseVoicePcm(
+export async function uploadVietnameseVoicePcm(
   projectId: string,
   segmentId: string,
   version: number,
