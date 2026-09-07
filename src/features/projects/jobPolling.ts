@@ -1,4 +1,4 @@
-import { getProjectJob, type CloudJob } from './jobApi';
+import { getJob, type CloudJob } from './jobApi';
 
 export const JOB_POLL_INTERVAL_MS = 2000;
 
@@ -10,7 +10,7 @@ const TERMINAL_STATUSES = new Set<CloudJob['status']>([
 ]);
 
 export type JobPollingOptions = {
-  getJob?: typeof getProjectJob;
+  getJob?: typeof getJob;
   sleep?: (ms: number) => Promise<void>;
   onJob?: (job: CloudJob) => void;
 };
@@ -45,7 +45,7 @@ export async function pollJobUntilTerminal(
   options: JobPollingOptions = {},
   signal?: AbortSignal,
 ): Promise<CloudJob> {
-  const readJob = options.getJob ?? getProjectJob;
+  const readJob = options.getJob ?? getJob;
   const wait = options.sleep ?? ((ms: number) => defaultSleep(ms, signal));
 
   for (;;) {
