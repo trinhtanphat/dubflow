@@ -9,8 +9,20 @@ export type AsrCapabilities = {
   speakerIdentityScope: 'chunk' | 'none';
 };
 
-export function asrCapabilities(deepgramApiKey?: string): AsrCapabilities {
+function qualifiedDeepgramApiKey(
+  deepgramApiKey?: string,
+  paidDeepgramAsrEnabled?: string,
+): string | undefined {
+  if (paidDeepgramAsrEnabled?.trim().toLowerCase() !== 'true') return undefined;
   const apiKey = deepgramApiKey?.trim();
+  return apiKey || undefined;
+}
+
+export function asrCapabilities(
+  deepgramApiKey?: string,
+  paidDeepgramAsrEnabled?: string,
+): AsrCapabilities {
+  const apiKey = qualifiedDeepgramApiKey(deepgramApiKey, paidDeepgramAsrEnabled);
   return apiKey
     ? {
       provider: 'deepgram-nova-3',
@@ -24,8 +36,12 @@ export function asrCapabilities(deepgramApiKey?: string): AsrCapabilities {
     };
 }
 
-export function createAsrProvider(ai: AiBinding, deepgramApiKey?: string): AsrProvider {
-  const apiKey = deepgramApiKey?.trim();
+export function createAsrProvider(
+  ai: AiBinding,
+  deepgramApiKey?: string,
+  paidDeepgramAsrEnabled?: string,
+): AsrProvider {
+  const apiKey = qualifiedDeepgramApiKey(deepgramApiKey, paidDeepgramAsrEnabled);
   return apiKey
     ? new DeepgramNova3AsrProvider(apiKey)
     : new WorkersAIAsrProvider(ai);
