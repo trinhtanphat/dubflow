@@ -112,7 +112,7 @@ export class PcmTimelineAssembler {
       if (endFrame <= startFrame) {
         throw new Error(`PCM_TIMELINE_INVALID: clip ${index} end must be after start.`);
       }
-      if (startFrame < 0 || endFrame > totalFrames) {
+      if (endFrame > totalFrames) {
         throw new Error(`PCM_TIMELINE_INVALID: clip ${index} is outside the project timeline.`);
       }
       this.frameCount(clip.pcm.byteLength);
@@ -134,6 +134,21 @@ export class PcmTimelineAssembler {
     let activeClip: Uint8Array | null = null;
     let activeClipOffset = 0;
 
+    const enqueueActive = (controller: ReadableStreamDefaultController<Uint8Array>): void => {
+      if (!activeClip) throw new Error('PCM_TIMELINE_INVALID: active clip state is missing.');
+      const chunkBytes = this.chunkSamples * this.blockAlign;
+      const end = Math.min(activeClip.byteLength, activeClipOffset + chunkBytes);
+      controller.enqueue(activeClip.subarray(activeClipOffset, end));
+      activeClipOffset = end;
+      if (activeClipOffset >= activeClip.byteLength) {
+        const clip = normalized[clipIndex];
+        cursorFrame = clip.endFrame;
+        clipIndex += 1;
+        activeClip = null;
+        activeClipOffset = 0;
+      }
+    };
+
     return new ReadableStream<Uint8Array>({
       pull: (controller) => {
         if (headerPending) {
@@ -143,17 +158,7 @@ export class PcmTimelineAssembler {
         }
 
         if (activeClip) {
-          const chunkBytes = this.chunkSamples * this.blockAlign;
-          const end = Math.min(activeClip.byteLength, activeClipOffset + chunkBytes);
-          controller.enqueue(activeClip.subarray(activeClipOffset, end));
-          activeClipOffset = end;
-          if (activeClipOffset >= activeClip.byteLength) {
-            const clip = normalized[clipIndex];
-            cursorFrame = clip.endFrame;
-            clipIndex += 1;
-            activeClip = null;
-            activeClipOffset = 0;
-          }
+          enqueueActive(controller);
           return;
         }
 
@@ -168,6 +173,7 @@ export class PcmTimelineAssembler {
         if (nextClip && cursorFrame === nextClip.startFrame) {
           activeClip = new Uint8Array(this.fitFrames(nextClip.pcm, nextClip.endFrame - nextClip.startFrame));
           activeClipOffset = 0;
+          enqueueActive(controller);
           return;
         }
 
