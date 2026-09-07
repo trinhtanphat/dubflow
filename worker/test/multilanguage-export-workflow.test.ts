@@ -247,36 +247,23 @@ describe('Phase 4D hybrid audio export workflow', () => {
     );
   });
 
-  it('creates and accounts for one qualified current-generation background stem before rendering', async () => {
+  it('requires explicit preparation and never creates or bills a missing background stem during export', async () => {
     const h = harness();
-    await runExportPipeline({ ...jaDubbed, audioMode: 'separated_background' } as never, h.deps as never, step() as never);
+
+    await expect(runExportPipeline(
+      { ...jaDubbed, audioMode: 'separated_background' } as never,
+      h.deps as never,
+      step() as never,
+    )).rejects.toMatchObject({ code: 'DIALOGUE_SEPARATION_UNAVAILABLE' });
 
     expect(h.deps.separation.capabilities).toHaveBeenCalledTimes(1);
     expect(h.deps.stems.latestCompleted).toHaveBeenCalledWith('p1', 'dev-user', 3, 'background', 'qualified-provider');
-    expect(h.deps.stems.begin).toHaveBeenCalledWith('p1', 'dev-user', 3, 'background', 'qualified-provider', null);
-    expect(h.deps.separation.separate).toHaveBeenCalledWith({
-      projectId: 'p1', sourceObjectKey: 'projects/p1/source/video.mp4', sourceGeneration: 3, durationMs: 10_000,
-    });
-    expect(h.deps.stems.complete).toHaveBeenCalledWith(
-      'p1', 'stem-pending-1', 'dev-user', 'projects/p1/stems/3/qualified-provider/background.wav', 'v1',
-    );
-    expect(h.usageEvents.filter((event) => event.kind === ('dialogue_separation_second' as never))).toEqual([
-      expect.objectContaining({
-        phase: 'started', units: 10, provider: 'qualified-provider', operationKey: h.separationOperationKey,
-      }),
-      expect.objectContaining({
-        phase: 'completed', units: 10, provider: 'qualified-provider', operationKey: h.separationOperationKey,
-      }),
-    ]);
-    expect(h.deps.media.renderExport).toHaveBeenCalledWith(
-      'p1',
-      'projects/p1/source/video.mp4',
-      expect.any(Array),
-      {
-        targetLanguage: 'ja', exportId: 'export-ja-1', audioMode: 'separated_background',
-        backgroundObjectKey: 'projects/p1/stems/3/qualified-provider/background.wav',
-      },
-    );
+    expect(h.deps.stems.begin).not.toHaveBeenCalled();
+    expect(h.deps.stems.complete).not.toHaveBeenCalled();
+    expect(h.deps.separation.separate).not.toHaveBeenCalled();
+    expect(h.deps.voice.generate).not.toHaveBeenCalled();
+    expect(h.usageEvents.some((event) => event.kind === ('dialogue_separation_second' as never))).toBe(false);
+    expect(h.deps.media.renderExport).not.toHaveBeenCalled();
   });
 
   it('reuses a completed valid current-generation background stem without provider or new separation usage', async () => {
@@ -319,17 +306,18 @@ describe('Phase 4D hybrid audio export workflow', () => {
     }
   });
 
-  it('does not repeat billable separation when completed accounting exists without a durable reusable stem', async () => {
+  it('does not consult old separation accounting when the durable prepared stem is missing', async () => {
     const h = harness({ completedSeparationAccounting: true });
 
     await expect(runExportPipeline(
       { ...jaDubbed, audioMode: 'separated_background' } as never,
       h.deps as never,
       step() as never,
-    )).rejects.toMatchObject({ code: 'DIALOGUE_SEPARATION_ARTIFACT_INVALID' });
+    )).rejects.toMatchObject({ code: 'DIALOGUE_SEPARATION_UNAVAILABLE' });
 
     expect(h.deps.separation.separate).not.toHaveBeenCalled();
     expect(h.deps.stems.begin).not.toHaveBeenCalled();
+    expect(h.deps.usage.getByOperation).not.toHaveBeenCalledWith(h.separationOperationKey, 'completed');
     expect(h.deps.voice.generate).not.toHaveBeenCalled();
   });
 });
