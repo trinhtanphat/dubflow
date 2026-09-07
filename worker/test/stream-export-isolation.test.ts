@@ -41,7 +41,7 @@ describe('StreamMediaService export render isolation', () => {
     const stream = {
       async upload(url: string, params?: Record<string, unknown>) {
         const parsed = new URL(url);
-        const exportId = parsed.searchParams.get('render');
+        const exportId = parsed.searchParams.get('render')
           ?? (params?.meta as { exportId?: string } | undefined)?.exportId
           ?? '';
         expect(exportId).toMatch(/^e[12]$/);
