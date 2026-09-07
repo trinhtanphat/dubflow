@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
   fetchExportCapabilities,
@@ -30,6 +30,9 @@ import {
   recoverProjectLanguagesConflict,
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
+import { BrowserPiperClient, browserPiperAvailable } from '../features/voice/browserPiperClient';
+import { preloadVietnameseVoices, type ClientVoiceProgress } from '../features/voice/clientVoicePreload';
+import { uploadVietnameseVoicePcm } from '../features/voice/clientVoiceApi';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
 import {
   Phase4CStudioProvider,
@@ -46,6 +49,7 @@ export {
 export { composeTargetSegment } from './phase4cStudioContext';
 
 type Props = ComponentProps<typeof BaseStudioShell>;
+type ClientVoiceState = 'available' | 'preparing' | 'unavailable';
 
 const FALLBACK_CONFIG: ProjectLanguageConfigDto = {
   revision: 1,
@@ -82,6 +86,18 @@ function withRequestedTreatment(
   visualMode: VisualMode,
 ): ExportLaunchDto {
   return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
+}
+
+function clientVoiceProgressLabel(progress: ClientVoiceProgress): string {
+  if (progress.stage === 'loading-model') {
+    if (progress.loaded !== undefined && progress.total && progress.total > 0) {
+      return `Đang tải giọng Việt: ${Math.min(100, Math.round(progress.loaded * 100 / progress.total))}%`;
+    }
+    return 'Đang tải giọng Việt cục bộ…';
+  }
+  if (progress.stage === 'synthesizing') return `Đang tạo giọng Việt ${progress.index}/${progress.total}`;
+  if (progress.stage === 'uploading') return `Đang lưu giọng Việt ${progress.index}/${progress.total}`;
+  return 'Đang xác minh voice cache tiếng Việt…';
 }
 
 export function acceptPolledExportAttempt(
@@ -125,6 +141,16 @@ export function StudioShell(props: Props) {
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportAttempts, setExportAttempts] = useState<Partial<Record<TargetLanguage, ExportAttemptDto>>>({});
   const [exportError, setExportError] = useState('');
+  const [clientVoiceState, setClientVoiceState] = useState<ClientVoiceState>(() => browserPiperAvailable() ? 'available' : 'unavailable');
+  const [clientVoiceStatus, setClientVoiceStatus] = useState('');
+  const piperClientRef = useRef<BrowserPiperClient | null>(null);
+
+  useEffect(() => {
+    return () => {
+      piperClientRef.current?.dispose();
+      piperClientRef.current = null;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (!isCloudProject) return;
@@ -372,12 +398,40 @@ export function StudioShell(props: Props) {
 
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
+  const prepareVietnameseClientVoice = async () => {
+    if (!browserPiperAvailable()) {
+      setClientVoiceState('unavailable');
+      throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+    }
+    setClientVoiceState('preparing');
+    setClientVoiceStatus('Đang chuẩn bị giọng Việt cục bộ…');
+    try {
+      const verified = await preloadVietnameseVoices(projectId, {
+        fetchVariants: (id) => getTranslationVariants(id, 'vi'),
+        synthesize: (text, onProgress) => {
+          if (!piperClientRef.current) piperClientRef.current = new BrowserPiperClient();
+          return piperClientRef.current.synthesize(text, onProgress);
+        },
+        upload: uploadVietnameseVoicePcm,
+      }, (progress) => setClientVoiceStatus(clientVoiceProgressLabel(progress)));
+      if (currentLanguage === 'vi') setTargetSegments(verified);
+      setClientVoiceState('available');
+      setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
+      return verified;
+    } catch (error) {
+      setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+      setClientVoiceStatus('');
+      throw error;
+    }
+  };
+
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      if (exportOutput === 'dubbed' && exportTarget === 'vi') await prepareVietnameseClientVoice();
       const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, exportOutput, requestedMode, requestedVisualMode);
       clearAttempt(tagged.targetLanguage);
@@ -395,6 +449,7 @@ export function StudioShell(props: Props) {
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      if (exportOutput === 'dubbed' && selectedLanguages.includes('vi')) await prepareVietnameseClientVoice();
       const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode);
       const tagged = result.exports.map((item) => withRequestedTreatment(item, exportOutput, requestedMode, requestedVisualMode));
       setExportAttempts((current) => {
@@ -418,6 +473,7 @@ export function StudioShell(props: Props) {
     const requestedMode = requestedOutput === 'dubbed' ? (prior?.audioMode ?? audioMode) : 'dubbed_only';
     const requestedVisualMode = requestedOutput === 'dubbed' ? (prior?.visualMode ?? visualMode) : 'standard';
     try {
+      if (requestedOutput === 'dubbed' && language === 'vi') await prepareVietnameseClientVoice();
       const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, requestedOutput, requestedMode, requestedVisualMode);
       clearAttempt(language);
@@ -462,7 +518,9 @@ export function StudioShell(props: Props) {
                 visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
-                busy={exportBusy}
+                clientVoiceAvailable={clientVoiceState !== 'unavailable'}
+                clientVoiceStatus={clientVoiceStatus}
+                busy={exportBusy || clientVoiceState === 'preparing'}
                 results={exportResults}
                 attempts={exportAttempts}
                 error={exportError}
