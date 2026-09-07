@@ -16,6 +16,8 @@ const inspector = [read('src/features/transcript/ScriptInspector.tsx'), read('sr
 const autosave = read('src/app/segmentAutosaveCoordinator.ts');
 const conflictNotice = read('src/features/transcript/SegmentConflictNotice.tsx');
 const history = read('src/app/editorHistory.ts');
+const app = read('src/app/App.tsx');
+const appRoute = read('src/app/appRoute.ts');
 const appCss = read('src/app/app.css');
 const workflow = read('.github/workflows/ci.yml');
 const wrangler = read('wrangler.jsonc');
@@ -105,4 +107,12 @@ test('V2 acceptance: canonical production hostname remains yupvox.qs3d.site on t
   assert.doesNotMatch(wrangler, /"pattern": "yupvox\.qs3d\.site"/);
   assert.match(gatewayWrangler, /"pattern": "yupvox\.qs3d\.site"/);
   assert.match(gatewayWrangler, /"custom_domain": true/);
+});
+
+test('V2 acceptance: browser URLs expose dashboard and project studio deep links', () => {
+  assert.match(appRoute, /DASHBOARD_PATH\s*=\s*['"]\/projects['"]/);
+  assert.match(appRoute, /\/projects\/\$\{encodeURIComponent\(projectId\)\}/);
+  assert.match(app, /window\.history\.(?:pushState|replaceState)/);
+  assert.match(app, /window\.addEventListener\(['"]popstate['"]/);
+  assert.match(app, /openDashboardProject\(route\.projectId\)/);
 });
