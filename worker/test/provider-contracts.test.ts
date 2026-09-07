@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiBinding } from '../src/cloudflare/ai';
-import type { R2BucketLike } from '../src/cloudflare/r2';
+import type { R2MediaBucketLike } from '../src/cloudflare/r2';
 import type { Env } from '../src/env';
 
 const ai = {
@@ -36,7 +36,10 @@ const bucket = {
       async abort() {},
     };
   },
-} satisfies R2BucketLike;
+  async get(_key: string) {
+    return null;
+  },
+} satisfies R2MediaBucketLike;
 
 const analytics = {
   writeDataPoint(_point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }) {},
@@ -47,25 +50,6 @@ const rateLimit = {
     return { success: true };
   },
 } satisfies Env['RATE_LIMIT_PROCESS'];
-
-const stream = {
-  async upload(_url: string) {
-    return { id: 'stream-video-1', readyToStream: true };
-  },
-  video(id: string) {
-    return {
-      async details() {
-        return { id, readyToStream: true };
-      },
-      downloads: {
-        async generate(_type?: 'default' | 'audio') {},
-        async get() {
-          return { default: { status: 'ready', url: 'https://example.invalid/video.mp4' } };
-        },
-      },
-    };
-  },
-} satisfies NonNullable<Env['STREAM']>;
 
 const dubbingWorkflow = {
   async create(_input: { id?: string; params?: unknown }) {
@@ -86,11 +70,10 @@ const languageTranslationWorkflow = {
 } satisfies Env['LANGUAGE_TRANSLATION_WORKFLOW'];
 
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI, R2, Analytics Engine, rate limits, Stream and Workflow bindings plus provider secrets', () => {
+  it('accepts portable AI, readable R2, Analytics Engine, rate limits and Workflow bindings plus provider secrets', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
-      STREAM: stream,
       AI: ai,
       ASSETS: { fetch: async () => new Response('asset') },
       ANALYTICS: analytics,
@@ -110,7 +93,6 @@ describe('Cloudflare provider contracts', () => {
     } satisfies Env;
 
     expect(env.MEDIA).toBe(bucket);
-    expect(env.STREAM).toBe(stream);
     expect(env.AI).toBe(ai);
     expect(env.ANALYTICS).toBe(analytics);
     expect(env.RATE_LIMIT_PROCESS).toBe(rateLimit);
