@@ -116,3 +116,9 @@ test('V2 acceptance: browser URLs expose dashboard and project studio deep links
   assert.match(app, /window\.addEventListener\(['"]popstate['"]/);
   assert.match(app, /openDashboardProject\(route\.projectId\)/);
 });
+
+test('V2 acceptance: unresolved Studio drafts cannot be bypassed by browser navigation', () => {
+  assert.match(app, /handlePopState[\s\S]*hasUnresolvedDrafts[\s\S]*appRoutePath\(route\)[\s\S]*window\.history\.pushState/);
+  assert.match(app, /window\.addEventListener\(['"]beforeunload['"]/);
+  assert.match(app, /event\.preventDefault\(\)/);
+});
