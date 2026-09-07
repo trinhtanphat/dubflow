@@ -9,6 +9,7 @@ export type CloudProject = {
   sourceLanguage: 'auto' | 'zh' | 'en' | 'ja' | 'ko';
   targetLanguage: 'vi';
   status: CloudProjectStatus;
+  sourceGeneration?: number;
   sourceObjectKey?: string | null;
   exportObjectKey?: string | null;
   durationMs?: number | null;
