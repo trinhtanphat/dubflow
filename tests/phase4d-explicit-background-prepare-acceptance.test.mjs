@@ -19,7 +19,8 @@ const provider = source('worker/src/services/separation/container.ts');
 const workflow = source('worker/src/workflows/SeparationWorkflow.ts');
 const pipeline = source('worker/src/workflows/separationPipeline.ts');
 const exportPipeline = source('worker/src/workflows/exportPipeline.ts');
-const wrangler = source('wrangler.jsonc');
+const wranglerText = source('wrangler.jsonc');
+const wrangler = JSON.parse(wranglerText);
 const deployScript = source('scripts/cloudflare-workers-build-deploy.mjs');
 const deploymentStatus = source('docs/deployment-status.md');
 
@@ -55,7 +56,7 @@ test('Phase 4D separated-background export reuses prepared durable stems and nev
   assert.match(exportPipeline, /DIALOGUE_SEPARATION_(?:UNAVAILABLE|ARTIFACT_INVALID)/);
 });
 
-test('Phase 4D source adapter pins Demucs provenance behind a dedicated durable workflow and admission lane', () => {
+test('Phase 4D keeps the optional Demucs source adapter but does not bind or deploy paid Containers', () => {
   assert.match(providerConfig, /demucs/i);
   assert.match(providerConfig, /htdemucs/);
   assert.match(providerConfig, /8726e21a/);
@@ -69,16 +70,18 @@ test('Phase 4D source adapter pins Demucs provenance behind a dedicated durable 
   assert.match(env, /SEPARATOR_CONTAINER/);
   assert.match(env, /SEPARATION_WORKFLOW/);
   assert.match(limiter, /'separation'/);
-  assert.match(wrangler, /RATE_LIMIT_SEPARATION/);
-  assert.match(wrangler, /"limit":\s*2/);
-  assert.match(wrangler, /SEPARATION_WORKFLOW/);
-  assert.match(wrangler, /SeparatorContainer/);
-  assert.match(wrangler, /SEPARATOR_CONTAINER/);
+  assert.match(wranglerText, /RATE_LIMIT_SEPARATION/);
+  assert.match(wranglerText, /"limit":\s*2/);
+  assert.match(wranglerText, /SEPARATION_WORKFLOW/);
+  assert.equal(wrangler.containers, undefined);
+  assert.equal(wrangler.durable_objects, undefined);
+  assert.equal(wrangler.exports, undefined);
 });
 
-test('Phase 4D production remains fail-closed while Workers Builds strips container deployment', () => {
+test('Phase 4D production remains fail-closed with Containers disabled', () => {
   assert.match(deployScript, /delete\s+source\.containers\b/);
   assert.match(deployScript, /delete\s+source\.durable_objects\b/);
   assert.match(deploymentStatus, /Phase 4D/i);
   assert.match(deploymentStatus, /UNQUALIFIED/i);
+  assert.match(deploymentStatus, /Containers.*disabled|disabled.*Containers/is);
 });
