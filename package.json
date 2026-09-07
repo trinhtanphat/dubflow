@@ -15,8 +15,10 @@
   },
   "dependencies": {
     "@mediabunny/aac-encoder": "1.55.7",
+    "@mintplex-labs/piper-tts-web": "1.0.5",
     "hono": "^4.9.0",
     "mediabunny": "1.55.7",
+    "onnxruntime-web": "1.18.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
