@@ -13,7 +13,14 @@ export type VoiceCapabilities = {
   cloneEnrollment: VoiceCloneEnrollmentCapability;
 };
 
-export type VoiceGenerateInput = { text: string; language: string; voice?: string };
+export type VoiceOutputFormat = 'mp3_44100_128' | 'pcm_24000';
+
+export type VoiceGenerateInput = {
+  text: string;
+  language: string;
+  voice?: string;
+  outputFormat?: VoiceOutputFormat;
+};
 
 export interface VoiceProvider {
   capabilities(): VoiceCapabilities;
