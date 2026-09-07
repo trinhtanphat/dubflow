@@ -16,6 +16,10 @@ const unavailableSeparation = {
     dialogueStem: false,
     qualification: 'unavailable' as const,
   },
+  visualLipSync: {
+    available: false,
+    provider: null,
+  },
 };
 const qualifiedSeparation = {
   duckOriginal: true,
@@ -25,6 +29,10 @@ const qualifiedSeparation = {
     backgroundStem: true,
     dialogueStem: true,
     qualification: 'qualified' as const,
+  },
+  visualLipSync: {
+    available: false,
+    provider: null,
   },
 };
 
