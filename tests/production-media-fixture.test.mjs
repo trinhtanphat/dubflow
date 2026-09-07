@@ -26,6 +26,17 @@ test('production media fixture runner is checked in and remains verification-onl
   assert.doesNotMatch(`${script}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
+test('production media fixture reports sanitized voice capability diagnostics', () => {
+  const script = fs.readFileSync(scriptUrl, 'utf8');
+  assert.match(script, /\/api\/voice\/capabilities/);
+  assert.match(script, /Production voice capability/);
+  assert.match(script, /provider/);
+  assert.match(script, /configured/);
+  assert.match(script, /cloning/);
+  assert.match(script, /preview/);
+  assert.doesNotMatch(script, /console\.log\([^\n]*(API_KEY|SECRET|TOKEN)/);
+});
+
 test('production export admission and workflow share the voice provider selector', () => {
   const exportWorkflow = fs.readFileSync(exportWorkflowUrl, 'utf8');
   const exportRoute = fs.readFileSync(exportRouteUrl, 'utf8');
