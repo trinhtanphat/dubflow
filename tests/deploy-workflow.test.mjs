@@ -34,8 +34,9 @@ test('deployment policy explicitly disables paid Containers and separates the zo
 });
 
 test('CI validates the exact generated Workers Builds backend config before merge', () => {
-  assert.match(ciWorkflow, /cloudflare-workers-build-deploy\.mjs/);
+  assert.match(ciWorkflow, /cloudflare-workers-build-config\.mjs/);
   assert.match(ciWorkflow, /prepareWorkersBuildConfig/);
   assert.match(ciWorkflow, /wrangler\s+deploy\s+--dry-run\s+--config\s+\.wrangler-production\.json/i);
   assert.match(ciWorkflow, /(?:trap[^\n]*|rm\s+-f\s+)\.wrangler-production\.json/i);
+  assert.doesNotMatch(ciWorkflow, /cloudflare-workers-build-deploy\.mjs/i);
 });
