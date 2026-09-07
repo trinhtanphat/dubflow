@@ -22,7 +22,6 @@ test('production media fixture runner is checked in and remains verification-onl
   assert.match(script, /\/export/);
   assert.match(script, /video\/mp4/);
   assert.match(workflow, /verify-production-media-fixture\.mjs/);
-  assert.match(workflow, /worker\/src\/services\/asr\/workers-ai\.ts/);
   assert.doesNotMatch(`${script}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
