@@ -31,7 +31,11 @@ import {
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
 import { BrowserPiperClient, BrowserPiperError, browserPiperAvailable } from '../features/voice/browserPiperClient';
-import { preloadVietnameseVoices, type ClientVoiceProgress } from '../features/voice/clientVoicePreload';
+import {
+  isExactVietnameseVoiceCached,
+  preloadVietnameseVoices,
+  type ClientVoiceProgress,
+} from '../features/voice/clientVoicePreload';
 import { uploadVietnameseVoicePcm } from '../features/voice/clientVoiceApi';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
 import {
@@ -77,6 +81,10 @@ function replaceVariant(
   translation: SegmentTranslationDto,
 ): TranslationVariantDto[] {
   return rows.map((row) => row.segmentId === segmentId ? { ...row, translation } : row);
+}
+
+function vietnameseClientVoiceCacheComplete(projectId: string, rows: TranslationVariantDto[]): boolean {
+  return rows.length > 0 && rows.every((row) => isExactVietnameseVoiceCached(projectId, row));
 }
 
 function withRequestedTreatment(
@@ -142,6 +150,7 @@ export function StudioShell(props: Props) {
   const [exportAttempts, setExportAttempts] = useState<Partial<Record<TargetLanguage, ExportAttemptDto>>>({});
   const [exportError, setExportError] = useState('');
   const [clientVoiceState, setClientVoiceState] = useState<ClientVoiceState>(() => browserPiperAvailable() ? 'available' : 'unavailable');
+  const [clientVoiceCached, setClientVoiceCached] = useState(false);
   const [clientVoiceStatus, setClientVoiceStatus] = useState('');
   const piperClientRef = useRef<BrowserPiperClient | null>(null);
 
@@ -172,13 +181,31 @@ export function StudioShell(props: Props) {
   }, [isCloudProject, projectId]);
 
   useEffect(() => {
+    if (!isCloudProject) {
+      setClientVoiceCached(false);
+      return;
+    }
+    let active = true;
+    getTranslationVariants(projectId, 'vi').then((rows) => {
+      if (active) setClientVoiceCached(vietnameseClientVoiceCacheComplete(projectId, rows));
+    }).catch(() => {
+      if (active) setClientVoiceCached(false);
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
+
+  useEffect(() => {
     if (!isCloudProject || currentLanguage === 'source') {
       setTargetSegments([]);
       return;
     }
     let active = true;
     getTranslationVariants(projectId, currentLanguage).then((result) => {
-      if (active) setTargetSegments(result);
+      if (!active) return;
+      setTargetSegments(result);
+      if (currentLanguage === 'vi') {
+        setClientVoiceCached(vietnameseClientVoiceCacheComplete(projectId, result));
+      }
     }).catch((error) => {
       if (active) setLanguageError(message(error, 'Không thể tải bản dịch ngôn ngữ đã chọn.'));
     });
@@ -280,6 +307,7 @@ export function StudioShell(props: Props) {
 
   const editTargetTranslation = (segmentId: string, text: string) => {
     if (!targetLanguage) return;
+    if (targetLanguage === 'vi') setClientVoiceCached(false);
     setTargetConflict('');
     setTargetDrafts((current) => ({ ...current, [`${targetLanguage}:${segmentId}`]: text }));
   };
@@ -296,6 +324,7 @@ export function StudioShell(props: Props) {
     try {
       const result = await patchTranslationVariant(projectId, targetLanguage, segmentId, row.translation.version, text);
       setTargetSegments((current) => replaceVariant(current, segmentId, result));
+      if (targetLanguage === 'vi') setClientVoiceCached(false);
       setTargetDrafts((current) => {
         const next = { ...current };
         delete next[`${targetLanguage}:${segmentId}`];
@@ -305,6 +334,7 @@ export function StudioShell(props: Props) {
     } catch (error) {
       if (error instanceof TranslationVariantConflictError) {
         setTargetSegments((current) => replaceVariant(current, segmentId, error.canonical));
+        if (targetLanguage === 'vi') setClientVoiceCached(false);
         setTargetDrafts((current) => {
           const next = { ...current };
           delete next[`${targetLanguage}:${segmentId}`];
@@ -364,6 +394,7 @@ export function StudioShell(props: Props) {
 
   const runLanguage = async (language: TargetLanguage) => {
     if (processingLanguage) return;
+    if (language === 'vi') setClientVoiceCached(false);
     setProcessingLanguage(language);
     setLanguageError('');
     try {
@@ -399,26 +430,27 @@ export function StudioShell(props: Props) {
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const prepareVietnameseClientVoice = async () => {
-    if (!browserPiperAvailable()) {
-      setClientVoiceState('unavailable');
-      throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
-    }
     setClientVoiceState('preparing');
     setClientVoiceStatus('Đang chuẩn bị giọng Việt cục bộ…');
     try {
       const verified = await preloadVietnameseVoices(projectId, {
         fetchVariants: (id) => getTranslationVariants(id, 'vi'),
         synthesize: (text, onProgress) => {
+          if (!browserPiperAvailable()) {
+            throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+          }
           if (!piperClientRef.current) piperClientRef.current = new BrowserPiperClient();
           return piperClientRef.current.synthesize(text, onProgress);
         },
         upload: uploadVietnameseVoicePcm,
       }, (progress) => setClientVoiceStatus(clientVoiceProgressLabel(progress)));
       if (currentLanguage === 'vi') setTargetSegments(verified);
-      setClientVoiceState('available');
+      setClientVoiceCached(true);
+      setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
       setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
       return verified;
     } catch (error) {
+      setClientVoiceCached(false);
       if (error instanceof BrowserPiperError && error.code === 'PIPER_INIT_FAILED') {
         piperClientRef.current?.dispose();
         piperClientRef.current = null;
@@ -525,6 +557,7 @@ export function StudioShell(props: Props) {
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
                 clientVoiceAvailable={clientVoiceState !== 'unavailable'}
+                clientVoiceCached={clientVoiceCached}
                 clientVoiceStatus={clientVoiceStatus}
                 busy={exportBusy || clientVoiceState === 'preparing'}
                 results={exportResults}
