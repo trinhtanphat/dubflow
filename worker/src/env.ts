@@ -44,6 +44,7 @@ export interface Env {
   PAID_GOOGLE_TRANSLATE_ENABLED?: string;
   DEEPGRAM_API_KEY?: string;
   PAID_DEEPGRAM_ASR_ENABLED?: string;
+  PAID_WORKERS_AI_ENABLED?: string;
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
   PAID_ELEVENLABS_ENABLED?: string;
