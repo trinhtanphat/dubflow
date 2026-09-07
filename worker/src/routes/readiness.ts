@@ -9,20 +9,24 @@ export interface ReadinessDatabaseLike {
 }
 
 export type MediaReadinessConfig = {
-  stream?: unknown;
-  accountId?: string;
+  r2?: unknown;
   publicOrigin?: string;
   sourceSigningSecret?: string;
-  streamApiToken?: string;
+  remuxReady?: boolean;
+};
+
+export type MediaReadiness = {
+  r2: 'ready' | 'unavailable';
+  remux: 'ready' | 'unavailable';
 };
 
 export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
-  schemaRevision: 13 | null;
+  schemaRevision: 14 | null;
   asr: AsrCapabilities;
-  media?: { stream: 'ready' | 'unavailable' };
+  media?: MediaReadiness;
 };
 
 type ReadinessSchemaRow = {
@@ -44,7 +48,7 @@ type ReadinessSchemaRow = {
   provider_media_grants_table: number;
 };
 
-const CURRENT_SCHEMA_REVISION = 13 as const;
+const CURRENT_SCHEMA_REVISION = 14 as const;
 
 function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   if (!row) return false;
@@ -68,20 +72,22 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
   );
 }
 
-function mediaStatus(config?: MediaReadinessConfig): { stream: 'ready' | 'unavailable' } | undefined {
+function mediaStatus(config?: MediaReadinessConfig): MediaReadiness | undefined {
   if (!config) return undefined;
-  const ready = Boolean(
-    config.stream &&
-    config.accountId?.trim() &&
-    config.publicOrigin?.trim() &&
-    config.sourceSigningSecret?.trim() &&
-    config.streamApiToken?.trim()
+  const r2Ready = Boolean(
+    config.r2
+    && config.publicOrigin?.trim()
+    && config.sourceSigningSecret?.trim()
   );
-  return { stream: ready ? 'ready' : 'unavailable' };
+  return {
+    r2: r2Ready ? 'ready' : 'unavailable',
+    remux: config.remuxReady === true ? 'ready' : 'unavailable',
+  };
 }
 
-function result(input: Omit<ReadinessResult, 'ready'>, media?: { stream: 'ready' | 'unavailable' }): ReadinessResult {
-  const ready = input.database === 'ready' && (!media || media.stream === 'ready');
+function result(input: Omit<ReadinessResult, 'ready'>, media?: MediaReadiness): ReadinessResult {
+  const ready = input.database === 'ready'
+    && (!media || (media.r2 === 'ready' && media.remux === 'ready'));
   return { ready, ...input, ...(media ? { media } : {}) };
 }
 
