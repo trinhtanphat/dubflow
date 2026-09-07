@@ -10,18 +10,34 @@ import { ProjectExportRepository } from '../db/project-exports';
 import { SpeakerRepository } from '../db/speakers';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
-import { ContainerMediaProcessor } from '../services/media/container';
+import { PcmSoundtrackService } from '../services/media/pcm-soundtrack';
+import { StreamMediaService } from '../services/media/stream';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
   async run(event: WorkflowEvent<ExportWorkflowParams>, step: WorkflowStep) {
-    const media = new ContainerMediaProcessor(this.env.FFMPEG_CONTAINER);
+    if (!this.env.STREAM) {
+      throw new Error('STREAM_BINDING_UNAVAILABLE: Cloudflare Stream binding is unavailable.');
+    }
+
+    const projects = new ProjectRepository(this.env.DB);
+    const soundtrack = new PcmSoundtrackService(this.env.MEDIA);
+    const publisher = new StreamMediaService({
+      projects,
+      stream: this.env.STREAM,
+      bucket: this.env.MEDIA,
+      publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
+      signingSecret: this.env.STREAM_SOURCE_SIGNING_SECRET ?? '',
+      accountId: this.env.CLOUDFLARE_ACCOUNT_ID,
+      apiToken: this.env.CLOUDFLARE_STREAM_API_TOKEN,
+    });
+
     return runExportPipeline(
       event.payload,
       {
-        projects: new ProjectRepository(this.env.DB),
+        projects,
         jobs: new JobRepository(this.env.DB),
         segments: new SegmentRepository(this.env.DB),
         translations: new SegmentTranslationRepository(this.env.DB),
@@ -34,7 +50,8 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
           this.env.ELEVENLABS_API_KEY ?? '',
           { defaultVoiceId: this.env.ELEVENLABS_DEFAULT_VOICE_ID },
         ),
-        media,
+        soundtrack,
+        publisher,
         usage: new UsageRepository(this.env.DB),
         telemetry: createTelemetry(this.env),
       },
