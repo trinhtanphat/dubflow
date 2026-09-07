@@ -14,6 +14,8 @@ const fullSchema = {
   stream_video_uid_column: 1,
   stream_source_object_key_column: 1,
   stream_ready_at_column: 1,
+  export_stream_video_uid_column: 1,
+  export_stream_source_object_key_column: 1,
 };
 
 describe('checkReadiness', () => {
@@ -83,6 +85,8 @@ describe('checkReadiness', () => {
               stream_video_uid_column: 0,
               stream_source_object_key_column: 0,
               stream_ready_at_column: 0,
+              export_stream_video_uid_column: 0,
+              export_stream_source_object_key_column: 0,
             } as T;
           },
         };
