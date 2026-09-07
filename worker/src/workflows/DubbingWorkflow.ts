@@ -38,6 +38,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
       signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET
         ?? this.env.STREAM_SOURCE_SIGNING_SECRET
         ?? '',
+      bucket: this.env.MEDIA,
       durationProbe: async (sourceObjectKey) => {
         if (!this.env.MEDIA.head) {
           throw new Error('R2_SOURCE_HEAD_UNAVAILABLE: R2 head is unavailable for media duration probing.');
@@ -57,6 +58,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         projects,
         jobs: new JobRepository(this.env.DB),
         sourceMedia,
+        bucket: this.env.MEDIA,
         asr: createAsrProvider(
           this.env.AI,
           this.env.DEEPGRAM_API_KEY,
