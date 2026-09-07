@@ -19,20 +19,33 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
-function firstAdtsFrame(bytes: Uint8Array): Uint8Array {
-  if (bytes.length < 7 || bytes[0] !== 0xff || (bytes[1] & 0xf6) !== 0xf0) {
-    throw new Error('AAC_FIXTURE_INVALID: Missing ADTS sync word.');
+function splitAdtsFrames(bytes: Uint8Array): Uint8Array[] {
+  const frames: Uint8Array[] = [];
+  let offset = 0;
+
+  while (offset < bytes.length) {
+    if (offset + 7 > bytes.length || bytes[offset] !== 0xff || (bytes[offset + 1] & 0xf6) !== 0xf0) {
+      throw new Error(`AAC_FIXTURE_INVALID: Missing ADTS sync word at offset ${offset}.`);
+    }
+    const length = ((bytes[offset + 3] & 0x03) << 11)
+      | (bytes[offset + 4] << 3)
+      | ((bytes[offset + 5] & 0xe0) >> 5);
+    if (length < 7 || offset + length > bytes.length) {
+      throw new Error(`AAC_FIXTURE_INVALID: ADTS frame length is invalid at offset ${offset}.`);
+    }
+    frames.push(bytes.subarray(offset, offset + length));
+    offset += length;
   }
-  const length = ((bytes[3] & 0x03) << 11) | (bytes[4] << 3) | ((bytes[5] & 0xe0) >> 5);
-  if (length < 7 || length > bytes.length) throw new Error('AAC_FIXTURE_INVALID: ADTS frame length is invalid.');
-  return bytes.subarray(0, length);
+
+  if (frames.length < 2) throw new Error('AAC_FIXTURE_INVALID: Expected multiple ADTS frames to cover encoder priming.');
+  return frames;
 }
 
 async function decodeFixture() {
   const common = await new WASMAudioDecoderCommon().instantiate(EmscriptenWASM, aacModule as WebAssembly.Module);
-  const frame = firstAdtsFrame(decodeBase64(AAC_ADTS_BASE64));
+  const frames = splitAdtsFrames(decodeBase64(AAC_ADTS_BASE64));
 
-  const input = common.allocateTypedArray(Math.max(65_536, frame.length), Uint8Array);
+  const input = common.allocateTypedArray(65_536, Uint8Array);
   const channels = common.allocateTypedArray(1, Uint32Array);
   const sampleRate = common.allocateTypedArray(1, Uint32Array);
   const samplesDecoded = common.allocateTypedArray(1, Uint32Array);
@@ -43,7 +56,6 @@ async function decodeFixture() {
   let outputPtr = 0;
 
   try {
-    input.buf.set(frame);
     decoder = common.wasm.create_decoder(
       0,
       0,
@@ -57,25 +69,49 @@ async function decodeFixture() {
     );
     if (!decoder) throw new Error('AAC_DECODER_INIT_FAILED');
 
-    common.wasm.decode_frame(decoder, input.ptr, frame.length);
-    if (errorStringPtr.buf[0]) throw new Error(`AAC_DECODE_FAILED: ${common.codeToString(errorStringPtr.buf[0])}`);
+    let totalSamplesDecoded = 0;
+    let decodedRate = 0;
+    let channelCount = 0;
 
-    outputPtr = outputBufferPtr.buf[0];
-    const outputLength = outputBufferLen.buf[0];
-    const channelCount = channels.buf[0];
-    const decodedSamples = samplesDecoded.buf[0];
-    const decodedRate = sampleRate.buf[0];
-    if (!outputPtr || !outputLength || !channelCount || !decodedSamples || !decodedRate) {
-      throw new Error('AAC_DECODE_EMPTY');
+    for (const frame of frames) {
+      input.buf.set(frame);
+      errorStringPtr.buf[0] = 0;
+      outputBufferPtr.buf[0] = 0;
+      outputBufferLen.buf[0] = 0;
+      samplesDecoded.buf[0] = 0;
+
+      common.wasm.decode_frame(decoder, input.ptr, frame.length);
+      if (errorStringPtr.buf[0]) {
+        throw new Error(`AAC_DECODE_FAILED: ${common.codeToString(errorStringPtr.buf[0])}`);
+      }
+
+      outputPtr = outputBufferPtr.buf[0];
+      const outputLength = outputBufferLen.buf[0];
+      const frameSamples = samplesDecoded.buf[0];
+      const frameRate = sampleRate.buf[0];
+      const frameChannels = channels.buf[0];
+
+      if (outputPtr && outputLength && frameSamples) {
+        const output = new Float32Array(common.wasm.HEAP, outputPtr, outputLength);
+        if (!output.every((sample: number) => Number.isFinite(sample))) {
+          throw new Error('AAC_DECODE_INVALID_PCM');
+        }
+        totalSamplesDecoded += frameSamples;
+        decodedRate ||= frameRate;
+        channelCount ||= frameChannels;
+        common.wasm.free(outputPtr);
+        outputPtr = 0;
+        outputBufferPtr.buf[0] = 0;
+        outputBufferLen.buf[0] = 0;
+      }
     }
 
-    const output = new Float32Array(common.wasm.HEAP, outputPtr, outputLength);
-    if (!output.some((sample: number) => Number.isFinite(sample))) throw new Error('AAC_DECODE_INVALID_PCM');
+    if (!totalSamplesDecoded || !decodedRate || !channelCount) throw new Error('AAC_DECODE_EMPTY');
 
     return {
       ok: true,
       sampleRate: decodedRate,
-      samplesDecoded: decodedSamples,
+      samplesDecoded: totalSamplesDecoded,
       channelCount,
     };
   } finally {
