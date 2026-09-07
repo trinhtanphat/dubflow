@@ -20,9 +20,10 @@ test('Phase 4D migration extends the full canonical schema without breaking fore
   assert.equal(fs.existsSync(phase4dUrl), true, '0011_phase4d_audio_separation.sql must exist');
 
   const files = migrationFiles();
-  const prefixes = files.map((name) => name.match(/^(\d+)_/)?.[1]);
-  assert.equal(new Set(prefixes).size, prefixes.length, 'migration numeric prefixes must remain unique');
+  assert.equal(new Set(files).size, files.length, 'migration filenames must remain unique');
   assert.ok(files.includes('0011_phase4d_audio_separation.sql'));
+  assert.ok(files.includes('0012_stream_media.sql'));
+  assert.ok(files.includes('0012_visual_lipsync.sql'));
   assert.ok(files.indexOf('0011_phase4d_audio_separation.sql') < files.indexOf('0012_stream_media.sql'));
 
   const db = new DatabaseSync(':memory:');

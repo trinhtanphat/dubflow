@@ -20,11 +20,12 @@ const exportPipeline = [
 
 const hasMigration = (name) => migrations.includes(name);
 
-test('main reconciliation keeps migration history collision-free and adds a forward Phase 4C migration', () => {
+test('main reconciliation preserves deployed migration identities and adds a forward Phase 4C migration', () => {
   assert.equal(hasMigration('0009_multilang_exports.sql'), true, 'keep already-landed main migration 0009');
   assert.equal(hasMigration('0010_multilanguage_variants.sql'), true, 'add forward migration 0010 for canonical Phase 4C schema');
-  const numbers = migrations.map((name) => name.slice(0, 4));
-  assert.equal(new Set(numbers).size, numbers.length, 'migration numbers must be unique');
+  assert.equal(new Set(migrations).size, migrations.length, 'migration filenames must be unique');
+  assert.equal(hasMigration('0012_stream_media.sql'), true, 'keep the shipped Stream migration filename');
+  assert.equal(hasMigration('0012_visual_lipsync.sql'), true, 'keep the earlier shipped visual-lipsync migration filename');
   if (hasMigration('0010_multilanguage_variants.sql')) {
     const forward = read('migrations/0010_multilanguage_variants.sql');
     assert.match(forward, /project_target_languages/);
