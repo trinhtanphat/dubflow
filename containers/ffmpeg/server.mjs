@@ -127,6 +127,12 @@ async function renderExport(input) {
     const outside = input.clips.find((clip) => clip.endMs > sourceDurationMs);
     if (outside) throw new Error(`Dubbed clip ${outside.segmentId} exceeds source duration.`);
 
+    let backgroundPath;
+    if (input.mixMode === 'preserve_background') {
+      backgroundPath = join(root, 'background.audio');
+      await downloadObject(input.backgroundObjectKey, backgroundPath);
+    }
+
     const clipPaths = [];
     const clipDurationsMs = [];
     for (let index = 0; index < input.clips.length; index += 1) {
@@ -144,6 +150,8 @@ async function renderExport(input) {
       clips: input.clips,
       clipPaths,
       clipDurationsMs,
+      mixMode: input.mixMode,
+      backgroundPath,
     });
     await execFileAsync('ffmpeg', args, { maxBuffer: 4 * 1024 * 1024 });
 
