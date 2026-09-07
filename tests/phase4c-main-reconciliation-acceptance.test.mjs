@@ -45,7 +45,8 @@ test('main reconciliation preserves the Cloudflare-owned production lanes', () =
 test('main reconciliation keeps backend state on 6666 and the public domain on the 2403 gateway', () => {
   assert.equal(wrangler.account_id, '6c5207813df3d5b83b9508125e0e9e12');
   assert.equal(wrangler.routes, undefined);
-  assert.deepEqual(wrangler.stream, { binding: 'STREAM' });
+  assert.equal(wrangler.stream, undefined);
+  assert.ok(wrangler.r2_buckets?.some((entry) => entry.binding === 'MEDIA'));
   assert.equal(gateway.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
   assert.deepEqual(gateway.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
   assert.ok(wrangler.workflows?.some((entry) => entry.binding === 'LANGUAGE_TRANSLATION_WORKFLOW' && entry.class_name === 'LanguageTranslationWorkflow'));
