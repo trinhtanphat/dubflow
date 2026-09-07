@@ -6,7 +6,6 @@ import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { VoiceProviderError } from '../services/voice/types';
-import { WorkersAIVoiceProvider } from '../services/voice/workers-ai';
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -14,23 +13,15 @@ function hasElevenLabsPreview(env: Env) {
   return Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_DEFAULT_VOICE_ID?.trim());
 }
 
-function hasElevenLabsKey(env: Env) {
-  return Boolean(env.ELEVENLABS_API_KEY?.trim());
-}
-
 export function createVoiceRoutes(fetcher: FetchLike = fetch) {
   const routes = new Hono<WorkerHonoEnv>();
 
   routes.get('/capabilities', (c) => {
-    if (hasElevenLabsKey(c.env)) {
-      const provider = new ElevenLabsVoiceProvider(
-        c.env.ELEVENLABS_API_KEY ?? '',
-        { defaultVoiceId: c.env.ELEVENLABS_DEFAULT_VOICE_ID },
-        fetcher,
-      );
-      return c.json(provider.capabilities());
-    }
-    const provider = new WorkersAIVoiceProvider(c.env.AI);
+    const provider = new ElevenLabsVoiceProvider(
+      c.env.ELEVENLABS_API_KEY ?? '',
+      { defaultVoiceId: c.env.ELEVENLABS_DEFAULT_VOICE_ID },
+      fetcher,
+    );
     return c.json(provider.capabilities());
   });
 
