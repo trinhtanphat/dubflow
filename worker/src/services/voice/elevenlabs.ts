@@ -21,7 +21,7 @@ export type ElevenLabsVoiceCapabilities = {
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
-const DEFAULT_MODEL = 'eleven_multilingual_v2';
+const DEFAULT_MODEL = 'eleven_flash_v2_5';
 
 export class ElevenLabsVoiceProvider implements VoiceProvider {
   constructor(

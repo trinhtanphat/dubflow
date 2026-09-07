@@ -42,7 +42,7 @@ describe('ElevenLabs voice provider', () => {
     expect(calls[0].url).toContain('/v1/text-to-speech/voice-123');
     expect(calls[0].url).not.toContain('secret-key');
     expect(new Headers(calls[0].init?.headers).get('xi-api-key')).toBe('secret-key');
-    expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({ text: 'Xin chào', model_id: 'eleven_multilingual_v2', language_code: 'vi' });
+    expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({ text: 'Xin chào', model_id: 'eleven_flash_v2_5', language_code: 'vi' });
   });
 
   it('fails closed when ElevenLabs is not configured', async () => {
