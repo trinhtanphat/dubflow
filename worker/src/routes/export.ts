@@ -106,17 +106,8 @@ function visualLipSyncAvailable(env: Env): boolean {
   return syncLabsLipSyncCapability(env.SYNC_API_KEY, env.SYNC_LIPSYNC_QUALIFIED).available;
 }
 
-function streamExportAdmissionError(env: Env): ErrorBody | null {
-  if (!env.STREAM) return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
-  if (!env.CLOUDFLARE_ACCOUNT_ID?.trim()) {
-    return errorBody('STREAM_ACCOUNT_UNAVAILABLE', 'Cloudflare account id is unavailable for Stream export.');
-  }
-  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
-    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
-  }
-  if (!env.CLOUDFLARE_STREAM_API_TOKEN?.trim()) {
-    return errorBody('STREAM_WRITE_UNAVAILABLE', 'Cloudflare Stream write token is unavailable.');
-  }
+function mediaExportAdmissionError(env: Env): ErrorBody | null {
+  if (!env.MEDIA) return errorBody('MEDIA_SOURCE_UNAVAILABLE', 'R2 media binding is unavailable.');
   return null;
 }
 
@@ -368,8 +359,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
       const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
       if (rateLimited) return rateLimited;
       if (output === 'dubbed') {
-        const streamError = streamExportAdmissionError(c.env);
-        if (streamError) return c.json(streamError, 503);
+        const mediaError = mediaExportAdmissionError(c.env);
+        if (mediaError) return c.json(mediaError, 503);
       }
 
       const launched = await launchValidated(
@@ -415,8 +406,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
 
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
-    const streamError = streamExportAdmissionError(c.env);
-    if (streamError) return c.json(streamError, 503);
+    const mediaError = mediaExportAdmissionError(c.env);
+    if (mediaError) return c.json(mediaError, 503);
 
     const exportsStore = makeExports(c.env);
     const jobs = makeJobs(c.env);
@@ -523,8 +514,8 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     const rateLimited = await enforceRateLimit(c, 'export', userId, projectId);
     if (rateLimited) return rateLimited;
     if (output === 'dubbed') {
-      const streamError = streamExportAdmissionError(c.env);
-      if (streamError) return c.json(streamError, 503);
+      const mediaError = mediaExportAdmissionError(c.env);
+      if (mediaError) return c.json(mediaError, 503);
     }
 
     const batchId = makeBatchId();

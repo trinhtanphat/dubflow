@@ -4,7 +4,7 @@ import test from 'node:test';
 
 const read = (path) => readFileSync(path, 'utf8');
 
-const streamMedia = read('worker/src/services/media/stream.ts');
+const r2SourceMedia = read('worker/src/services/media/r2-source.ts');
 const deepgram = read('worker/src/services/asr/deepgram.ts');
 const stitch = read('worker/src/services/asr/stitch.ts');
 const reconcile = read('worker/src/services/asr/reconcile.ts');
@@ -22,15 +22,16 @@ function assertInOrder(source, markers) {
   }
 }
 
-test('Phase 4A diarization now enters through Stream remote ASR without FFmpeg chunk extraction', () => {
-  assert.match(streamMedia, /prepareSource\(/);
+test('Phase 4A diarization enters through signed R2 remote ASR without Stream or FFmpeg chunk extraction', () => {
+  assert.match(r2SourceMedia, /prepareSource\(/);
+  assert.match(r2SourceMedia, /\/api\/media-source\//);
   assert.match(deepgram, /transcribeUrl\(/);
   assert.match(pipeline, /sourceMedia\.prepareSource|sourceMedia!\.prepareSource/);
   assert.match(pipeline, /transcribeUrl\(source\.audioUrl/);
   assert.match(pipeline, /source\.durationMs\s*\/\s*1000/);
   assert.match(pipeline, /overlapBeforeMs:\s*0/);
   assert.match(pipeline, /overlapAfterMs:\s*0/);
-  assert.doesNotMatch(pipeline, /ContainerMediaProcessor|FFMPEG_CONTAINER/);
+  assert.doesNotMatch(r2SourceMedia + pipeline, /StreamMediaService|cloudflare\/stream|ContainerMediaProcessor|FFMPEG_CONTAINER/);
 });
 
 test('Phase 4A locks conservative deterministic stitch and rerun reconciliation thresholds', () => {

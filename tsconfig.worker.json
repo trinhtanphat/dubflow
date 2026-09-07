@@ -2,7 +2,7 @@
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
-    "lib": ["ES2022", "WebWorker"],
+    "lib": ["ES2022", "ESNext.Disposable", "WebWorker"],
     "skipLibCheck": true,
     "strict": true,
     "module": "ESNext",

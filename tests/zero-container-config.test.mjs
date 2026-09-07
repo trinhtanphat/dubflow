@@ -19,21 +19,32 @@ const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, expor
 const wrangler = JSON.parse(wranglerText);
 const pkg = JSON.parse(packageText);
 
-test('production config is Stream-based and contains no Container runtime binding or export', () => {
-  assert.deepEqual(wrangler.stream, { binding: 'STREAM' });
+test('production config is R2-only and contains no Stream or Container runtime binding', () => {
+  assert.equal(wrangler.stream, undefined);
   assert.equal(wrangler.containers, undefined);
   assert.equal(wrangler.durable_objects, undefined);
   assert.equal(wrangler.exports?.FfmpegContainer, undefined);
-  assert.doesNotMatch(wranglerText, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg/);
+  assert.ok(wrangler.r2_buckets?.some((entry) => entry.binding === 'MEDIA'));
+  assert.doesNotMatch(wranglerText, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg|CLOUDFLARE_STREAM_API_TOKEN/);
 });
 
-test('production worker wiring and dependencies contain no hidden FFmpeg Container fallback', () => {
+test('active production worker wiring contains no Stream or FFmpeg Container fallback', () => {
   assert.equal(pkg.dependencies?.['@cloudflare/containers'], undefined);
   assert.doesNotMatch(packageText, /containers\/ffmpeg|@cloudflare\/containers/);
   assert.doesNotMatch(indexSource, /ContainerProxy|FfmpegContainer|@cloudflare\/containers/);
   assert.doesNotMatch(envSource, /FFMPEG_CONTAINER|services\/media\/container|ContainerNamespaceLike/);
   for (const source of [dubbingWorkflow, exportWorkflow, exportDispatcher]) {
     assert.doesNotMatch(source, /ContainerMediaProcessor|FFMPEG_CONTAINER|services\/media\/container|ffmpeg-container/);
+    assert.doesNotMatch(source, /StreamMediaService|cloudflare\/stream|CLOUDFLARE_STREAM_API_TOKEN/);
+  }
+});
+
+test('legacy Cloudflare Stream runtime implementation files are deleted', () => {
+  for (const path of [
+    'worker/src/services/media/stream.ts',
+    'worker/src/cloudflare/stream.ts',
+  ]) {
+    assert.equal(existsSync(new URL(path, root)), false, `${path} must be deleted`);
   }
 });
 

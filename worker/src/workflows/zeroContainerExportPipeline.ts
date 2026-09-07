@@ -136,6 +136,7 @@ export type ZeroContainerExportDeps = {
     }): Promise<string>;
   };
   publisher: {
+    inspect(sourceObjectKey: string): Promise<unknown>;
     publishDubbedExport(input: {
       projectId: string;
       userId: string;
@@ -144,7 +145,7 @@ export type ZeroContainerExportDeps = {
       targetLanguage: TargetLanguage;
       exportId: string;
       exportObjectKey: string;
-    }): Promise<{ exportObjectKey: string; audioTrackUid: string }>;
+    }): Promise<{ exportObjectKey: string; audioTrackUid?: string }>;
   };
   usage: Pick<UsageStore, 'record' | 'getByOperation'>;
   telemetry: TelemetrySink;
@@ -310,6 +311,8 @@ export async function runZeroContainerExportPipeline(
     const durationMs = Number(project.durationMs);
     if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Project duration is missing or invalid for render metering.');
 
+    await step.do('admit R2 remux source', () => deps.publisher.inspect(project.sourceObjectKey!));
+
     const job = await step.do('load zero-container export retry generation', () =>
       deps.jobs.getForProject(params!.projectId, params!.jobId, params!.userId),
     );
@@ -465,7 +468,7 @@ export async function runZeroContainerExportPipeline(
       throw new Error('Soundtrack service returned an invalid object key.');
     }
 
-    const renderProvider = 'cloudflare-stream';
+    const renderProvider = 'r2-remux';
     const renderItem = params.modern ? `${params.targetLanguage}:final` : 'final';
     const renderKey = operationKey(params.jobId, retryCount, 'render', renderItem, renderProvider);
     const expectedExportObjectKey = params.modern
@@ -500,7 +503,7 @@ export async function runZeroContainerExportPipeline(
         exportObjectKey: expectedExportObjectKey,
       }));
       if (result.exportObjectKey !== expectedExportObjectKey) {
-        throw new Error('Stream publisher returned an invalid export object key.');
+        throw new Error('R2 remux publisher returned an invalid export object key.');
       }
       await deps.usage.record({ ...common, phase: 'completed' });
       return result;

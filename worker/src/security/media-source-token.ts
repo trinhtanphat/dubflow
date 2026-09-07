@@ -12,7 +12,7 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 async function importSigningKey(secret: string): Promise<CryptoKey> {
   const normalized = secret.trim();
-  if (!normalized) throw new Error('Stream source signing secret is missing.');
+  if (!normalized) throw new Error('Media source signing secret is missing.');
   return crypto.subtle.importKey(
     'raw',
     arrayBuffer(encoder.encode(normalized)),
@@ -37,19 +37,19 @@ function hexToBytes(value: string): Uint8Array | null {
   return result;
 }
 
-export async function createStreamSourceToken(
+export async function createMediaSourceToken(
   secret: string,
   projectId: string,
   objectKey: string,
   expires: number,
 ): Promise<string> {
-  if (!Number.isInteger(expires) || expires <= 0) throw new Error('Stream source expiry is invalid.');
-  if (!objectKey.startsWith(`projects/${projectId}/`)) throw new Error('Stream source object is outside the project.');
+  if (!Number.isInteger(expires) || expires <= 0) throw new Error('Media source expiry is invalid.');
+  if (!objectKey.startsWith(`projects/${projectId}/`)) throw new Error('Media source object is outside the project.');
   const key = await importSigningKey(secret);
   return bytesToHex(await crypto.subtle.sign('HMAC', key, arrayBuffer(tokenMessage(projectId, objectKey, expires))));
 }
 
-export async function verifyStreamSourceToken(input: {
+export async function verifyMediaSourceToken(input: {
   secret: string;
   projectId: string;
   objectKey: string;

@@ -24,7 +24,7 @@ test('Phase 4D persists the canonical source generation, audio mode, and reusabl
   assert.match(migration, /audio_mode/i);
   assert.match(migration, /CREATE TABLE project_audio_stems/i);
   assert.match(migration, /idx_project_audio_stems_active/i);
-  assert.match(readiness, /CURRENT_SCHEMA_REVISION = 13 as const/);
+  assert.match(readiness, /CURRENT_SCHEMA_REVISION = 14 as const/);
   assert.match(readiness, /project_audio_stems/);
 });
 
@@ -33,12 +33,12 @@ test('Phase 4D exposes exactly three backwards-compatible dubbed audio modes', (
   assert.match(audioMode, /value === undefined\) return 'dubbed_only'/);
 });
 
-test('zero-container production selects Stream publishing only for dubbed_only and keeps legacy hybrid modes fail-closed', () => {
+test('zero-container production selects R2 remux publishing only for dubbed_only and keeps legacy hybrid modes fail-closed', () => {
   assert.match(exportPipeline, /value\.output === 'dubbed' && value\.audioMode === 'dubbed_only'/);
   assert.match(exportPipeline, /if \(!deps\.media && value\.output !== 'subtitles'\)/);
-  assert.doesNotMatch(exportWorkflow, /ContainerMediaProcessor|FFMPEG_CONTAINER|ffmpeg-container/);
+  assert.doesNotMatch(exportWorkflow, /ContainerMediaProcessor|FFMPEG_CONTAINER|ffmpeg-container|StreamMediaService/);
   assert.match(exportWorkflow, /PcmSoundtrackService/);
-  assert.match(exportWorkflow, /StreamMediaService/);
+  assert.match(exportWorkflow, /R2Mp4RemuxPublisher/);
 });
 
 test('Phase 4D separation stays fail-closed with stable errors and an unavailable production adapter', () => {

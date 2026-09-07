@@ -12,15 +12,16 @@ export type ProcessRouteDeps = {
   makeJobs?: (env: Env) => JobStore;
 };
 
-function streamAdmissionError(env: Env) {
-  if (!env.STREAM) {
-    return errorBody('STREAM_BINDING_UNAVAILABLE', 'Cloudflare Stream binding is unavailable.');
+function mediaAdmissionError(env: Env) {
+  if (!env.MEDIA) {
+    return errorBody('MEDIA_SOURCE_UNAVAILABLE', 'R2 media binding is unavailable.');
   }
-  if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
-    return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
+  const signingSecret = env.MEDIA_SOURCE_SIGNING_SECRET ?? env.STREAM_SOURCE_SIGNING_SECRET;
+  if (!signingSecret?.trim()) {
+    return errorBody('MEDIA_SOURCE_SIGNING_UNAVAILABLE', 'Media source signing secret is unavailable.');
   }
   if (!env.PUBLIC_ORIGIN?.trim()) {
-    return errorBody('STREAM_SOURCE_ORIGIN_UNAVAILABLE', 'Stream source public origin is unavailable.');
+    return errorBody('MEDIA_SOURCE_ORIGIN_UNAVAILABLE', 'Media source public origin is unavailable.');
   }
   return null;
 }
@@ -43,7 +44,7 @@ export function createProcessRoutes(deps: ProcessRouteDeps = {}) {
       const rateLimited = await enforceRateLimit(c, 'process', userId, projectId);
       if (rateLimited) return rateLimited;
 
-      const admissionError = streamAdmissionError(c.env);
+      const admissionError = mediaAdmissionError(c.env);
       if (admissionError) return c.json(admissionError, 503);
 
       const job = await jobs.create(projectId, 'dubbing');

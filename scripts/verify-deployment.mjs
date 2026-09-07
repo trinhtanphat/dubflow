@@ -1,7 +1,7 @@
 import { pathToFileURL } from 'node:url';
 
 export const READINESS_URL = 'https://yupvox.qs3d.site/api/ready';
-export const CURRENT_SCHEMA_REVISION = 13;
+export const CURRENT_SCHEMA_REVISION = 14;
 
 export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
   try {
@@ -16,6 +16,8 @@ export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
       && body?.service === 'dubflow'
       && body?.database === 'ready'
       && body?.schemaRevision === CURRENT_SCHEMA_REVISION
+      && body?.media?.r2 === 'ready'
+      && body?.media?.remux === 'ready'
     );
     return { ok: ready, status: response.status, body };
   } catch (error) {

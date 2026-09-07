@@ -11,11 +11,18 @@ type RawUtterance = {
 };
 
 type RawResponse = {
+  metadata?: { duration?: number };
   results?: {
     channels?: Array<{ alternatives?: Array<{ transcript?: string }> }>;
     utterances?: RawUtterance[];
   };
 };
+
+function durationMs(value: unknown): number | undefined {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return undefined;
+  return Math.round(seconds * 1000);
+}
 
 export class DeepgramNova3AsrProvider implements AsrProvider {
   constructor(
@@ -78,6 +85,7 @@ export class DeepgramNova3AsrProvider implements AsrProvider {
     return {
       text: typeof transcript === 'string' ? transcript : segments.map((segment) => segment.text).join(' '),
       segments,
+      durationMs: durationMs(payload.metadata?.duration),
     };
   }
 

@@ -49,7 +49,7 @@ test('Phase 4B documents consent and no-production boundary', () => {
   const status = read('docs/deployment-status.md');
   assert.match(status, /Phase 4B/);
   assert.match(status, /consent/i);
-  assert.match(status, /IVC/);
+  assert.match(status, /Instant Voice Clone|IVC/i);
   assert.match(status, /production.*UNQUALIFIED|UNQUALIFIED.*production/is);
   assert.match(status, /manual-only/i);
 });

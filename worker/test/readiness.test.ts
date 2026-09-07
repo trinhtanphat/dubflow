@@ -36,7 +36,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 13,
+      schemaRevision: 14,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -60,7 +60,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 13,
+      schemaRevision: 14,
       asr: {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',

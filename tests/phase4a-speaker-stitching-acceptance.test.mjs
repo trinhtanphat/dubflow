@@ -3,16 +3,16 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const read = (path) => readFileSync(path, 'utf8');
-const streamMedia = read('worker/src/services/media/stream.ts');
+const r2SourceMedia = read('worker/src/services/media/r2-source.ts');
 const stitch = read('worker/src/services/asr/stitch.ts');
 const reconcile = read('worker/src/services/asr/reconcile.ts');
 const pipeline = read('worker/src/workflows/pipeline.ts');
 const packageJson = read('package.json');
 const deploymentStatus = read('docs/deployment-status.md');
 
-test('Phase 4A speaker reconciliation accepts the zero-overlap Stream ASR source as one deterministic stitch input', () => {
-  assert.match(streamMedia, /prepareSource\(/);
-  assert.match(pipeline, /chunkId:\s*`stream:\$\{source\.sourceId\}`/);
+test('Phase 4A speaker reconciliation accepts the zero-overlap R2 remote-ASR source as one deterministic stitch input', () => {
+  assert.match(r2SourceMedia, /prepareSource\(/);
+  assert.match(pipeline, /chunkId:\s*`source:\$\{source\.sourceId\}`/);
   assert.match(pipeline, /chunkOrder:\s*0/);
   assert.match(pipeline, /offsetMs:\s*0/);
   assert.match(pipeline, /overlapBeforeMs:\s*0/);

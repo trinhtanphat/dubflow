@@ -7,7 +7,7 @@ import { SegmentRepository } from '../db/segments';
 import { TranslationContextRepository } from '../db/translation-context';
 import { UsageRepository } from '../db/usage';
 import { createTelemetry } from '../observability/telemetry';
-import { StreamMediaService } from '../services/media/stream';
+import { R2SourceMediaService } from '../services/media/r2-source';
 import { asrCapabilities, createAsrProvider } from '../services/asr/router';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
@@ -27,19 +27,13 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
         this.env.CONTEXT_TRANSLATION_MODEL ?? '',
       ),
     );
-    const sourceMedia = {
-      prepareSource: async (projectId: string, userId: string, sourceObjectKey: string) => {
-        if (!this.env.STREAM) {
-          throw new Error('STREAM_BINDING_UNAVAILABLE: Cloudflare Stream binding is unavailable.');
-        }
-        return new StreamMediaService({
-          projects,
-          stream: this.env.STREAM,
-          publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
-          signingSecret: this.env.STREAM_SOURCE_SIGNING_SECRET ?? '',
-        }).prepareSource(projectId, userId, sourceObjectKey);
-      },
-    };
+    const sourceMedia = new R2SourceMediaService({
+      projects,
+      publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
+      signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET
+        ?? this.env.STREAM_SOURCE_SIGNING_SECRET
+        ?? '',
+    });
 
     return runDubbingPipeline(
       event.payload,

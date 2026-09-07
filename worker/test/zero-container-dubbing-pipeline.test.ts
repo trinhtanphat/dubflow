@@ -28,8 +28,12 @@ function baseDeps(calls: string[], usageEvents: UsageRecordInput[]) {
     },
     sourceMedia: {
       async prepareSource(projectId: string, userId: string, key: string) {
-        calls.push(`stream:${projectId}:${userId}:${key}`);
-        return { sourceId: 'stream-1', durationMs: 12_500, audioUrl: 'https://videodelivery.net/audio.m4a' };
+        calls.push(`r2:${projectId}:${userId}:${key}`);
+        return {
+          sourceId: 'r2-source-1',
+          durationMs: 12_500,
+          audioUrl: 'https://yupvox.qs3d.site/api/media-source/signed-source-token',
+        };
       },
     },
     segments: {
@@ -59,10 +63,11 @@ function baseDeps(calls: string[], usageEvents: UsageRecordInput[]) {
   };
 }
 
-describe('zero-container dubbing pipeline', () => {
-  it('uses Stream audio and remote Deepgram ASR without media chunks or R2 audio buffering', async () => {
+describe('zero-container R2-only dubbing pipeline', () => {
+  it('uses a signed R2 source URL with remote Deepgram ASR without media chunks or whole-file buffering', async () => {
     const calls: string[] = [];
     const usageEvents: UsageRecordInput[] = [];
+    const sourceUrl = 'https://yupvox.qs3d.site/api/media-source/signed-source-token';
     const deps = {
       ...baseDeps(calls, usageEvents),
       asr: {
@@ -83,30 +88,35 @@ describe('zero-container dubbing pipeline', () => {
       step,
     )).resolves.toEqual({ status: 'needs_review', segmentCount: 1 });
 
-    expect(calls).toContain('job:stream_ingest');
-    expect(calls).toContain('asr:remote:https://videodelivery.net/audio.m4a');
+    expect(calls).toContain('job:preparing_source');
+    expect(calls).toContain(`asr:remote:${sourceUrl}`);
     expect(calls.find((call) => call.startsWith('segments:replace:'))).toBe('segments:replace:1');
-    expect(calls.indexOf('asr:remote:https://videodelivery.net/audio.m4a')).toBeLessThan(calls.indexOf('translation:batch'));
+    expect(calls.indexOf(`asr:remote:${sourceUrl}`)).toBeLessThan(calls.indexOf('translation:batch'));
+    expect(calls.some((call) => call.includes('stream_ingest'))).toBe(false);
     expect(usageEvents).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'asr_audio_second', units: 12.5, provider: 'deepgram-nova-3', phase: 'started',
-        operationKey: 'job:job-1:retry:0:asr:stream:stream-1:deepgram-nova-3',
+        operationKey: 'job:job-1:retry:0:asr:source:r2-source-1:deepgram-nova-3',
       }),
       expect.objectContaining({
         kind: 'asr_audio_second', units: 12.5, provider: 'deepgram-nova-3', phase: 'completed',
-        operationKey: 'job:job-1:retry:0:asr:stream:stream-1:deepgram-nova-3',
+        operationKey: 'job:job-1:retry:0:asr:source:r2-source-1:deepgram-nova-3',
       }),
     ]));
   });
 
-  it('fails explicitly when long-form Stream audio has no remote-capable ASR provider', async () => {
+  it('fails explicitly when long-form R2 media has no remote-capable ASR provider', async () => {
     const calls: string[] = [];
     const usageEvents: UsageRecordInput[] = [];
     const deps = {
       ...baseDeps(calls, usageEvents),
       sourceMedia: {
         async prepareSource() {
-          return { sourceId: 'stream-long', durationMs: 3_600_000, audioUrl: 'https://videodelivery.net/long-audio.m4a' };
+          return {
+            sourceId: 'r2-long',
+            durationMs: 3_600_000,
+            audioUrl: 'https://yupvox.qs3d.site/api/media-source/signed-long-source-token',
+          };
         },
       },
       asr: { async transcribe() { throw new Error('must not buffer long-form media'); } },

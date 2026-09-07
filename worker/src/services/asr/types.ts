@@ -6,7 +6,7 @@ export type AsrSegment = {
   text: string;
   speakerIndex?: number;
 };
-export type AsrChunkResult = { text: string; segments: AsrSegment[] };
+export type AsrChunkResult = { text: string; segments: AsrSegment[]; durationMs?: number };
 export type AsrContext = { sourceLanguage: SourceLanguage };
 
 export interface AsrProvider {
