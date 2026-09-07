@@ -1,32 +1,36 @@
-# Browser-local ASR + EN→VI zero-cost design
+# Zero-Cost Browser-Local ASR + EN→VI Translation Design
+
+Date: 2026-09-07
+Status: Approved for implementation
+Reviewed against `main`: `848dd48cd94115a502a23faa8b8bb83b48381bc8`
+Issue: #91
+Paid-Resources: FORBIDDEN
 
 ## Goal
 
-Qualify the production media path without any metered inference. The browser performs source audio decode, Whisper ASR, English-to-Vietnamese Marian translation, and existing Piper Vietnamese TTS. The backend only authenticates, validates, durably commits client inference results, and performs the existing R2 export/remux path.
+Qualify the production media path without metered inference. The browser performs source audio decode, Whisper ASR, English-to-Vietnamese Marian translation, and the existing Piper Vietnamese TTS. The backend only authenticates, validates, durably commits browser-computed artifacts, and performs the existing private-R2 export/remux path.
 
 Canonical flow:
 
 ```text
-private R2 source / local upload File
+private R2 source
   -> browser decode
   -> browser Whisper ASR
   -> browser EN→VI Marian translation
   -> atomic durable client-inference commit
   -> existing browser Piper exact-version PCM cache
-  -> existing R2 dubbed_only export/remux
+  -> existing R2 dubbed export/remux
 ```
 
 ## Hard cost boundary
 
 - `Paid-Resources: FORBIDDEN`.
-- Never invoke Workers AI, Deepgram, Google Translate, Grok/xAI, ElevenLabs, Sync Labs, Cloudflare Stream, Containers, or any other metered inference/resource from this lane.
-- Never call `/api/projects/:id/process` or server translation/retranslate routes from the local coordinator.
-- `PAID_WORKERS_AI_ENABLED`, `PAID_DEEPGRAM_ASR_ENABLED`, `PAID_GOOGLE_TRANSLATE_ENABLED`, `PAID_GROK_TTS_ENABLED`, and `PAID_ELEVENLABS_ENABLED` stay absent/OFF.
-- Any browser/runtime/model/validation error aborts locally or returns a fail-closed 4xx/409 response. There is no provider fallback.
+- Never invoke Workers AI, Deepgram, Google Translate, Grok/xAI, ElevenLabs, Sync Labs, Cloudflare Stream, Containers, or another metered inference/resource from this lane.
+- Never call `/api/projects/:id/process`, server translation process/retranslate routes, or `/api/voice/capabilities` for local-lane admission.
+- `PAID_WORKERS_AI_ENABLED` remains OFF for this lane.
+- Any browser/runtime/model/validation error fails closed. There is no provider fallback.
 
-## Bounded admission
-
-This first qualified lane is deliberately narrow:
+## Bounded v1 admission
 
 - source language: exact `en`
 - target language: exact `vi`
@@ -34,10 +38,13 @@ This first qualified lane is deliberately narrow:
 - source duration: `> 0 && <= 300000 ms`
 - maximum durable segments: `500`
 - maximum commit payload: `2 MiB`
-- timing: integer milliseconds, non-negative, ordered, non-overlapping, `endMs > startMs`, inside source duration
-- source text and translated text must be non-empty after trimming
-- one durable project-unique speaker identity is used for all locally inferred segments; no diarization claim is made
-- durable commit must match current authenticated project `sourceObjectKey` and `sourceGeneration`
+- duration tolerance against an existing canonical duration: `<= 1000 ms` absolute
+- minimum segment duration: existing `MIN_SEGMENT_MS = 100`
+- timing: integer milliseconds, ordered, non-overlapping, inside source duration
+- source/translated text: non-empty after trim
+- one durable speaker only; no diarization claim
+- speaker id: deterministic project-unique `browser-local:<projectId>:speaker-1`
+- durable commit must match current authenticated `sourceObjectKey` and `sourceGeneration`
 
 ## Immutable browser inference pins
 
@@ -50,10 +57,12 @@ Package:
 ASR:
 
 ```text
-model: onnx-community/whisper-tiny
-revision: 3718def40bb096dd8ab6b3d7518c3fc55016ce66
+model: onnx-community/whisper-tiny.en
+revision: 2575352d61be1bf7225cf8f8b268a4678025fc58
 task: automatic-speech-recognition
-language: en
+dtype: q8
+preferred device: webgpu
+fallback: wasm only when WebGPU initialization fails before inference
 ```
 
 Translation:
@@ -62,76 +71,131 @@ Translation:
 model: Xenova/opus-mt-en-vi
 revision: 3f5f449333cbc7ecaa9eec16ee9e37682f036b8e
 task: translation
+dtype: q8
 provenance: browser-opus-mt
+preferred device: webgpu when initialization succeeds
+fallback: wasm
 ```
 
-WebGPU may be preferred when available; supported browser-local WASM fallback is allowed. Neither path may call a hosted inference API. Workers are ES-module browser workers and must not use `eval`, dynamic remote scripts, or server inference endpoints.
+Model files may come from Hugging Face Hub/CDN, but inference executes locally through Transformers.js. Media, transcript text, and translated text are never sent to a hosted inference API. Exact pinned revisions must fail closed if unavailable; never auto-switch model/revision/provider.
 
-## Browser decode and ASR
+## Browser worker lifecycle
 
-The existing Mediabunny browser decode boundary is reused. The coordinator keeps the original local `File`, validates size/duration/audio decodability, and obtains bounded mono 16 kHz audio without server decoding. Browser Whisper receives only local decoded audio and returns timestamped text chunks.
+Use ES-module browser workers, not React main-thread inference.
 
-The coordinator normalizes Whisper chunks into at most 500 ordered segments. Timing is clamped/validated against authoritative decoded duration before translation. Empty chunks are rejected/filtered deterministically; overlapping or invalid timestamps fail closed rather than being silently repaired into misleading timing.
+`browserAsr.worker.ts`:
+- lazy-import `@huggingface/transformers`;
+- consume mono Float32 PCM at 16 kHz;
+- return timestamped Whisper chunks and progress events;
+- dispose after transcript materializes.
+
+`browserTranslation.worker.ts`:
+- lazy-import `@huggingface/transformers`;
+- translate normalized segments sequentially;
+- return Vietnamese text keyed by local segment id;
+- dispose after translations materialize.
+
+Avoid keeping Whisper, Marian, and Piper resident simultaneously when possible. Cached model assets may remain in browser cache after worker disposal.
+
+## Browser decode and normalization
+
+Use the existing authenticated/signed private-R2 media path and the browser-supported media decode boundary. Do not expose the source bucket publicly and do not add a server decoder/transcoder.
+
+Before model work, capture authoritative `sourceObjectKey`, `sourceGeneration`, `sizeBytes`, and known `durationMs`. Reject ineligible language, missing source, >24 MiB, known >5 minutes, or unsupported decode before model download.
+
+Normalize decoded audio to mono Float32 16 kHz. Whisper chunks become client-generated UUID segments with integer timing, trimmed non-empty source text, >=100 ms duration, sorted/non-overlapping timing, <= canonical source duration, and <=500 segments. Empty/no-legal-segment output fails `LOCAL_ASR_EMPTY` and commits nothing.
+
+All segments use the server-derived project-unique one-speaker id. The browser does not submit arbitrary speaker identity.
 
 ## Browser translation
 
-Only English-to-Vietnamese is admitted. Marian translation runs in a dedicated browser worker with the immutable model revision above. Results are paired by stable local segment id/index. Missing, duplicate, empty, or count-mismatched outputs abort the commit.
+Translate each normalized English segment locally to Vietnamese using the pinned Marian model. Translation is sequential in v1 to bound memory. Every segment must produce exactly one non-empty Vietnamese output; missing/duplicate/count-mismatched/empty output aborts the entire commit.
 
-Translation provenance is always `browser-opus-mt`. Local work must never be labelled `workers-ai` or `google`.
+Translation provenance is always `browser-opus-mt`. Never label local work `workers-ai` or `google`.
 
-## Atomic durable commit
+## Atomic authenticated durable commit
 
-Add one authenticated project route:
+Add exactly one inference-free authenticated route:
 
 ```text
-POST /api/projects/:id/client-inference/commit
+PUT /api/projects/:id/client-inference/vi
 ```
 
-The request includes current source identity/generation, duration, immutable model provenance, and ordered locally inferred/translated segments. The backend re-authorizes the project and revalidates every bounded invariant. It must reject stale generation/source identity before mutation.
+Request carries:
+- `expectedSourceGeneration`;
+- `expectedSourceObjectKey`;
+- `durationMs`;
+- exact ASR provider/model/revision (`browser-whisper` + approved Whisper pin);
+- 1..500 normalized segments;
+- exact translation provider/model/revision (`browser-opus-mt` + approved Marian pin);
+- one translation item for every segment.
 
-All durable writes are one D1 `batch`/transactional unit:
+Server rejects before mutation unless owner/project exists, source language is `en`, `vi` is enabled, source identity/generation exactly match, canonical size is known and <=24 MiB, duration is valid and within 1000 ms of existing canonical duration when present, model/provider/revisions exactly match constants, segment/translation sets are legal, request <=2 MiB, project is not `processing`, vi target is not `translating`/`exporting`, and no project export is `pending`/`exporting`.
 
-1. replace project ASR segments with server-normalized client result ids/timing/text and one project-local speaker identity;
-2. persist completed Vietnamese translation variants with `translation_engine='browser-opus-mt'` and voice state `pending`;
-3. keep legacy `segments.translated_text`/translation status in sync for compatibility;
-4. invalidate stale exports/voice object references affected by replacement;
-5. set authoritative project duration;
-6. move project and Vietnamese target status to `needs_review` only after the complete batch is admitted.
+Source identity/generation mismatch returns `409 LOCAL_INFERENCE_SOURCE_CONFLICT` with safe current canonical source metadata. Browser discards computed artifacts and requires a fresh local run.
 
-No partial segment/translation mutation may remain if validation or batch execution fails.
+All durable writes execute as one ordered D1 `db.batch()` after read-side validation:
+1. invalidate prior current vi exports;
+2. replace project source segments;
+3. upsert exactly one speaker `browser-local:<projectId>:speaker-1`;
+4. create completed vi translation variants;
+5. mirror Vietnamese text/status/provenance into legacy segment columns required by existing readers;
+6. persist truthful `browser-opus-mt` provenance;
+7. leave voice pending and dubbed object null;
+8. set canonical duration only when previously absent, otherwise retain canonical duration within tolerance;
+9. set project and vi target status to `needs_review`;
+10. preserve current source generation/object key.
+
+If atomic `db.batch()` is unavailable/fails, fail closed; do not emulate atomicity with sequential writes.
 
 ## Schema evolution
 
-The deployed `segments.translation_engine` CHECK currently excludes `browser-opus-mt`. Existing migrations are immutable. If that CHECK still exists on latest `main`, add only a new append-only migration `0013_browser_local_translation_engine.sql` that rebuilds the table safely while preserving rows/indexes/foreign keys and widens the CHECK to include `browser-opus-mt`. `segment_translations.translation_engine` is already free-form but must also persist truthful provenance.
+The original `segments.translation_engine` CHECK excludes `browser-opus-mt`, while modern `segment_translations.translation_engine` accepts text. Because local provenance must be truthful in legacy mirrors, a new append-only migration is required if that CHECK still exists on latest `main`.
 
-Migration creation is allowed only after confirming `0013` remains unused on latest `main` immediately before the commit.
+Rules:
+- re-fetch latest `main` and migrations immediately before allocating the next filename;
+- use `0013_browser_local_translation_engine.sql` only if `0013` is still unused;
+- never edit, rename, or renumber deployed migrations;
+- preserve all current segment rows/columns/indexes/FKs/split lineage while widening only the required engine admission;
+- keep historical Stream migration lineage untouched;
+- keep readiness `schemaRevision=14` unless a separately justified readiness capability change is introduced; it is not a migration counter.
 
-## Studio orchestration
+## Studio orchestration and resumability
 
-For admitted EN→VI files, Studio executes local inference instead of calling server processing:
+Expose an explicit action such as `Process locally (zero-cost)` for eligible EN→VI cloud projects. Do not silently replace normal paid-provider actions.
 
-1. upload source normally to private R2 and refresh authoritative project/source generation;
-2. run browser decode + Whisper + Marian locally;
-3. POST the atomic client-inference commit;
-4. reload canonical project/segments/translations from the backend;
-5. existing browser Piper preloads exact-version Vietnamese PCM only for missing/stale rows;
-6. existing `dubbed_only` export starts only after durable client inference and Piper cache are complete.
+Phases:
+- Preparing source
+- Downloading ASR model
+- Transcribing locally
+- Downloading translation model
+- Translating locally
+- Saving transcript
+- Preparing Vietnamese voices
+- Exporting
 
-If local inference is unsupported or fails, Studio presents a failure and stops. It must never route to `/process`, retranslate, or any paid provider as fallback.
+After atomic commit, refetch canonical vi variants and reuse existing browser Piper exact-version preload/upload, then reuse the existing modern vi dubbed export. Piper starts only from canonical server truth.
 
-## Verification
+Resume is artifact-driven: current-generation completed local translations skip ASR/translation; exact-version PCM skips synthesis; current completed export may be reused; source generation changes invalidate prior local inference.
 
-Source/CI gates must prove:
+Local failure offers local retry only. It never routes to `/process`, retranslate, remote TTS, or another provider.
 
-- immutable dependency/model pins;
-- no server inference calls/fallback strings in the local coordinator;
-- browser worker model initialization and bounded input/output validation;
-- stale source generation/object key rejected before mutation;
-- >5 min, >24 MiB, >500 segments, >2 MiB payload rejected;
-- overlap/out-of-bounds/empty/count mismatch rejected;
-- atomic persistence and truthful `browser-opus-mt` provenance;
-- export/voice invalidation semantics remain correct;
-- exact-head full CI, both Wrangler dry-runs, screenshots and artifact pass;
-- no paid opt-in is introduced in source/config.
+## Verification / #91
 
-After merge/deploy, #91 remains OPEN until a real authorized browser production fixture proves local Whisper + local Marian + browser Piper + private-R2 MP4 export, reload durability, H.264/AAC codecs, and H.264 packet preservation. Production fixture dispatch is prohibited until the deployed schema/runtime is proven current and the fixture itself cannot enter a metered inference path.
+Source and CI gates must prove exact package/model pins, worker-only model imports, local network denylist, source race guards, bounded limits, atomic persistence, truthful provenance, migration-chain integrity, Piper handoff, and exact-head full CI/current-main mergeability.
+
+After merge/deploy, #91 remains OPEN until a real authorized browser production fixture proves:
+1. schema-14 R2/remux readiness;
+2. authorized H.264/AAC upload;
+3. no Stream/Container/getByName regression;
+4. no metered ASR/translation/TTS request;
+5. exact pinned local Whisper transcript + one durable project-unique speaker;
+6. exact pinned local EN→VI completed variants with `browser-opus-mt`;
+7. browser Piper exact-version PCM;
+8. UI-triggered modern dubbed export;
+9. reload preserves durable artifacts/export identity;
+10. final private-R2 MP4 is H.264 + AAC;
+11. output H.264 elementary-stream SHA equals source;
+12. frontend build SHA, backend version, gateway version, model IDs/revisions and project/job/export IDs are recorded.
+
+Only terminal real-media evidence closes #91. Only after #91 PASS may #128 be refreshed/revalidated for merge.
