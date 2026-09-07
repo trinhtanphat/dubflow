@@ -20,19 +20,22 @@ const schema13 = {
   provider_media_grants_table: 1,
 };
 
-describe('zero-container media readiness', () => {
-  it('requires schema 13 and Stream configuration before reporting ready', async () => {
-    const db = {
-      prepare() {
-        return {
-          async first<T>() { return schema13 as T; },
-        };
-      },
-    };
+function schemaDb() {
+  return {
+    prepare() {
+      return {
+        async first<T>() { return schema13 as T; },
+      };
+    },
+  };
+}
 
-    const result = await checkReadiness(db, 'dg-secret', {
+describe('zero-container media readiness', () => {
+  it('requires schema 13 and complete Stream configuration before reporting ready', async () => {
+    const result = await checkReadiness(schemaDb(), 'dg-secret', {
       stream: {},
-      accountId: '50afb4fd3c4c7a1f3e1bdb7f22d4af7f',
+      accountId: '6c5207813df3d5b83b9508125e0e9e12',
+      publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
       streamApiToken: 'stream-token',
     });
@@ -45,9 +48,34 @@ describe('zero-container media readiness', () => {
     });
   });
 
-  it('reports media unavailable when Stream write configuration is incomplete', async () => {
-    const db = { prepare: () => ({ async first<T>() { return schema13 as T; } }) };
-    const result = await checkReadiness(db, 'dg-secret', { stream: {}, accountId: 'account' });
-    expect(result).toMatchObject({ ready: false, database: 'ready', schemaRevision: 13, media: { stream: 'unavailable' } });
+  it('reports media unavailable when the signed source origin is incomplete', async () => {
+    const result = await checkReadiness(schemaDb(), 'dg-secret', {
+      stream: {},
+      accountId: '6c5207813df3d5b83b9508125e0e9e12',
+      sourceSigningSecret: 'source-secret',
+      streamApiToken: 'stream-token',
+    });
+
+    expect(result).toMatchObject({
+      ready: false,
+      database: 'ready',
+      schemaRevision: 13,
+      media: { stream: 'unavailable' },
+    });
+  });
+
+  it('keeps Stream REST credentials required for final dubbed MP4 publication', async () => {
+    const result = await checkReadiness(schemaDb(), 'dg-secret', {
+      stream: {},
+      publicOrigin: 'https://yupvox.qs3d.site',
+      sourceSigningSecret: 'source-secret',
+    });
+
+    expect(result).toMatchObject({
+      ready: false,
+      database: 'ready',
+      schemaRevision: 13,
+      media: { stream: 'unavailable' },
+    });
   });
 });
