@@ -6,7 +6,7 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 const read = (path) => readFile(new URL(path, root), 'utf8');
 
-const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, exportWorkflow, exportDispatcher] = await Promise.all([
+const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, exportWorkflow, exportDispatcher, studioShell] = await Promise.all([
   read('wrangler.jsonc'),
   read('package.json'),
   read('worker/src/index.ts'),
@@ -14,6 +14,7 @@ const [wranglerText, packageText, indexSource, envSource, dubbingWorkflow, expor
   read('worker/src/workflows/DubbingWorkflow.ts'),
   read('worker/src/workflows/ExportWorkflow.ts'),
   read('worker/src/workflows/exportPipeline.ts'),
+  read('src/app/StudioShellBase.tsx'),
 ]);
 const wrangler = JSON.parse(wranglerText);
 const pkg = JSON.parse(packageText);
@@ -34,6 +35,13 @@ test('production worker wiring and dependencies contain no hidden FFmpeg Contain
   for (const source of [dubbingWorkflow, exportWorkflow, exportDispatcher]) {
     assert.doesNotMatch(source, /ContainerMediaProcessor|FFMPEG_CONTAINER|services\/media\/container|ffmpeg-container/);
   }
+});
+
+test('Studio passes only the active dubbing job into UploadPanel for persisted progress and error feedback', () => {
+  assert.match(
+    studioShell,
+    /<UploadPanel[\s\S]*job=\{cloudJob\?\.type === 'dubbing' \? cloudJob : null\}[\s\S]*onProcessStarted=\{onProcessStarted\}/,
+  );
 });
 
 test('legacy FFmpeg Container implementation files are deleted', () => {
