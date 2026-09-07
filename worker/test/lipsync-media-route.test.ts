@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import type { Env } from '../src/env';
-import { createExportRoutes } from '../src/routes/export';
+import { createVisualExportMediaRoutes } from '../src/routes/visual-export-media';
 
 function stream(bytes: number[]) {
   return new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Uint8Array.from(bytes)); controller.close(); } });
@@ -27,13 +27,12 @@ const completedVisual = {
 
 function appFor(attempt = completedVisual) {
   const app = new Hono<{ Bindings: Env }>();
-  app.route('/api/projects', createExportRoutes({
+  app.route('/api/projects', createVisualExportMediaRoutes({
     makeProjects: () => ({
       async getByIdForUser() {
         return { id: 'p1', userId: 'dev-user', status: 'completed', sourceObjectKey: 'projects/p1/source/a.mp4' };
       },
     }) as never,
-    makeJobs: () => ({}) as never,
     makeExports: () => ({
       async latestCompleted() { return attempt; },
     }) as never,
@@ -65,9 +64,8 @@ describe('Phase 4E owner visual export media', () => {
     const attempt = { ...completedVisual, lipSyncStatus: 'failed' as const, lipSyncObjectKey: null };
     const app = new Hono<{ Bindings: Env }>();
     let bucketRead = false;
-    app.route('/api/projects', createExportRoutes({
+    app.route('/api/projects', createVisualExportMediaRoutes({
       makeProjects: () => ({ async getByIdForUser() { return { id: 'p1', userId: 'dev-user', status: 'completed' }; } }) as never,
-      makeJobs: () => ({}) as never,
       makeExports: () => ({ async latestCompleted() { return attempt; } }) as never,
       makeBucket: () => ({ async get() { bucketRead = true; return null; } }) as never,
     }));
