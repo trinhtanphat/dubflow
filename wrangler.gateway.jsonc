@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dubflow-gateway",
+  "account_id": "50afb4fd3c4c7a1f3e1bdb7f22d4af7f",
+  "main": "gateway/src/index.ts",
+  "compatibility_date": "2026-09-05",
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "yupvox.qs3d.site", "custom_domain": true }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": { "enabled": true, "invocation_logs": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 },
+    "redact_query_string": true
+  }
+}
