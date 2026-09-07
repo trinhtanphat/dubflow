@@ -34,7 +34,7 @@ test('Phase 3B meters provider work in canonical units with retry-scoped operati
   assert.match(pipeline, /retry:\$\{retryCount\}/);
 
   assert.match(exportPipeline, /metadata\.durationMs\s*\/\s*1000/);
-  assert.match(exportPipeline, /Number\(project\.durationMs\)\s*\/\s*1000/);
+  assert.match(exportPipeline, /Number\((?:project|renderProject)\.durationMs\)\s*\/\s*1000/);
   assert.match(exportPipeline, /kind:\s*'tts_audio_second'/);
   assert.match(exportPipeline, /kind:\s*'render_second'/);
   assert.match(exportPipeline, /getByOperation\(ttsKey,\s*'started'\)/);
