@@ -24,6 +24,13 @@ export function browserPiperAvailable(): boolean {
     && typeof navigator.storage?.getDirectory === 'function';
 }
 
+export class BrowserPiperError extends Error {
+  constructor(public readonly code: string, message: string) {
+    super(message);
+    this.name = 'BrowserPiperError';
+  }
+}
+
 export class BrowserPiperClient {
   private worker: PiperWorkerLike | null = null;
   private initPromise: Promise<void> | null = null;
@@ -53,7 +60,7 @@ export class BrowserPiperClient {
       return;
     }
     if (message.type === 'error') {
-      const error = new Error(message.message || message.code);
+      const error = new BrowserPiperError(message.code, message.message || message.code);
       if (this.initReject && !message.requestId) {
         this.initReject(error);
         this.initResolve = null;
