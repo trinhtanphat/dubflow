@@ -50,7 +50,7 @@ app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
 app.route('/api/projects', createVoiceCloneRoutes());
 app.route('/api/projects', languageRoutes);
-app.route('/api/projects', translationVariantRoutes());
+app.route('/api/projects', translationVariantRoutes);
 app.route('/api/projects', createTranslationRoutes());
 app.route('/api/projects', createTranslationContextRoutes());
 app.route('/api/projects', createJobRoutes());
