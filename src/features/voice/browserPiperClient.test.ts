@@ -69,6 +69,7 @@ describe('BrowserPiperClient', () => {
     await expect(first).resolves.toEqual(new Uint8Array([1, 2]));
 
     const second = client.synthesize('thế giới');
+    await Promise.resolve();
     expect(worker.messages.filter((message) => message.type === 'init')).toHaveLength(1);
     const secondRequest = worker.messages.at(-1);
     if (!secondRequest || secondRequest.type !== 'synthesize') throw new Error('Expected second synthesize request.');
