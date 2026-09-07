@@ -104,3 +104,63 @@ jobs:
             ${{ runner.temp }}/yupvox-1364x767-reference.png
           if-no-files-found: error
           retention-days: 14
+
+      - name: Install production smoke media tools
+        if: github.ref == 'refs/heads/fix/prod-h264-smoke-20260907'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
+
+      - name: Run production H264 R2 smoke
+        if: github.ref == 'refs/heads/fix/prod-h264-smoke-20260907'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="$RUNNER_TEMP/prod-h264-smoke.mp4"
+          OUTPUT="$RUNNER_TEMP/prod-h264-smoke-output.mp4"
+          WAV="$RUNNER_TEMP/prod-h264-smoke.wav"
+          LOG="$RUNNER_TEMP/prod-h264-smoke.log"
+
+          espeak-ng -v en-us -s 135 -w "$WAV" \
+            'Hello world. This is a DubFlow production smoke test. Please translate this sentence into Vietnamese.'
+
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i 'testsrc2=size=320x240:rate=25:duration=10' \
+            -i "$WAV" \
+            -shortest \
+            -c:v libx264 -profile:v baseline -level:v 3.0 -pix_fmt yuv420p -preset veryfast \
+            -c:a aac -b:a 96k \
+            "$SOURCE"
+
+          node scripts/prod-h264-smoke.mjs "$SOURCE" "$OUTPUT" | tee "$LOG"
+
+          SOURCE_VIDEO_CODEC="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$SOURCE")"
+          OUTPUT_VIDEO_CODEC="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUTPUT")"
+          OUTPUT_AUDIO_CODEC="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUTPUT")"
+          SOURCE_VIDEO_SHA="$(ffmpeg -v error -i "$SOURCE" -map 0:v:0 -c copy -bsf:v h264_mp4toannexb -f h264 - | sha256sum | awk '{print $1}')"
+          OUTPUT_VIDEO_SHA="$(ffmpeg -v error -i "$OUTPUT" -map 0:v:0 -c copy -bsf:v h264_mp4toannexb -f h264 - | sha256sum | awk '{print $1}')"
+
+          test "$SOURCE_VIDEO_CODEC" = 'h264'
+          test "$OUTPUT_VIDEO_CODEC" = 'h264'
+          test "$OUTPUT_AUDIO_CODEC" = 'aac'
+          test "$SOURCE_VIDEO_SHA" = "$OUTPUT_VIDEO_SHA"
+
+          {
+            echo "SOURCE_VIDEO_CODEC=$SOURCE_VIDEO_CODEC"
+            echo "OUTPUT_VIDEO_CODEC=$OUTPUT_VIDEO_CODEC"
+            echo "OUTPUT_AUDIO_CODEC=$OUTPUT_AUDIO_CODEC"
+            echo "VIDEO_PACKET_SHA256=$SOURCE_VIDEO_SHA"
+          } | tee -a "$LOG"
+
+      - name: Upload production H264 smoke evidence
+        if: github.ref == 'refs/heads/fix/prod-h264-smoke-20260907' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-h264-smoke-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/prod-h264-smoke.mp4
+            ${{ runner.temp }}/prod-h264-smoke-output.mp4
+            ${{ runner.temp }}/prod-h264-smoke.log
+          if-no-files-found: warn
+          retention-days: 7
