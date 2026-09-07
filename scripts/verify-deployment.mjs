@@ -18,6 +18,8 @@ export async function probeDeployment(fetchImpl = fetch, url = READINESS_URL) {
       && body?.schemaRevision === CURRENT_SCHEMA_REVISION
       && body?.media?.r2 === 'ready'
       && body?.media?.remux === 'ready'
+      && body?.voice?.provider === 'elevenlabs'
+      && body?.voice?.status === 'ready'
     );
     return { ok: ready, status: response.status, body };
   } catch (error) {
