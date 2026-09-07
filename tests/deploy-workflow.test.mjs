@@ -23,11 +23,12 @@ test('Cloudflare Workers Builds is the only production deployment lane', () => {
   assert.match(policy, /must not deploy/i);
 });
 
-test('Workers Builds container deploy token requirement is documented', () => {
+test('Workers Builds production lane is explicitly container-free on account 2403', () => {
   const policy = fs.readFileSync(policyUrl, 'utf8');
-  assert.match(policy, /Workers Builds.*API token/is);
-  assert.match(policy, /Containers Edit/i);
-  assert.match(policy, /Settings\s*>\s*Builds/i);
-  assert.match(policy, /Unauthorized/i);
-  assert.match(policy, /do not.*GitHub.*deploy/is);
+  assert.match(policy, /container-free/i);
+  assert.match(policy, /50afb4fd3c4c7a1f3e1bdb7f22d4af7f/i);
+  assert.match(policy, /removes `containers`.*`durable_objects`/is);
+  assert.match(policy, /without enabling paid Cloudflare Containers/i);
+  assert.match(policy, /hard-pins account/i);
+  assert.doesNotMatch(policy, /Containers Edit/i);
 });
