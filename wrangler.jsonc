@@ -17,6 +17,13 @@
   "vars": {
     "PUBLIC_ORIGIN": "https://yupvox.qs3d.site"
   },
+  "secrets": {
+    "required": [
+      "DEEPGRAM_API_KEY",
+      "ELEVENLABS_API_KEY",
+      "ELEVENLABS_DEFAULT_VOICE_ID"
+    ]
+  },
   "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "dubflow_events" }],
   "ratelimits": [
     { "name": "RATE_LIMIT_PROCESS", "namespace_id": "31001", "simple": { "limit": 4, "period": 60 } },
