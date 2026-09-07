@@ -4,6 +4,7 @@ import type { CloudJob } from '../features/projects/jobApi';
 import type { CloudProject } from '../features/projects/projectApi';
 import { getUsageSummary, type UsageSummaryResponse } from '../features/projects/usageApi';
 import { cancelDashboardJob, retryDashboardJob, type DashboardJobResult } from './dashboardJobControl';
+import { DASHBOARD_PATH, parseAppRoute, projectPath, type AppRoute } from './appRoute';
 import { StudioShell } from './StudioShell';
 import {
   createDashboardProject,
@@ -12,15 +13,22 @@ import {
 } from './projectDashboardFlow';
 import { useStudioState } from './useStudioState';
 
-type AppView = 'dashboard' | 'studio';
-
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
+function initialAppRoute(): AppRoute {
+  if (typeof window === 'undefined') return { view: 'dashboard' };
+  return parseAppRoute(window.location.pathname);
+}
+
+function appRoutePath(route: AppRoute): string {
+  return route.view === 'studio' ? projectPath(route.projectId) : DASHBOARD_PATH;
+}
+
 export function App() {
   const studio = useStudioState();
-  const [view, setView] = useState<AppView>('dashboard');
+  const [route, setRoute] = useState<AppRoute>(initialAppRoute);
   const [projects, setProjects] = useState<CloudProject[]>([]);
   const [jobsByProject, setJobsByProject] = useState<Record<string, CloudJob[]>>({});
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -29,8 +37,56 @@ export function App() {
   const [usageLoading, setUsageLoading] = useState(true);
   const [usageError, setUsageError] = useState('');
 
+  function navigateTo(nextRoute: AppRoute, mode: 'push' | 'replace' = 'push') {
+    setRoute(nextRoute);
+    if (typeof window === 'undefined') return;
+    const path = appRoutePath(nextRoute);
+    if (window.location.pathname === path) return;
+    if (mode === 'replace') {
+      window.history.replaceState(null, '', path);
+    } else {
+      window.history.pushState(null, '', path);
+    }
+  }
+
   useEffect(() => {
-    if (view !== 'dashboard') return;
+    if (typeof window === 'undefined') return;
+
+    const initialRoute = parseAppRoute(window.location.pathname);
+    const canonicalPath = appRoutePath(initialRoute);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState(null, '', canonicalPath);
+    }
+
+    const handlePopState = () => {
+      setRoute(parseAppRoute(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (route.view !== 'studio' || studio.state.project.id === route.projectId) return;
+    let active = true;
+    setDashboardError('');
+    void openDashboardProject(route.projectId)
+      .then((project) => {
+        if (!active) return;
+        studio.dispatch({ type: 'hydrateProject', project });
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setDashboardError(errorMessage(error, 'Không thể mở dự án từ đường dẫn.'));
+        setRoute({ view: 'dashboard' });
+        if (typeof window !== 'undefined') {
+          window.history.replaceState(null, '', DASHBOARD_PATH);
+        }
+      });
+    return () => { active = false; };
+  }, [route, studio.dispatch, studio.state.project.id]);
+
+  useEffect(() => {
+    if (route.view !== 'dashboard') return;
     let active = true;
     setDashboardLoading(true);
     setDashboardError('');
@@ -48,10 +104,10 @@ export function App() {
         if (active) setDashboardLoading(false);
       });
     return () => { active = false; };
-  }, [view]);
+  }, [route.view]);
 
   useEffect(() => {
-    if (view !== 'dashboard') return;
+    if (route.view !== 'dashboard') return;
     let active = true;
     setUsageLoading(true);
     setUsageError('');
@@ -67,7 +123,7 @@ export function App() {
         if (active) setUsageLoading(false);
       });
     return () => { active = false; };
-  }, [view]);
+  }, [route.view]);
 
   function applyJobResult(projectId: string, jobId: string, result: DashboardJobResult) {
     setProjects((current) => current.map((project) => project.id === projectId ? result.project : project));
@@ -82,7 +138,7 @@ export function App() {
     try {
       const project = await openDashboardProject(projectId);
       studio.dispatch({ type: 'hydrateProject', project });
-      setView('studio');
+      navigateTo({ view: 'studio', projectId: project.id });
     } catch (error) {
       setDashboardError(errorMessage(error, 'Không thể mở dự án.'));
     }
@@ -93,7 +149,7 @@ export function App() {
     try {
       const project = await createDashboardProject('Dự án mới');
       studio.dispatch({ type: 'hydrateProject', project });
-      setView('studio');
+      navigateTo({ view: 'studio', projectId: project.id });
     } catch (error) {
       setDashboardError(errorMessage(error, 'Không thể tạo dự án.'));
     }
@@ -121,7 +177,15 @@ export function App() {
 
   const hasUnresolvedDrafts = Object.keys(studio.state.drafts).length > 0;
 
-  if (view === 'studio') {
+  if (route.view === 'studio') {
+    if (studio.state.project.id !== route.projectId) {
+      return (
+        <div className="app-studio-view" aria-live="polite">
+          <div className="project-dashboard-loading">Đang tải dự án…</div>
+        </div>
+      );
+    }
+
     return (
       <div className="app-studio-view">
         <button
@@ -129,7 +193,7 @@ export function App() {
           className="studio-dashboard-nav"
           disabled={hasUnresolvedDrafts}
           title={hasUnresolvedDrafts ? 'Lưu hoặc xử lý xung đột trước khi quay về danh sách dự án.' : 'Quay về danh sách dự án'}
-          onClick={() => setView('dashboard')}
+          onClick={() => navigateTo({ view: 'dashboard' })}
         >
           ← Dự án
         </button>
