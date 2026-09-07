@@ -91,6 +91,7 @@ describe('Cloudflare provider contracts', () => {
       RATE_LIMIT_UPLOAD: rateLimit,
       RATE_LIMIT_VOICE_CLONE: rateLimit,
       RATE_LIMIT_BATCH_EXPORT: rateLimit,
+      RATE_LIMIT_SEPARATION: rateLimit,
       FFMPEG_CONTAINER: ffmpegContainer,
       DUBBING_WORKFLOW: dubbingWorkflow,
       EXPORT_WORKFLOW: exportWorkflow,
@@ -110,6 +111,7 @@ describe('Cloudflare provider contracts', () => {
     expect(env.RATE_LIMIT_UPLOAD).toBe(rateLimit);
     expect(env.RATE_LIMIT_VOICE_CLONE).toBe(rateLimit);
     expect(env.RATE_LIMIT_BATCH_EXPORT).toBe(rateLimit);
+    expect(env.RATE_LIMIT_SEPARATION).toBe(rateLimit);
     expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
