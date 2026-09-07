@@ -129,7 +129,7 @@ describe('export route', () => {
     ]);
   });
 
-  it('fails closed before creating a job when voice credentials are missing', async () => {
+  it('fails closed before creating a job when voice credentials are missing and client cache is incomplete', async () => {
     let created = false;
     const routes = createExportRoutes({
       makeProjects: () => ({
@@ -138,6 +138,7 @@ describe('export route', () => {
         },
       }) as never,
       makeJobs: () => ({ async create() { created = true; throw new Error('must not create'); } }) as never,
+      ...phase4cExportDeps(),
     });
 
     const response = await post(routes, { EXPORT_WORKFLOW: { create: async () => ({ id: 'x' }) } } as unknown as Env, '/p1/export');
