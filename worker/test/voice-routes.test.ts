@@ -45,7 +45,7 @@ describe('voice HTTP routes', () => {
     }));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      provider: 'workers-ai',
+      provider: 'xai/grok-tts',
       configured: true,
       languages: ['vi'],
       cloning: false,

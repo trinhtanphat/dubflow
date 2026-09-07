@@ -6,6 +6,7 @@ export type WorkersAIVoiceConfig = {
   model?: string;
   verifiedLanguages?: string[];
   voice?: string;
+  provider?: string;
 };
 
 type GrokTtsOutput = {
@@ -27,7 +28,7 @@ export class WorkersAIVoiceProvider implements VoiceProvider {
 
   capabilities(): VoiceCapabilities {
     return {
-      provider: 'workers-ai',
+      provider: this.config.provider ?? 'workers-ai',
       configured: Boolean(this.config.model),
       languages: this.config.verifiedLanguages ?? 'unknown',
       cloning: false,
