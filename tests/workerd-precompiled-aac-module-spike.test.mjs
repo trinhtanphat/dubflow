@@ -7,6 +7,7 @@ import test from 'node:test';
 const CONFIG = 'wrangler.aac-precompiled-spike.jsonc';
 const ENTRY = 'worker/src/spikes/aac-precompiled-worker.ts';
 const GENERATED_WASM = 'worker/src/spikes/generated/aac-decoder.wasm';
+const WRANGLER_BIN = 'node_modules/wrangler/bin/wrangler.js';
 const PORT = 8798;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
@@ -67,16 +68,49 @@ async function waitForWorker(child, diagnostics) {
   throw new Error(`local workerd did not become ready: ${lastError instanceof Error ? lastError.message : 'unknown error'}\n${diagnostics()}`);
 }
 
+async function stopWorker(child) {
+  if (child.exitCode !== null) return;
+
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
+  } else {
+    child.kill('SIGTERM');
+  }
+
+  await Promise.race([
+    new Promise((resolve) => child.once('exit', resolve)),
+    delay(2_000),
+  ]);
+
+  if (child.exitCode !== null) return;
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    } catch {}
+  }
+  child.kill('SIGKILL');
+}
+
 test('precompiled AAC Wasm module is executed inside local workerd', { timeout: 60_000 }, async () => {
   assert.equal(existsSync(CONFIG), true, `${CONFIG} must exist`);
   assert.equal(existsSync(ENTRY), true, `${ENTRY} must exist`);
+  assert.equal(existsSync(WRANGLER_BIN), true, `${WRANGLER_BIN} must exist`);
   await extractDecoderWasm();
   assert.equal(existsSync(GENERATED_WASM), true, 'AAC decoder Wasm must be materialized before Wrangler starts');
 
   const child = spawn(
-    process.platform === 'win32' ? 'npx.cmd' : 'npx',
-    ['wrangler', 'dev', '--local', '--config', CONFIG, '--ip', '127.0.0.1', '--port', String(PORT), '--log-level', 'error'],
-    { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CI: '1' } },
+    process.execPath,
+    [WRANGLER_BIN, 'dev', '--local', '--config', CONFIG, '--ip', '127.0.0.1', '--port', String(PORT), '--log-level', 'error'],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CI: '1' },
+      detached: process.platform !== 'win32',
+    },
   );
   let stdout = '';
   let stderr = '';
@@ -97,11 +131,6 @@ test('precompiled AAC Wasm module is executed inside local workerd', { timeout: 
     assert.equal(typeof body?.channelCount, 'number');
     assert.ok(body.channelCount >= 1);
   } finally {
-    child.kill('SIGTERM');
-    await Promise.race([
-      new Promise((resolve) => child.once('exit', resolve)),
-      delay(2_000),
-    ]);
-    if (child.exitCode === null) child.kill('SIGKILL');
+    await stopWorker(child);
   }
 });
