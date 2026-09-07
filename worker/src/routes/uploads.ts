@@ -13,7 +13,11 @@ export type UploadRouteDeps = {
 
 function uploadError(error: unknown) {
   if (error instanceof UploadInputError || error instanceof UploadServiceError) {
-    const status = error.code === 'PROJECT_NOT_FOUND' ? 404 : error.code === 'PREPARED_ASR_SOURCE_CHANGED' ? 409 : 400;
+    const status = error.code === 'PROJECT_NOT_FOUND'
+      ? 404
+      : error.code === 'ASR_PREP_STALE' || error.code === 'PREPARED_ASR_SOURCE_CHANGED'
+        ? 409
+        : 400;
     return { status, body: errorBody(error.code, error.message) } as const;
   }
   return { status: 500, body: errorBody('UPLOAD_FAILED', 'Upload operation failed.') } as const;
@@ -76,18 +80,20 @@ export function createUploadRoutes(deps: UploadRouteDeps = {}) {
     try {
       const contentLength = Number(c.req.header('content-length'));
       if (Number.isFinite(contentLength) && contentLength > PREPARED_ASR_MAX_CHUNK_BYTES) {
-        return c.json(errorBody('PREPARED_ASR_CHUNK_INVALID', 'Prepared ASR WAV chunk exceeds the upload limit.'), 400);
+        return c.json(errorBody('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV chunk exceeds the upload limit.'), 400);
       }
       const wav = await c.req.arrayBuffer();
       const service = makeService(c.env);
-      return c.json(await service.putPreparedAsrChunk(
+      return c.json(await service.uploadPreparedAsrChunk(
         c.req.param('id'),
         getCurrentUserId(),
-        queryNumber(c, 'sourceGeneration'),
-        Number(c.req.param('index')),
-        queryNumber(c, 'offsetMs'),
-        queryNumber(c, 'durationMs'),
-        wav,
+        {
+          sourceGeneration: queryNumber(c, 'sourceGeneration'),
+          index: Number(c.req.param('index')),
+          offsetMs: queryNumber(c, 'offsetMs'),
+          durationMs: queryNumber(c, 'durationMs'),
+          wav,
+        },
       ));
     } catch (error) {
       const result = uploadError(error);
