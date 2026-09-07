@@ -2,7 +2,6 @@
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.worker.json" },
-    { "path": "./tsconfig.gateway.json" }
+    { "path": "./tsconfig.worker.json" }
   ]
 }
