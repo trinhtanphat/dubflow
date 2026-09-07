@@ -1,0 +1,55 @@
+name: Production R2 Media Fixture
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/verify-production-media-fixture.mjs'
+      - '.github/workflows/production-media-fixture.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-r2-media-fixture
+  cancel-in-progress: false
+
+jobs:
+  verify-production-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install fixture media tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
+
+      - name: Generate deterministic H.264 speech fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          espeak-ng -s 135 -w "$RUNNER_TEMP/production-r2-fixture.wav" \
+            'Hello from DubFlow production media fixture. This verifies speech recognition, translation, voice generation, and final video export.'
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i 'testsrc=size=320x180:rate=24:duration=12' \
+            -i "$RUNNER_TEMP/production-r2-fixture.wav" \
+            -c:v libx264 -pix_fmt yuv420p -profile:v baseline -level 3.0 -preset veryfast \
+            -c:a aac -b:a 96k -shortest -movflags +faststart \
+            "$RUNNER_TEMP/production-r2-fixture.mp4"
+          test -s "$RUNNER_TEMP/production-r2-fixture.mp4"
+
+      - name: Verify deployed R2-only media path
+        env:
+          PRODUCTION_MEDIA_FIXTURE_PATH: ${{ runner.temp }}/production-r2-fixture.mp4
+        run: node scripts/verify-production-media-fixture.mjs
