@@ -48,6 +48,14 @@ type ValidatedTarget = {
   output: ExportOutput;
 };
 
+type VisualLipSyncQualification = 'qualified' | 'unqualified' | 'unavailable';
+
+type VisualLipSyncCapability = {
+  available: boolean;
+  provider: 'sync-labs' | null;
+  qualification: VisualLipSyncQualification;
+};
+
 function voiceCapabilities(env: Env): VoiceCapabilities {
   return new ElevenLabsVoiceProvider(
     env.ELEVENLABS_API_KEY ?? '',
@@ -101,8 +109,21 @@ function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode 
   return visualMode;
 }
 
+function visualLipSyncCapability(env: Env): VisualLipSyncCapability {
+  const configured = Boolean(env.SYNC_API_KEY?.trim());
+  if (!configured) {
+    return { available: false, provider: null, qualification: 'unavailable' };
+  }
+  const qualified = env.SYNC_LIPSYNC_QUALIFIED?.trim().toLowerCase() === 'true';
+  return {
+    available: qualified,
+    provider: 'sync-labs',
+    qualification: qualified ? 'qualified' : 'unqualified',
+  };
+}
+
 function visualLipSyncAvailable(env: Env): boolean {
-  return Boolean(env.SYNC_API_KEY?.trim());
+  return visualLipSyncCapability(env).available;
 }
 
 function separationCapabilityError(capabilities: DialogueSeparationCapabilities): ExportValidationError | null {
@@ -438,14 +459,11 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     } catch {
       separation = await new UnavailableDialogueSeparationProvider().capabilities();
     }
-    const lipSyncAvailable = visualLipSyncAvailable(c.env);
+    const visualLipSync = visualLipSyncCapability(c.env);
     return c.json({
       duckOriginal: true,
       separation,
-      visualLipSync: {
-        available: lipSyncAvailable,
-        provider: lipSyncAvailable ? 'sync-labs' : null,
-      },
+      visualLipSync,
     });
   });
 
