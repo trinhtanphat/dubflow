@@ -16,6 +16,7 @@ describe('StreamMediaService dubbed export publication', () => {
     const apiCalls: Array<{ method: string; url: string; body?: unknown }> = [];
     const downloadGenerate: string[] = [];
     const puts: Array<{ key: string; bytes: string; contentType?: string }> = [];
+    let audioCopied = false;
     let audioPoll = 0;
     let downloadPoll = 0;
 
@@ -68,9 +69,11 @@ describe('StreamMediaService dubbed export publication', () => {
       );
 
       if (method === 'POST' && url.endsWith('/audio/copy')) {
+        audioCopied = true;
         return Response.json({ success: true, result: { uid: 'audio-1', label: 'dubflow-vi-e1', default: false, status: 'queued' } });
       }
       if (method === 'GET' && url.endsWith('/audio')) {
+        if (!audioCopied) return Response.json({ success: true, result: { audio: [] } });
         audioPoll += 1;
         return Response.json({
           success: true,
