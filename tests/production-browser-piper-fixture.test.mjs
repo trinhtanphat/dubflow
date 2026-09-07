@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+// Keep this acceptance contract RED until the browser runner and manual workflow are implemented.
 const scriptUrl = new URL('../scripts/verify-production-browser-piper-fixture.mjs', import.meta.url);
 const workflowUrl = new URL('../.github/workflows/production-browser-piper-fixture.yml', import.meta.url);
 
