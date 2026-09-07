@@ -59,11 +59,11 @@ The former 300-second / 15-second overlapping FFmpeg chunk contract is historica
 
 ## Phase 4B safe managed voice clone qualification
 
-Phase 4B remains **source/CI qualification only** for consent-gated ElevenLabs Instant Voice Clone enrollment. Explicit rights/consent is required. Temporary samples remain bounded and managed cleanup is fail-closed. Production runtime remains **UNQUALIFIED** until a real authorized sample fixture passes.
+Phase 4B remains **source/CI qualification only** for consent-gated ElevenLabs Instant Voice Clone (IVC) enrollment. Explicit rights/consent is required. Temporary samples remain bounded and managed cleanup is fail-closed. Production runtime remains **UNQUALIFIED** until a real authorized sample fixture passes.
 
 ## Phase 4C multi-language batch export qualification
 
-Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`. Target translations, voice artifacts, soundtracks and exports are persisted independently; Vietnamese remains backward-compatible without overwriting sibling targets.
+Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`. Target translations, voice artifacts, soundtracks and exports are persisted independently; Vietnamese backward compatibility remains intact without overwriting sibling targets.
 
 `RATE_LIMIT_BATCH_EXPORT` remains the dedicated batch admission lane. Batch grouping is metadata only; child `project_exports` rows remain authoritative, so one failed target does not roll back completed siblings. The zero-container PCM/WAV + Stream publisher is the active `dubbed_only` render path.
 
