@@ -8,6 +8,7 @@ import { enforceRateLimit } from '../security/rate-limit';
 import { errorBody } from '../http/json';
 import { createTelemetry, withProviderTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
+import { paidWorkersAiEnabled } from '../services/paid-provider-policy';
 import { WorkersAITranslationProvider } from '../services/translation/workers-ai';
 import { GoogleCloudTranslationProvider } from '../services/translation/google';
 import { ContextualWorkersAITranslationProvider } from '../services/translation/contextual';
@@ -29,6 +30,7 @@ function providerErrorStatus(code: string): 400 | 409 | 502 | 503 {
   if (code === 'TRANSLATION_CONTEXT_UNSUPPORTED') return 409;
   if (code === 'CONTEXT_TRANSLATION_UNAVAILABLE') return 503;
   if (code === 'GOOGLE_TRANSLATE_PAID_OPT_IN_REQUIRED') return 503;
+  if (code === 'WORKERS_AI_PAID_OPT_IN_REQUIRED') return 503;
   return 502;
 }
 
@@ -37,16 +39,23 @@ export function createTranslationRoutes(deps: TranslationRouteDeps = {}) {
   const makeProjects = deps.makeProjects ?? ((env: Env) => new ProjectRepository(env.DB));
   const makeSegments = deps.makeSegments ?? ((env: Env) => new SegmentRepository(env.DB));
   const makeContext = deps.makeContext ?? ((env: Env) => new TranslationContextRepository(env.DB));
-  const makeRouter = deps.makeRouter ?? ((env: Env) => new TranslationRouter(
-    new WorkersAITranslationProvider(env.AI),
-    new GoogleCloudTranslationProvider(
-      env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? '',
-      fetch,
-      15_000,
-      env.PAID_GOOGLE_TRANSLATE_ENABLED,
-    ),
-    new ContextualWorkersAITranslationProvider(env.AI, env.CONTEXT_TRANSLATION_MODEL ?? ''),
-  ));
+  const makeRouter = deps.makeRouter ?? ((env: Env) => {
+    const workersAIEnabled = paidWorkersAiEnabled(env.PAID_WORKERS_AI_ENABLED);
+    return new TranslationRouter(
+      new WorkersAITranslationProvider(env.AI, workersAIEnabled),
+      new GoogleCloudTranslationProvider(
+        env.GOOGLE_CLOUD_TRANSLATE_API_KEY ?? '',
+        fetch,
+        15_000,
+        env.PAID_GOOGLE_TRANSLATE_ENABLED,
+      ),
+      new ContextualWorkersAITranslationProvider(
+        env.AI,
+        env.CONTEXT_TRANSLATION_MODEL ?? '',
+        workersAIEnabled,
+      ),
+    );
+  });
 
   routes.post('/:id/segments/:segmentId/retranslate', async (c) => {
     const userId = getCurrentUserId();
