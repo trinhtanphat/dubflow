@@ -31,6 +31,7 @@ describe('process route', () => {
       ANALYTICS: analytics,
       RATE_LIMIT_PROCESS: allowProcess,
       STREAM: {},
+      PUBLIC_ORIGIN: 'https://yupvox.qs3d.site',
       STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
       DUBBING_WORKFLOW: {
         async create(input: unknown) { workflowCalls.push(input); return { id: 'workflow-1' }; },

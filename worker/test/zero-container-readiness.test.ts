@@ -21,7 +21,7 @@ const schema13 = {
 };
 
 describe('zero-container media readiness', () => {
-  it('requires schema 13 and Stream configuration before reporting ready', async () => {
+  it('requires schema 13 and only the Stream source-path configuration before reporting ready', async () => {
     const db = {
       prepare() {
         return {
@@ -32,9 +32,8 @@ describe('zero-container media readiness', () => {
 
     const result = await checkReadiness(db, 'dg-secret', {
       stream: {},
-      accountId: '50afb4fd3c4c7a1f3e1bdb7f22d4af7f',
       sourceSigningSecret: 'source-secret',
-      streamApiToken: 'stream-token',
+      publicOrigin: 'https://yupvox.qs3d.site',
     });
 
     expect(result).toMatchObject({
@@ -45,9 +44,19 @@ describe('zero-container media readiness', () => {
     });
   });
 
-  it('reports media unavailable when Stream write configuration is incomplete', async () => {
+  it('does not require a separate Stream REST API token when the Workers Stream binding is present', async () => {
     const db = { prepare: () => ({ async first<T>() { return schema13 as T; } }) };
-    const result = await checkReadiness(db, 'dg-secret', { stream: {}, accountId: 'account' });
+    const result = await checkReadiness(db, 'dg-secret', {
+      stream: {},
+      sourceSigningSecret: 'source-secret',
+      publicOrigin: 'https://yupvox.qs3d.site',
+    });
+    expect(result.ready).toBe(true);
+  });
+
+  it('reports media unavailable when the signed source origin is incomplete', async () => {
+    const db = { prepare: () => ({ async first<T>() { return schema13 as T; } }) };
+    const result = await checkReadiness(db, 'dg-secret', { stream: {}, sourceSigningSecret: 'source-secret' });
     expect(result).toMatchObject({ ready: false, database: 'ready', schemaRevision: 13, media: { stream: 'unavailable' } });
   });
 });
