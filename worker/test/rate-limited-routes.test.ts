@@ -112,6 +112,7 @@ describe('Phase 3C expensive route admission', () => {
       RATE_LIMIT_EXPORT: limiter,
       ELEVENLABS_API_KEY: 'key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
+      PAID_ELEVENLABS_ENABLED: 'true',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); return { id: 'w1' }; } },
     } as unknown as Env;
 
