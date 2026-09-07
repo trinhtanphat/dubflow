@@ -429,6 +429,7 @@ describe('Phase 4D export audio treatment admission', () => {
       visualLipSync: {
         available: false,
         provider: null,
+        qualification: 'unavailable',
       },
     });
     expect(h.calls.separationCapabilities).toBe(1);
