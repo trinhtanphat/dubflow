@@ -17,8 +17,11 @@ function variant(
     startMs: 0,
     endMs: 1000,
     sourceText: 'hello',
+    sourceVersion: 1,
     speakerId: null,
     translation: {
+      segmentId,
+      projectId: 'p1',
       targetLanguage: 'vi',
       translatedText: `Xin chào ${segmentId}`,
       translationEngine: 'workers-ai',
