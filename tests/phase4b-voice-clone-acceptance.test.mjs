@@ -42,7 +42,10 @@ test('Phase 4B capability is explicit instead of a generic cloning claim', () =>
   assert.match(elevenLabsVoice, /mode:\s*'ivc'/);
   assert.match(workersAiVoice, /cloneEnrollment:[\s\S]*available:\s*false/);
   assert.match(route, /provider\.capabilities\(\)/);
-  assert.match(route, /hasElevenLabsKey/);
+  assert.match(route, /new ElevenLabsVoiceProvider/);
+  assert.match(route, /ELEVENLABS_API_KEY/);
+  assert.match(route, /ELEVENLABS_DEFAULT_VOICE_ID/);
+  assert.doesNotMatch(route, /new WorkersAIVoiceProvider/);
 });
 
 test('Phase 4B documents consent and no-production boundary', () => {
