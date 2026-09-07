@@ -26,6 +26,7 @@
     "@types/react": "^19.1.1",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "@wasm-audio-decoders/aac": "0.0.1",
     "typescript": "^5.8.3",
     "vite": "^7.1.0",
     "vitest": "^3.2.4",
