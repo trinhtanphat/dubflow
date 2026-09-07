@@ -454,6 +454,9 @@ export function StudioShell(props: Props) {
           return getTranslationVariants(id, 'vi');
         },
         synthesize: (text, onProgress) => {
+          if (!browserPiperAvailable()) {
+            throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+          }
           if (!piperClientRef.current) piperClientRef.current = new BrowserPiperClient();
           return piperClientRef.current.synthesize(text, onProgress);
         },
