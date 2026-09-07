@@ -30,6 +30,10 @@ import {
   recoverProjectLanguagesConflict,
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
+import {
+  isLocalPiperSupported,
+  prepareVietnameseClientVoiceCache,
+} from '../features/voice/clientPiperVoice';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
 import {
   Phase4CStudioProvider,
@@ -82,6 +86,30 @@ function withRequestedTreatment(
   visualMode: VisualMode,
 ): ExportLaunchDto {
   return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
+}
+
+type LocalVoiceLaunchInput = {
+  projectId: string;
+  targetLanguages: TargetLanguage[];
+  output: ExportOutput;
+  audioMode: DubbedAudioMode;
+  localSupported: boolean;
+};
+
+export async function launchWithLocalVietnameseVoice<T>(
+  input: LocalVoiceLaunchInput,
+  launch: () => Promise<T>,
+  prepare: (projectId: string) => Promise<unknown> = prepareVietnameseClientVoiceCache,
+): Promise<T> {
+  if (
+    input.localSupported
+    && input.output === 'dubbed'
+    && input.audioMode === 'dubbed_only'
+    && input.targetLanguages.includes('vi')
+  ) {
+    await prepare(input.projectId);
+  }
+  return launch();
 }
 
 export function acceptPolledExportAttempt(
@@ -371,6 +399,7 @@ export function StudioShell(props: Props) {
   };
 
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
+  const localVietnameseVoiceAvailable = isLocalPiperSupported();
 
   const exportCurrent = async () => {
     setExportBusy(true);
@@ -378,7 +407,13 @@ export function StudioShell(props: Props) {
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
-      const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode);
+      const result = await launchWithLocalVietnameseVoice({
+        projectId,
+        targetLanguages: [exportTarget],
+        output: exportOutput,
+        audioMode: requestedMode,
+        localSupported: localVietnameseVoiceAvailable,
+      }, () => startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode));
       const tagged = withRequestedTreatment(result, exportOutput, requestedMode, requestedVisualMode);
       clearAttempt(tagged.targetLanguage);
       setExportResults((current) => [...current.filter((item) => item.targetLanguage !== tagged.targetLanguage), tagged]);
@@ -395,7 +430,13 @@ export function StudioShell(props: Props) {
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
-      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode);
+      const result = await launchWithLocalVietnameseVoice({
+        projectId,
+        targetLanguages: selectedLanguages,
+        output: exportOutput,
+        audioMode: requestedMode,
+        localSupported: localVietnameseVoiceAvailable,
+      }, () => startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode));
       const tagged = result.exports.map((item) => withRequestedTreatment(item, exportOutput, requestedMode, requestedVisualMode));
       setExportAttempts((current) => {
         const next = { ...current };
@@ -418,7 +459,13 @@ export function StudioShell(props: Props) {
     const requestedMode = requestedOutput === 'dubbed' ? (prior?.audioMode ?? audioMode) : 'dubbed_only';
     const requestedVisualMode = requestedOutput === 'dubbed' ? (prior?.visualMode ?? visualMode) : 'standard';
     try {
-      const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode);
+      const result = await launchWithLocalVietnameseVoice({
+        projectId,
+        targetLanguages: [language],
+        output: requestedOutput,
+        audioMode: requestedMode,
+        localSupported: localVietnameseVoiceAvailable,
+      }, () => startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode));
       const tagged = withRequestedTreatment(result, requestedOutput, requestedMode, requestedVisualMode);
       clearAttempt(language);
       setExportResults((current) => current.map((item) => item.targetLanguage === language ? tagged : item));
@@ -462,6 +509,7 @@ export function StudioShell(props: Props) {
                 visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
+                localVietnameseVoiceAvailable={localVietnameseVoiceAvailable && audioMode === 'dubbed_only'}
                 busy={exportBusy}
                 results={exportResults}
                 attempts={exportAttempts}
