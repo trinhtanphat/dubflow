@@ -37,6 +37,8 @@ type ReadinessSchemaRow = {
   stream_video_uid_column: number;
   stream_source_object_key_column: number;
   stream_ready_at_column: number;
+  export_stream_video_uid_column: number;
+  export_stream_source_object_key_column: number;
 };
 
 const CURRENT_SCHEMA_REVISION = 12 as const;
@@ -55,7 +57,9 @@ function hasCurrentSchema(row: ReadinessSchemaRow | null): boolean {
     Number(row.project_audio_stems_table) === 1 &&
     Number(row.stream_video_uid_column) === 1 &&
     Number(row.stream_source_object_key_column) === 1 &&
-    Number(row.stream_ready_at_column) === 1
+    Number(row.stream_ready_at_column) === 1 &&
+    Number(row.export_stream_video_uid_column) === 1 &&
+    Number(row.export_stream_source_object_key_column) === 1
   );
 }
 
@@ -96,7 +100,9 @@ export async function checkReadiness(
         EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'project_audio_stems') AS project_audio_stems_table,
         EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name = 'stream_video_uid') AS stream_video_uid_column,
         EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name = 'stream_source_object_key') AS stream_source_object_key_column,
-        EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name = 'stream_ready_at') AS stream_ready_at_column
+        EXISTS(SELECT 1 FROM pragma_table_info('projects') WHERE name = 'stream_ready_at') AS stream_ready_at_column,
+        EXISTS(SELECT 1 FROM pragma_table_info('project_exports') WHERE name = 'stream_video_uid') AS export_stream_video_uid_column,
+        EXISTS(SELECT 1 FROM pragma_table_info('project_exports') WHERE name = 'stream_source_object_key') AS export_stream_source_object_key_column
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
