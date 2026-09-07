@@ -9,6 +9,11 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider, RemoteAsrProvider } from '../services/asr/types';
+import {
+  DIRECT_ASR_CHUNK_DURATION_MS,
+  extractR2LongFormAudioChunks,
+  type SourceAudioChunk,
+} from '../services/asr/r2-long-form';
 import { stitchAsrChunks, type StitchChunk } from '../services/asr/stitch';
 import { reconcileSpeakerIds, type ExistingSpeakerCoverage } from '../services/asr/reconcile';
 import { isTranslationContextActive } from '../services/translation/context';
@@ -46,6 +51,8 @@ type SourceMedia = {
 };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+type SourceAudioChunkExtractor = (audioUrl: string, durationMs: number) => Promise<SourceAudioChunk[]>;
+
 export type DubbingPipelineDeps = {
   projects: PipelineProjects;
   jobs: PipelineJobs;
@@ -53,6 +60,7 @@ export type DubbingPipelineDeps = {
   media?: Pick<MediaProcessor, 'probe' | 'extractAudioChunks'>;
   bucket?: Pick<R2BucketLike, 'get'>;
   fetcher?: FetchLike;
+  extractSourceAudioChunks?: SourceAudioChunkExtractor;
   asr: AsrProvider & Partial<RemoteAsrProvider>;
   asrProviderId: string;
   segments: PipelineSegments;
@@ -62,7 +70,7 @@ export type DubbingPipelineDeps = {
   telemetry: TelemetrySink;
 };
 
-const MAX_DIRECT_ASR_DURATION_MS = 300_000;
+const MAX_DIRECT_ASR_DURATION_MS = DIRECT_ASR_CHUNK_DURATION_MS;
 const MAX_DIRECT_ASR_BYTES = 24 * 1024 * 1024;
 
 class PipelineFailure extends Error {
@@ -126,6 +134,26 @@ function supportsRemoteAsr(asr: AsrProvider & Partial<RemoteAsrProvider>): asr i
   return typeof asr.transcribeUrl === 'function';
 }
 
+function assertDirectSourceChunk(chunk: SourceAudioChunk, index: number, sourceDurationMs: number): void {
+  if (!chunk.chunkId.trim()) throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} id is missing.`);
+  if (!Number.isInteger(chunk.offsetMs) || chunk.offsetMs < 0 || chunk.offsetMs >= sourceDurationMs) {
+    throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} offset is invalid.`);
+  }
+  if (!Number.isInteger(chunk.durationMs) || chunk.durationMs <= 0 || chunk.durationMs > MAX_DIRECT_ASR_DURATION_MS) {
+    throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} duration is invalid.`);
+  }
+  if (chunk.offsetMs + chunk.durationMs > sourceDurationMs) {
+    throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} exceeds the source duration.`);
+  }
+  if (!Number.isInteger(chunk.overlapBeforeMs) || chunk.overlapBeforeMs < 0
+    || !Number.isInteger(chunk.overlapAfterMs) || chunk.overlapAfterMs < 0) {
+    throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} overlap is invalid.`);
+  }
+  if (!chunk.audio.byteLength || chunk.audio.byteLength > MAX_DIRECT_ASR_BYTES) {
+    throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} exceeds the direct Workers AI payload budget.`);
+  }
+}
+
 async function directAsrAudio(
   audioUrl: string,
   durationMs: number,
@@ -134,7 +162,7 @@ async function directAsrAudio(
   if (durationMs > MAX_DIRECT_ASR_DURATION_MS) {
     throw new PipelineFailure(
       'ASR_LONG_FORM_UNAVAILABLE',
-      'Long-form source audio requires a remote-capable ASR provider such as Deepgram.',
+      'Long-form source audio must be decoded into bounded chunks before direct ASR.',
     );
   }
   const response = await fetcher(audioUrl);
@@ -143,14 +171,14 @@ async function directAsrAudio(
   if (Number.isFinite(contentLength) && contentLength > MAX_DIRECT_ASR_BYTES) {
     throw new PipelineFailure(
       'ASR_LONG_FORM_UNAVAILABLE',
-      'Source audio exceeds the direct Workers AI payload budget; configure Deepgram for remote ASR.',
+      'Source audio exceeds the direct Workers AI payload budget.',
     );
   }
   const audio = await response.arrayBuffer();
   if (audio.byteLength > MAX_DIRECT_ASR_BYTES) {
     throw new PipelineFailure(
       'ASR_LONG_FORM_UNAVAILABLE',
-      'Source audio exceeds the direct Workers AI payload budget; configure Deepgram for remote ASR.',
+      'Source audio exceeds the direct Workers AI payload budget.',
     );
   }
   return audio;
@@ -192,7 +220,7 @@ export async function runDubbingPipeline(
       );
 
       failureCode = 'ASR_FAILED';
-      await step.do('check cancellation before remote ASR', ensureActive);
+      await step.do('check cancellation before source ASR', ensureActive);
       const startedUnits = validSourceDuration(source.durationMs) ? source.durationMs / 1000 : 0;
       const item = `source:${source.sourceId}`;
       const key = operationKey(params.jobId, retryCount, 'asr', item, asrProvider);
@@ -207,33 +235,107 @@ export async function runDubbingPipeline(
         phase: 'started',
       });
 
-      const asrResult = await step.do('transcribe source media', async () => withProviderTelemetry(deps.telemetry, {
-        requestId: params.requestId,
-        actorId: params.userId,
-        projectId: params.projectId,
-        jobId: params.jobId,
-        operation: 'asr',
-        provider: asrProvider,
-        errorCode: 'ASR_FAILED',
-      }, async () => {
-        if (supportsRemoteAsr(deps.asr)) {
-          return deps.asr.transcribeUrl(source.audioUrl, { sourceLanguage: project.sourceLanguage });
-        }
+      let providerDurationMs: number | null = null;
+      if (supportsRemoteAsr(deps.asr)) {
+        const asrResult = await step.do('transcribe source media', async () => withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'asr',
+          provider: asrProvider,
+          errorCode: 'ASR_FAILED',
+        }, () => deps.asr.transcribeUrl(source.audioUrl, { sourceLanguage: project.sourceLanguage })));
+        providerDurationMs = validSourceDuration(asrResult.durationMs) ? asrResult.durationMs : null;
+        stitchInputs.push({
+          projectId: params.projectId,
+          chunkId: `source:${source.sourceId}`,
+          chunkOrder: 0,
+          offsetMs: 0,
+          overlapBeforeMs: 0,
+          overlapAfterMs: 0,
+          segments: asrResult.segments,
+        });
+        await step.do('persist remote ASR progress', async () => deps.jobs.setProgress(params.jobId, 0.65, 'transcribing'));
+      } else {
         if (!validSourceDuration(source.durationMs)) {
           throw new PipelineFailure(
             'ASR_LONG_FORM_UNAVAILABLE',
-            'Direct ASR requires a known bounded source duration; configure Deepgram for remote ASR.',
+            'Direct ASR requires a known bounded source duration.',
           );
         }
-        const audio = await directAsrAudio(source.audioUrl, source.durationMs, deps.fetcher ?? fetch);
-        return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
-      }));
+
+        if (source.durationMs <= MAX_DIRECT_ASR_DURATION_MS) {
+          const asrResult = await step.do('transcribe source media', async () => withProviderTelemetry(deps.telemetry, {
+            requestId: params.requestId,
+            actorId: params.userId,
+            projectId: params.projectId,
+            jobId: params.jobId,
+            operation: 'asr',
+            provider: asrProvider,
+            errorCode: 'ASR_FAILED',
+          }, async () => {
+            const audio = await directAsrAudio(source.audioUrl, source.durationMs!, deps.fetcher ?? fetch);
+            return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+          }));
+          stitchInputs.push({
+            projectId: params.projectId,
+            chunkId: `source:${source.sourceId}`,
+            chunkOrder: 0,
+            offsetMs: 0,
+            overlapBeforeMs: 0,
+            overlapAfterMs: 0,
+            segments: asrResult.segments,
+          });
+          await step.do('persist direct ASR progress', async () => deps.jobs.setProgress(params.jobId, 0.65, 'transcribing'));
+        } else {
+          await step.do('check cancellation before source audio chunk extraction', ensureActive);
+          const extractChunks = deps.extractSourceAudioChunks ?? extractR2LongFormAudioChunks;
+          const chunks = await step.do('decode bounded source audio chunks', async () =>
+            extractChunks(source.audioUrl, source.durationMs!),
+          );
+          if (chunks.length === 0) {
+            throw new PipelineFailure('ASR_LONG_FORM_UNAVAILABLE', 'Long-form source produced no bounded audio chunks.');
+          }
+
+          let previousEndMs = 0;
+          for (let index = 0; index < chunks.length; index += 1) {
+            const chunk = chunks[index];
+            assertDirectSourceChunk(chunk, index, source.durationMs);
+            if (chunk.offsetMs < previousEndMs - chunk.overlapBeforeMs) {
+              throw new Error(`ASR_CHUNK_INVALID: Chunk ${index + 1} timeline is not monotonic.`);
+            }
+            previousEndMs = chunk.offsetMs + chunk.durationMs;
+            await step.do(`check cancellation before source ASR chunk ${index + 1}`, ensureActive);
+            const asrResult = await step.do(`transcribe source audio chunk ${index + 1}`, async () => withProviderTelemetry(deps.telemetry, {
+              requestId: params.requestId,
+              actorId: params.userId,
+              projectId: params.projectId,
+              jobId: params.jobId,
+              operation: 'asr',
+              provider: asrProvider,
+              errorCode: 'ASR_FAILED',
+            }, () => deps.asr.transcribe(chunk.audio, { sourceLanguage: project.sourceLanguage })));
+            stitchInputs.push({
+              projectId: params.projectId,
+              chunkId: chunk.chunkId,
+              chunkOrder: index,
+              offsetMs: chunk.offsetMs,
+              overlapBeforeMs: chunk.overlapBeforeMs,
+              overlapAfterMs: chunk.overlapAfterMs,
+              segments: asrResult.segments,
+            });
+            const progress = 0.2 + ((index + 1) / chunks.length) * 0.45;
+            await step.do(`persist source ASR progress ${index + 1}`, async () =>
+              deps.jobs.setProgress(params.jobId, progress, 'transcribing'),
+            );
+          }
+        }
+      }
 
       const sourceDurationMs = validSourceDuration(source.durationMs)
         ? source.durationMs
-        : validSourceDuration(asrResult.durationMs)
-          ? asrResult.durationMs
-          : null;
+        : providerDurationMs;
       if (!sourceDurationMs) {
         throw new PipelineFailure('ASR_RESPONSE_INVALID', 'Source media duration is missing, invalid, or exceeds 3 hours.');
       }
@@ -251,19 +353,8 @@ export async function runDubbingPipeline(
 
       await step.do('persist source duration', async () => {
         await deps.projects.setStatus(params.projectId, params.userId, 'processing', sourceDurationMs);
-        await deps.jobs.setProgress(params.jobId, 0.12, 'transcribing');
+        await deps.jobs.setProgress(params.jobId, 0.65, 'transcribing');
       });
-
-      stitchInputs.push({
-        projectId: params.projectId,
-        chunkId: `source:${source.sourceId}`,
-        chunkOrder: 0,
-        offsetMs: 0,
-        overlapBeforeMs: 0,
-        overlapAfterMs: 0,
-        segments: asrResult.segments,
-      });
-      await step.do('persist remote ASR progress', async () => deps.jobs.setProgress(params.jobId, 0.65, 'transcribing'));
     } else {
       if (!deps.media) throw new Error('Media processor is unavailable.');
       failureCode = 'MEDIA_PROCESSOR_FAILED';
