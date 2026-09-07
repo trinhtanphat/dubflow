@@ -21,6 +21,7 @@ import { createUsageRoutes } from './routes/usage';
 import { createProjectShareRoutes, createPublicShareRoutes } from './routes/shares';
 import { createMediaSourceRoutes } from './routes/media-source';
 import { createProviderMediaRoutes } from './routes/provider-media';
+import { isR2Mp4RemuxRuntimeReady } from './services/media/mp4-remux';
 
 const app = new Hono<WorkerHonoEnv>();
 const exportRoutes = createExportRoutes();
@@ -30,12 +31,12 @@ const translationVariantRoutes = createTranslationVariantRoutes();
 app.use('/api/*', requestTelemetryMiddleware());
 app.get('/api/health', (c) => c.json(healthPayload()));
 app.get('/api/ready', async (c) => {
+  const remuxReady = await isR2Mp4RemuxRuntimeReady();
   const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY, {
-    stream: c.env.STREAM,
-    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
+    r2: c.env.MEDIA,
     publicOrigin: c.env.PUBLIC_ORIGIN,
-    sourceSigningSecret: c.env.STREAM_SOURCE_SIGNING_SECRET,
-    streamApiToken: c.env.CLOUDFLARE_STREAM_API_TOKEN,
+    sourceSigningSecret: c.env.MEDIA_SOURCE_SIGNING_SECRET ?? c.env.STREAM_SOURCE_SIGNING_SECRET,
+    remuxReady,
   });
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });
@@ -50,7 +51,7 @@ app.route('/api/projects', createSegmentRoutes());
 app.route('/api/projects', createSpeakerRoutes());
 app.route('/api/projects', createVoiceCloneRoutes());
 app.route('/api/projects', languageRoutes);
-app.route('/api/projects', translationVariantRoutes);
+app.route('/api/projects', translationVariantRoutes());
 app.route('/api/projects', createTranslationRoutes());
 app.route('/api/projects', createTranslationContextRoutes());
 app.route('/api/projects', createJobRoutes());
