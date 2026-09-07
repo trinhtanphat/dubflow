@@ -1,4 +1,5 @@
 import type { VisualMode } from '../domain/visual-mode';
+import { isJobCancelledError } from './jobCancellation';
 import { runExportPipeline as runLegacyExportPipeline } from './legacyExportPipeline';
 import type {
   ExportPipelineDeps as LegacyExportPipelineDeps,
@@ -63,6 +64,19 @@ function shouldUseZeroContainer(input: RunExportParams, deps: ExportPipelineDeps
   return value.output === 'dubbed' && value.audioMode === 'dubbed_only';
 }
 
+async function recoverLegacyProjectFailure(
+  input: RunExportParams,
+  deps: ExportPipelineDeps,
+  error: unknown,
+): Promise<void> {
+  if (hasModernExportFields(input) || isJobCancelledError(error)) return;
+  try {
+    await deps.projects.setStatus(input.projectId, input.userId, 'needs_review');
+  } catch {
+    // Preserve the original export failure if project lifecycle repair also fails.
+  }
+}
+
 export async function runExportPipeline(
   input: RunExportParams,
   deps: ExportPipelineDeps,
@@ -80,9 +94,14 @@ export async function runExportPipeline(
   if (!deps.media && value.output !== 'subtitles') {
     throw new Error('Media processor is unavailable.');
   }
-  return runLegacyExportPipeline(
-    input,
-    deps as LegacyExportPipelineDeps,
-    step,
-  );
+  try {
+    return await runLegacyExportPipeline(
+      input,
+      deps as LegacyExportPipelineDeps,
+      step,
+    );
+  } catch (error) {
+    await recoverLegacyProjectFailure(input, deps, error);
+    throw error;
+  }
 }
