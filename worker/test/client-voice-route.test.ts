@@ -147,6 +147,67 @@ describe('client-generated PCM voice route', () => {
     expect(harness.stored()).toBeNull();
   });
 
+  it('rejects missing or unauthorized resources and incomplete translations before rate limit and R2 write', async () => {
+    const missingProject = testApp();
+    const projectResponse = await put(
+      missingProject.app,
+      missingProject.env,
+      '/api/projects/p2/translations/vi/s1/voice-pcm',
+      new Uint8Array([0, 0]),
+    );
+    expect(projectResponse.status).toBe(404);
+    expect(await projectResponse.json()).toMatchObject({ code: 'PROJECT_NOT_FOUND' });
+    expect(missingProject.calls).toEqual(['project:p2:dev-user']);
+    expect(missingProject.stored()).toBeNull();
+
+    const missingSegment = testApp();
+    const segmentResponse = await put(
+      missingSegment.app,
+      missingSegment.env,
+      '/api/projects/p1/translations/vi/missing/voice-pcm',
+      new Uint8Array([0, 0]),
+    );
+    expect(segmentResponse.status).toBe(404);
+    expect(await segmentResponse.json()).toMatchObject({ code: 'SEGMENT_NOT_FOUND' });
+    expect(missingSegment.calls).toEqual([
+      'project:p1:dev-user',
+      'segment:p1:missing:dev-user',
+    ]);
+    expect(missingSegment.stored()).toBeNull();
+
+    const missingVariant = testApp({ current: null });
+    const variantResponse = await put(
+      missingVariant.app,
+      missingVariant.env,
+      '/api/projects/p1/translations/vi/s1/voice-pcm',
+      new Uint8Array([0, 0]),
+    );
+    expect(variantResponse.status).toBe(404);
+    expect(await variantResponse.json()).toMatchObject({ code: 'TRANSLATION_VARIANT_NOT_FOUND' });
+    expect(missingVariant.calls).toEqual([
+      'project:p1:dev-user',
+      'segment:p1:s1:dev-user',
+      'translation:get',
+    ]);
+    expect(missingVariant.stored()).toBeNull();
+
+    const incompleteVariant = testApp({ current: translation({ translationStatus: 'pending' }) });
+    const incompleteResponse = await put(
+      incompleteVariant.app,
+      incompleteVariant.env,
+      '/api/projects/p1/translations/vi/s1/voice-pcm',
+      new Uint8Array([0, 0]),
+    );
+    expect(incompleteResponse.status).toBe(409);
+    expect(await incompleteResponse.json()).toMatchObject({ code: 'TRANSLATION_VARIANT_INCOMPLETE' });
+    expect(incompleteVariant.calls).toEqual([
+      'project:p1:dev-user',
+      'segment:p1:s1:dev-user',
+      'translation:get',
+    ]);
+    expect(incompleteVariant.stored()).toBeNull();
+  });
+
   it('rejects unsupported language and malformed PCM metadata without repository work', async () => {
     const languageHarness = testApp();
     const unsupported = await put(languageHarness.app, languageHarness.env, '/api/projects/p1/translations/ja/s1/voice-pcm', new Uint8Array([0, 0]));
@@ -167,7 +228,13 @@ describe('client-generated PCM voice route', () => {
     expect(metadataHarness.calls).toEqual([]);
   });
 
-  it('rejects odd and oversized PCM and rate-limited requests before R2 write', async () => {
+  it('rejects empty, odd and oversized PCM and rate-limited requests before R2 write', async () => {
+    const emptyHarness = testApp();
+    const empty = await put(emptyHarness.app, emptyHarness.env, '/api/projects/p1/translations/vi/s1/voice-pcm', new Uint8Array());
+    expect(empty.status).toBe(400);
+    expect(await empty.json()).toMatchObject({ code: 'CLIENT_VOICE_PCM_INVALID' });
+    expect(emptyHarness.stored()).toBeNull();
+
     const oddHarness = testApp();
     const odd = await put(oddHarness.app, oddHarness.env, '/api/projects/p1/translations/vi/s1/voice-pcm', new Uint8Array([1, 2, 3]));
     expect(odd.status).toBe(400);
