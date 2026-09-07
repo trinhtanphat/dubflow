@@ -101,12 +101,14 @@ export async function launchWithLocalVietnameseVoice<T>(
   launch: () => Promise<T>,
   prepare: (projectId: string) => Promise<unknown> = prepareVietnameseClientVoiceCache,
 ): Promise<T> {
-  if (
-    input.localSupported
-    && input.output === 'dubbed'
+  const requiresLocalVietnameseVoice = input.output === 'dubbed'
     && input.audioMode === 'dubbed_only'
-    && input.targetLanguages.includes('vi')
-  ) {
+    && input.targetLanguages.includes('vi');
+
+  if (requiresLocalVietnameseVoice && !input.localSupported) {
+    throw new Error('Local Piper is required for Vietnamese dubbed-only export in this browser.');
+  }
+  if (requiresLocalVietnameseVoice) {
     await prepare(input.projectId);
   }
   return launch();
