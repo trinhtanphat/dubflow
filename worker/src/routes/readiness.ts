@@ -20,6 +20,16 @@ export type MediaReadiness = {
   remux: 'ready' | 'unavailable';
 };
 
+export type VoiceReadinessConfig = {
+  apiKey?: string;
+  defaultVoiceId?: string;
+};
+
+export type VoiceReadiness = {
+  provider: 'elevenlabs';
+  status: 'ready' | 'unavailable';
+};
+
 export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
@@ -27,6 +37,7 @@ export type ReadinessResult = {
   schemaRevision: 14 | null;
   asr: AsrCapabilities;
   media?: MediaReadiness;
+  voice?: VoiceReadiness;
 };
 
 type ReadinessSchemaRow = {
@@ -85,19 +96,40 @@ function mediaStatus(config?: MediaReadinessConfig): MediaReadiness | undefined 
   };
 }
 
-function result(input: Omit<ReadinessResult, 'ready'>, media?: MediaReadiness): ReadinessResult {
+function voiceStatus(config?: VoiceReadinessConfig): VoiceReadiness | undefined {
+  if (!config) return undefined;
+  const configured = Boolean(config.apiKey?.trim() && config.defaultVoiceId?.trim());
+  return {
+    provider: 'elevenlabs',
+    status: configured ? 'ready' : 'unavailable',
+  };
+}
+
+function result(
+  input: Omit<ReadinessResult, 'ready'>,
+  media?: MediaReadiness,
+  voice?: VoiceReadiness,
+): ReadinessResult {
   const ready = input.database === 'ready'
-    && (!media || (media.r2 === 'ready' && media.remux === 'ready'));
-  return { ready, ...input, ...(media ? { media } : {}) };
+    && (!media || (media.r2 === 'ready' && media.remux === 'ready'))
+    && (!voice || voice.status === 'ready');
+  return {
+    ready,
+    ...input,
+    ...(media ? { media } : {}),
+    ...(voice ? { voice } : {}),
+  };
 }
 
 export async function checkReadiness(
   db: ReadinessDatabaseLike,
   deepgramApiKey?: string,
   mediaConfig?: MediaReadinessConfig,
+  voiceConfig?: VoiceReadinessConfig,
 ): Promise<ReadinessResult> {
   const asr = asrCapabilities(deepgramApiKey);
   const media = mediaStatus(mediaConfig);
+  const voice = voiceStatus(voiceConfig);
   try {
     const row = await db.prepare(`
       SELECT
@@ -120,10 +152,10 @@ export async function checkReadiness(
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
-      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr }, media);
+      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr }, media, voice);
     }
-    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr }, media);
+    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr }, media, voice);
   } catch {
-    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr }, media);
+    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr }, media, voice);
   }
 }
