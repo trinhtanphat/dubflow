@@ -13,11 +13,11 @@ describe('Google Cloud Translation provider', () => {
       'capabilities',
       { contextual: false, available: false, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
     );
-    expect(new GoogleCloudTranslationProvider('secret-key', ' TRUE ')).toHaveProperty(
+    expect(new GoogleCloudTranslationProvider('secret-key', fetch, 15_000, ' TRUE ')).toHaveProperty(
       'capabilities',
       { contextual: false, available: true, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
     );
-    expect(new GoogleCloudTranslationProvider('', 'true')).toHaveProperty(
+    expect(new GoogleCloudTranslationProvider('', fetch, 15_000, 'true')).toHaveProperty(
       'capabilities',
       { contextual: false, available: false, targets: ['vi', 'en', 'zh', 'ja', 'ko'] },
     );
@@ -25,7 +25,7 @@ describe('Google Cloud Translation provider', () => {
 
   it('fails closed before network calls when only a Google API key is configured', async () => {
     let called = false;
-    const provider = new GoogleCloudTranslationProvider('secret-key', undefined, async () => {
+    const provider = new GoogleCloudTranslationProvider('secret-key', async () => {
       called = true;
       return Response.json({ data: { translations: [{ translatedText: 'x' }] } });
     });
@@ -48,7 +48,7 @@ describe('Google Cloud Translation provider', () => {
         { translatedText: 'Thế giới' },
       ] } });
     };
-    const provider = new GoogleCloudTranslationProvider('secret-key', 'true', fakeFetch);
+    const provider = new GoogleCloudTranslationProvider('secret-key', fakeFetch, 15_000, 'true');
     const result = await provider.translateBatch([
       { id: 'a', text: 'Hello & welcome' },
       { id: 'b', text: 'World' },
@@ -66,18 +66,18 @@ describe('Google Cloud Translation provider', () => {
 
   it('rejects missing credentials before network calls', async () => {
     let called = false;
-    const provider = new GoogleCloudTranslationProvider('', 'true', async () => { called = true; return new Response(); });
+    const provider = new GoogleCloudTranslationProvider('', async () => { called = true; return new Response(); }, 15_000, 'true');
     await expect(provider.translateBatch([{ id: 'a', text: 'Hello' }], 'en', 'vi')).rejects.toMatchObject({ code: 'GOOGLE_TRANSLATE_SECRET_MISSING' });
     expect(called).toBe(false);
   });
 
   it('rejects auto source until it is resolved', async () => {
-    const provider = new GoogleCloudTranslationProvider('x', 'true', async () => Response.json({}));
+    const provider = new GoogleCloudTranslationProvider('x', async () => Response.json({}), 15_000, 'true');
     await expect(provider.translateBatch([{ id: 'a', text: 'Hello' }], 'auto', 'vi')).rejects.toMatchObject({ code: 'TRANSLATION_SOURCE_UNRESOLVED' });
   });
 
   it('fails closed if a direct raw-provider call would discard active context', async () => {
-    const provider = new GoogleCloudTranslationProvider('secret-key', 'true', async () => Response.json({ data: { translations: [{ translatedText: 'x' }] } }));
+    const provider = new GoogleCloudTranslationProvider('secret-key', async () => Response.json({ data: { translations: [{ translatedText: 'x' }] } }), 15_000, 'true');
     await expect((provider.translateBatch as any)([{ id: 'a', text: 'Hello' }], 'en', 'vi', activeContext))
       .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
   });
