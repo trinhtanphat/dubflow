@@ -16,6 +16,7 @@ const [
   studioSource,
   preloadSource,
   workerSource,
+  workerProtocolSource,
   workerClientSource,
   apiSource,
   pcmSource,
@@ -25,6 +26,7 @@ const [
   source('../src/app/StudioShell.tsx'),
   source('../src/features/voice/clientVoicePreload.ts'),
   source('../src/features/voice/browserPiper.worker.ts'),
+  source('../src/features/voice/browserPiperProtocol.ts'),
   source('../src/features/voice/browserPiperClient.ts'),
   source('../src/features/voice/clientVoiceApi.ts'),
   source('../src/features/voice/clientPcm.ts'),
@@ -32,7 +34,8 @@ const [
 
 test('browser Piper zero-cost lane pins the qualified dependency and voice', () => {
   assert.match(packageSource, /"@mintplex-labs\/piper-tts-web"\s*:\s*"1\.0\.5"/);
-  assert.match(workerSource, /vi_VN-vais1000-medium/);
+  assert.match(workerProtocolSource, /vi_VN-vais1000-medium/);
+  assert.match(workerSource, /VIETNAMESE_PIPER_VOICE/);
   assert.match(workerSource, /@mintplex-labs\/piper-tts-web/);
 });
 
@@ -60,6 +63,6 @@ test('export presentation can admit the Vietnamese client lane without broadenin
 });
 
 test('browser zero-cost lane has no paid, Stream, Container, or deploy coupling', () => {
-  const combined = [preloadSource, workerSource, workerClientSource, apiSource, pcmSource].join('\n');
+  const combined = [preloadSource, workerSource, workerProtocolSource, workerClientSource, apiSource, pcmSource].join('\n');
   assert.doesNotMatch(combined, /xai\/grok-tts|ElevenLabs|AI Gateway|CLOUDFLARE_STREAM|FFMPEG_CONTAINER|wrangler\s+deploy/i);
 });
