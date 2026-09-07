@@ -39,6 +39,15 @@ test('active production worker wiring contains no Stream or FFmpeg Container fal
   }
 });
 
+test('legacy Cloudflare Stream runtime implementation files are deleted', () => {
+  for (const path of [
+    'worker/src/services/media/stream.ts',
+    'worker/src/cloudflare/stream.ts',
+  ]) {
+    assert.equal(existsSync(new URL(path, root)), false, `${path} must be deleted`);
+  }
+});
+
 test('Studio passes only the active dubbing job into UploadPanel for persisted progress and error feedback', () => {
   assert.match(
     studioShell,
