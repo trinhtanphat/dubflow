@@ -1,11 +1,16 @@
 import type { VoiceCapabilities } from '../voice/voiceApi';
 import type { TargetLanguage } from '../translation/languageVariantsApi';
 import { LANGUAGE_LABELS } from '../translation/TargetLanguagesPanel';
-import type {
-  DubbedAudioMode,
-  ExportCapabilitiesDto,
-  ExportLaunchDto,
-  ExportOutput,
+import {
+  exportMediaUrl,
+  visualExportMediaUrl,
+  type DubbedAudioMode,
+  type ExportAttemptDto,
+  type ExportCapabilitiesDto,
+  type ExportLaunchDto,
+  type ExportOutput,
+  type LipSyncStatus,
+  type VisualMode,
 } from './batchExportApi';
 import './batch-export.css';
 
@@ -36,42 +41,93 @@ export function separatedBackgroundAvailability(
   return { allowed: true, reason: '' };
 }
 
+export function visualLipSyncAvailability(
+  capabilities: ExportCapabilitiesDto | null,
+): { allowed: boolean; reason: string } {
+  const visual = capabilities?.visualLipSync;
+  if (
+    visual?.available !== true
+    || typeof visual.provider !== 'string'
+    || visual.provider.trim() === ''
+  ) {
+    return { allowed: false, reason: 'Visual lip-sync chưa khả dụng vì provider chưa được cấu hình.' };
+  }
+  return { allowed: true, reason: '' };
+}
+
+type AttemptView = Partial<Pick<
+  ExportAttemptDto,
+  'status' | 'exportObjectKey' | 'lipSyncRequested' | 'lipSyncStatus' | 'lipSyncObjectKey'
+>>;
+
 type Props = {
+  projectId?: string;
   currentTargetLanguage: TargetLanguage;
   enabledLanguages: TargetLanguage[];
   selectedLanguages: TargetLanguage[];
   output: ExportOutput;
   audioMode: DubbedAudioMode;
+  visualMode?: VisualMode;
   exportCapabilities: ExportCapabilitiesDto | null;
   voiceCapabilities: VoiceCapabilities | null;
   busy: boolean;
   results: ExportLaunchDto[];
+  attempts?: Partial<Record<TargetLanguage, AttemptView>>;
   error: string;
   onOutputChange: (output: ExportOutput) => void;
   onAudioModeChange: (audioMode: DubbedAudioMode) => void;
+  onVisualModeChange?: (visualMode: VisualMode) => void;
   onToggleLanguage: (language: TargetLanguage) => void;
   onExportCurrent: () => void;
   onBatchExport: () => void;
   onRetryFailed: (language: TargetLanguage) => void;
 };
 
-function statusLabel(result: ExportLaunchDto) {
-  return result.status === 'queued' ? 'Đã xếp hàng' : 'Thất bại';
+function visualStatus(result: ExportLaunchDto, attempt?: AttemptView): LipSyncStatus | null {
+  const explicit = attempt?.lipSyncStatus ?? result.lipSyncStatus;
+  if (explicit && explicit !== 'not_requested') return explicit;
+  const requested = attempt?.lipSyncRequested === true || result.lipSyncRequested === true || result.visualMode === 'lip_sync';
+  if (!requested || result.status === 'failed') return null;
+  if (result.status === 'completed') return 'completed';
+  if (result.status === 'processing') return 'processing';
+  return 'queued';
+}
+
+function statusLabel(result: ExportLaunchDto, attempt?: AttemptView) {
+  const lipStatus = visualStatus(result, attempt);
+  if (lipStatus === 'queued') return 'Lip-sync đã xếp hàng';
+  if (lipStatus === 'processing') return 'Đang xử lý lip-sync';
+  if (lipStatus === 'failed') return 'Lip-sync thất bại';
+  if (lipStatus === 'completed') return 'Lip-sync hoàn tất';
+  if (result.status === 'completed' || attempt?.status === 'completed') return 'Hoàn tất';
+  if (result.status === 'processing') return 'Đang xử lý';
+  if (result.status === 'queued') return 'Đã xếp hàng';
+  return 'Thất bại';
+}
+
+function isCompleted(result: ExportLaunchDto, attempt?: AttemptView) {
+  const lipStatus = visualStatus(result, attempt);
+  if (lipStatus) return lipStatus === 'completed';
+  return result.status === 'completed' || attempt?.status === 'completed';
 }
 
 export function BatchExportPanelView({
+  projectId = '',
   currentTargetLanguage,
   enabledLanguages,
   selectedLanguages,
   output,
   audioMode,
+  visualMode = 'standard',
   exportCapabilities,
   voiceCapabilities,
   busy,
   results,
+  attempts = {},
   error,
   onOutputChange,
   onAudioModeChange,
+  onVisualModeChange = () => {},
   onToggleLanguage,
   onExportCurrent,
   onBatchExport,
@@ -79,13 +135,16 @@ export function BatchExportPanelView({
 }: Props) {
   const voice = dubbedAvailability(voiceCapabilities, currentTargetLanguage);
   const separated = separatedBackgroundAvailability(exportCapabilities);
+  const visual = visualLipSyncAvailability(exportCapabilities);
   const treatmentBlocked = output === 'dubbed' && audioMode === 'separated_background' && !separated.allowed;
-  const currentBlocked = output === 'dubbed' && (!voice.allowed || treatmentBlocked);
+  const visualBlocked = output === 'dubbed' && visualMode === 'lip_sync' && !visual.allowed;
+  const currentBlocked = output === 'dubbed' && (!voice.allowed || treatmentBlocked || visualBlocked);
   const selectedBlocked = output === 'dubbed' && (
     treatmentBlocked
+    || visualBlocked
     || selectedLanguages.some((language) => !dubbedAvailability(voiceCapabilities, language).allowed)
   );
-  const allSucceeded = results.length > 0 && results.every((result) => result.status === 'queued');
+  const allSucceeded = results.length > 0 && results.every((result) => isCompleted(result, attempts[result.targetLanguage]));
 
   return (
     <section className="batch-export" data-testid="batch-export-panel" aria-label="Batch export">
@@ -97,21 +156,37 @@ export function BatchExportPanelView({
         </select>
       </header>
       {output === 'dubbed' && (
-        <div className="batch-export__audio-treatment">
-          <label>
-            <span>Xử lý âm thanh</span>
-            <select
-              aria-label="Xử lý âm thanh"
-              value={audioMode}
-              onChange={(event) => onAudioModeChange(event.currentTarget.value as DubbedAudioMode)}
-            >
-              <option value="dubbed_only">Dubbed voice only</option>
-              <option value="duck_original">Keep original ambience (duck dialogue)</option>
-              <option value="separated_background" disabled={!separated.allowed}>Separated background stem</option>
-            </select>
-          </label>
-          {!separated.allowed && <p className="batch-export__capability">{separated.reason}</p>}
-        </div>
+        <>
+          <div className="batch-export__audio-treatment">
+            <label>
+              <span>Xử lý âm thanh</span>
+              <select
+                aria-label="Xử lý âm thanh"
+                value={audioMode}
+                onChange={(event) => onAudioModeChange(event.currentTarget.value as DubbedAudioMode)}
+              >
+                <option value="dubbed_only">Dubbed voice only</option>
+                <option value="duck_original">Keep original ambience (duck dialogue)</option>
+                <option value="separated_background" disabled={!separated.allowed}>Separated background stem</option>
+              </select>
+            </label>
+            {!separated.allowed && <p className="batch-export__capability">{separated.reason}</p>}
+          </div>
+          <div className="batch-export__visual-treatment">
+            <label>
+              <span>Xử lý hình ảnh</span>
+              <select
+                aria-label="Xử lý hình ảnh"
+                value={visualMode}
+                onChange={(event) => onVisualModeChange(event.currentTarget.value as VisualMode)}
+              >
+                <option value="standard">Standard dubbed video</option>
+                <option value="lip_sync" disabled={!visual.allowed}>Visual lip-sync</option>
+              </select>
+            </label>
+            {!visual.allowed && <p className="batch-export__capability">{visual.reason}</p>}
+          </div>
+        </>
       )}
       <div className="batch-export__languages">
         {enabledLanguages.map((language) => (
@@ -123,6 +198,7 @@ export function BatchExportPanelView({
       </div>
       {output === 'dubbed' && !voice.allowed && <p className="batch-export__guard">{voice.reason}</p>}
       {treatmentBlocked && <p className="batch-export__guard">{separated.reason}</p>}
+      {visualBlocked && <p className="batch-export__guard">{visual.reason}</p>}
       <div className="batch-export__actions">
         <button type="button" className="secondary-button" data-testid="export-current-language" disabled={busy || currentBlocked} onClick={onExportCurrent}>
           Export current language
@@ -132,15 +208,35 @@ export function BatchExportPanelView({
         </button>
       </div>
       <div className="batch-export__results" aria-live="polite">
-        {results.map((result) => (
-          <div key={`${result.targetLanguage}:${result.exportId}`} className={`batch-export__result is-${result.status}`}>
-            <span>{LANGUAGE_LABELS[result.targetLanguage]}</span>
-            <strong>{statusLabel(result)}</strong>
-            {result.status === 'failed' && (
-              <button type="button" className="ghost-button" disabled={busy} onClick={() => onRetryFailed(result.targetLanguage)}>Thử lại</button>
-            )}
-          </div>
-        ))}
+        {results.map((result) => {
+          const attempt = attempts[result.targetLanguage];
+          const lipStatus = visualStatus(result, attempt);
+          const standardObjectKey = attempt?.exportObjectKey ?? result.exportObjectKey ?? null;
+          const visualObjectKey = attempt?.lipSyncObjectKey ?? result.lipSyncObjectKey ?? null;
+          const visualFailed = lipStatus === 'failed';
+          const visualCompleted = lipStatus === 'completed' && Boolean(visualObjectKey);
+          return (
+            <div key={`${result.targetLanguage}:${result.exportId}`} className={`batch-export__result is-${visualFailed ? 'failed' : result.status}`}>
+              <span>{LANGUAGE_LABELS[result.targetLanguage]}</span>
+              <strong>{statusLabel(result, attempt)}</strong>
+              {(result.status === 'failed' || visualFailed) && (
+                <button type="button" className="ghost-button" disabled={busy} onClick={() => onRetryFailed(result.targetLanguage)}>
+                  {visualFailed ? 'Thử lại lip-sync' : 'Thử lại'}
+                </button>
+              )}
+              {visualFailed && standardObjectKey && projectId && (
+                <a className="batch-export__fallback-link" href={exportMediaUrl(projectId, result.targetLanguage, 'dubbed')}>
+                  Tải video dubbed chuẩn
+                </a>
+              )}
+              {visualCompleted && projectId && (
+                <a className="batch-export__visual-link" href={visualExportMediaUrl(projectId, result.targetLanguage)}>
+                  Tải video lip-sync
+                </a>
+              )}
+            </div>
+          );
+        })}
       </div>
       {allSucceeded && <p className="batch-export__success">Tất cả ngôn ngữ đã xuất thành công.</p>}
       {error && <p className="batch-export__error" role="alert">{error}</p>}
