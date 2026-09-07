@@ -104,7 +104,7 @@ describe('paid ElevenLabs opt-in', () => {
           mediaReads += 1;
           return null;
         },
-      } as Env['MEDIA'],
+      } as unknown as Env['MEDIA'],
     }));
 
     expect(response.status).toBe(503);
@@ -128,7 +128,7 @@ describe('paid ElevenLabs opt-in', () => {
     }), paidCredentialsEnv({
       MEDIA: {
         async delete() { mediaDeletes += 1; },
-      } as Env['MEDIA'],
+      } as unknown as Env['MEDIA'],
     }));
 
     expect(response.status).toBe(503);
