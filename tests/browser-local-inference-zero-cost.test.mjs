@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const packageSource = await readFile(new URL('../package.json', import.meta.url), 'utf8');
-
 async function source(path) {
-  return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  try {
+    return await readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+  } catch {
+    return '';
+  }
 }
+
+const packageSource = await source('package.json');
 
 test('browser-local inference pins Transformers.js exactly', () => {
   assert.match(
@@ -29,4 +33,42 @@ test('browser-local workers pin the approved Whisper and Marian revisions', asyn
   assert.match(translation, /3f5f449333cbc7ecaa9eec16ee9e37682f036b8e/);
   assert.match(translation, /translation/);
   assert.match(translation, /dtype\s*:\s*['"]q8['"]/);
+});
+
+test('local coordinator is browser-only and has no metered or server-inference fallback', async () => {
+  const coordinator = await source('src/features/local-inference/localInferenceCoordinator.ts');
+
+  assert.match(coordinator, /browserAsr\.worker\.ts/);
+  assert.match(coordinator, /browserTranslation\.worker\.ts/);
+  assert.match(coordinator, /client-inference\/vi/);
+  assert.doesNotMatch(
+    coordinator,
+    /\/process\b|retranslate|voice\/capabilities|Workers AI|workers-ai|Deepgram|Google(?: Cloud)? Translate|Grok|xAI|ElevenLabs|Sync Labs|Cloudflare Stream|FFMPEG_CONTAINER|Containers?/i,
+  );
+});
+
+test('server local-inference contract locks exact route, limits, provenance and project-unique speaker', async () => {
+  const domain = await source('worker/src/domain/client-inference.ts');
+  const routes = await source('worker/src/routes/projects.ts');
+
+  assert.match(routes, /put\s*\(\s*['"]\/:id\/client-inference\/vi['"]/i);
+  assert.match(domain, /browser-whisper/);
+  assert.match(domain, /onnx-community\/whisper-tiny\.en/);
+  assert.match(domain, /2575352d61be1bf7225cf8f8b268a4678025fc58/);
+  assert.match(domain, /browser-opus-mt/);
+  assert.match(domain, /Xenova\/opus-mt-en-vi/);
+  assert.match(domain, /3f5f449333cbc7ecaa9eec16ee9e37682f036b8e/);
+
+  assert.match(domain, /24\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(domain, /300_?000|300\s*\*\s*1000/);
+  assert.match(domain, /\b500\b/);
+  assert.match(domain, /2\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(domain, /1_?000|1000/);
+
+  assert.match(domain, /browser-local:\$\{projectId\}:speaker-1/);
+  assert.doesNotMatch(domain, /browser-local-speaker-1/);
+});
+
+test('superseded backend-ASR chunk contract is absent from source verification', () => {
+  assert.doesNotMatch(packageSource, /browser-asr-r2-chunks\.test\.mjs/);
 });
