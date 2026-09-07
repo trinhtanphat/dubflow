@@ -4,6 +4,7 @@ import {
   BatchExportPanelView,
   dubbedAvailability,
   separatedBackgroundAvailability,
+  visualLipSyncAvailability,
 } from './BatchExportPanel';
 
 const enabledLanguages = ['vi', 'ja', 'ko'] as const;
@@ -19,6 +20,7 @@ const unavailableSeparation = {
   visualLipSync: {
     available: false,
     provider: null,
+    qualification: 'unavailable' as const,
   },
 };
 const qualifiedSeparation = {
@@ -33,6 +35,7 @@ const qualifiedSeparation = {
   visualLipSync: {
     available: false,
     provider: null,
+    qualification: 'unavailable' as const,
   },
 };
 
@@ -154,6 +157,31 @@ describe('Phase 4D batch export studio controls', () => {
     );
     expect(html).toContain('value="separated_background" selected=""');
     expect(html).not.toMatch(/<option value="separated_background"[^>]*disabled/);
+  });
+
+  it('distinguishes configured-but-unqualified visual lip-sync and admits only qualified runtime', () => {
+    const unqualified = {
+      ...unavailableSeparation,
+      visualLipSync: {
+        available: false,
+        provider: 'sync-labs',
+        qualification: 'unqualified' as const,
+      },
+    };
+    const qualified = {
+      ...unavailableSeparation,
+      visualLipSync: {
+        available: true,
+        provider: 'sync-labs',
+        qualification: 'qualified' as const,
+      },
+    };
+
+    expect(visualLipSyncAvailability(unqualified)).toMatchObject({
+      allowed: false,
+      reason: expect.stringMatching(/unqualified|chưa được xác nhận/i),
+    });
+    expect(visualLipSyncAvailability(qualified).allowed).toBe(true);
   });
 
   it('fails dubbed output closed for unsupported or unknown voice capability while subtitles remain available', () => {
