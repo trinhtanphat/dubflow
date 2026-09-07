@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
   fetchExportCapabilities,
+  fetchLatestLanguageExport,
   startBatchExport,
   startLanguageExport,
   type DubbedAudioMode,
+  type ExportAttemptDto,
   type ExportCapabilitiesDto,
   type ExportLaunchDto,
   type ExportOutput,
+  type VisualMode,
 } from '../features/export/batchExportApi';
 import {
   getProjectLanguages,
@@ -72,12 +75,32 @@ function replaceVariant(
   return rows.map((row) => row.segmentId === segmentId ? { ...row, translation } : row);
 }
 
-function withRequestedAudioMode(
+function withRequestedTreatment(
   result: ExportLaunchDto,
   output: ExportOutput,
   audioMode: DubbedAudioMode,
+  visualMode: VisualMode,
 ): ExportLaunchDto {
-  return output === 'dubbed' ? { ...result, audioMode } : result;
+  return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
+}
+
+export function acceptPolledExportAttempt(
+  result: ExportLaunchDto,
+  attempt: ExportAttemptDto,
+): ExportAttemptDto | null {
+  return attempt.id === result.exportId
+    && attempt.targetLanguage === result.targetLanguage
+    && attempt.output === result.output
+    ? attempt
+    : null;
+}
+
+export function isTerminalExportAttempt(result: ExportLaunchDto, attempt?: ExportAttemptDto): boolean {
+  if (!attempt) return result.status === 'failed';
+  if (attempt.status === 'failed' || attempt.status === 'invalidated') return true;
+  const visualRequested = result.visualMode === 'lip_sync' || attempt.lipSyncRequested;
+  if (visualRequested) return attempt.lipSyncStatus === 'completed' || attempt.lipSyncStatus === 'failed';
+  return attempt.status === 'completed';
 }
 
 export function StudioShell(props: Props) {
@@ -97,8 +120,10 @@ export function StudioShell(props: Props) {
   const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilitiesDto | null>(null);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
   const [audioMode, setAudioMode] = useState<DubbedAudioMode>('dubbed_only');
+  const [visualMode, setVisualMode] = useState<VisualMode>('standard');
   const [exportBusy, setExportBusy] = useState(false);
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
+  const [exportAttempts, setExportAttempts] = useState<Partial<Record<TargetLanguage, ExportAttemptDto>>>({});
   const [exportError, setExportError] = useState('');
 
   useEffect(() => {
@@ -155,6 +180,66 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject, projectId]);
+
+  useEffect(() => {
+    if (!isCloudProject || exportResults.length === 0) return;
+    const remaining = new Map(
+      exportResults
+        .filter((result) => result.status !== 'failed')
+        .map((result) => [result.exportId, result] as const),
+    );
+    if (remaining.size === 0) return;
+
+    let active = true;
+    let inFlight = false;
+    let timer: number | null = null;
+
+    const refresh = async () => {
+      if (!active || inFlight || remaining.size === 0) return;
+      inFlight = true;
+      try {
+        const pending = [...remaining.values()];
+        const settled = await Promise.allSettled(pending.map(async (result) => ({
+          result,
+          attempt: await fetchLatestLanguageExport(projectId, result.targetLanguage, result.output),
+        })));
+        if (!active) return;
+
+        const accepted: Array<{ result: ExportLaunchDto; attempt: ExportAttemptDto }> = [];
+        for (const item of settled) {
+          if (item.status !== 'fulfilled') continue;
+          const canonical = acceptPolledExportAttempt(item.value.result, item.value.attempt);
+          if (!canonical) continue;
+          accepted.push({ result: item.value.result, attempt: canonical });
+          if (isTerminalExportAttempt(item.value.result, canonical)) {
+            remaining.delete(item.value.result.exportId);
+          }
+        }
+
+        if (accepted.length > 0) {
+          setExportAttempts((current) => {
+            const next = { ...current };
+            for (const item of accepted) next[item.result.targetLanguage] = item.attempt;
+            return next;
+          });
+        }
+
+        if (remaining.size === 0 && timer !== null) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    timer = window.setInterval(() => { void refresh(); }, 2000);
+    void refresh();
+    return () => {
+      active = false;
+      if (timer !== null) window.clearInterval(timer);
+    };
+  }, [exportResults, isCloudProject, projectId]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
@@ -276,15 +361,26 @@ export function StudioShell(props: Props) {
       : [...current, language]);
   };
 
+  const clearAttempt = (language: TargetLanguage) => {
+    setExportAttempts((current) => {
+      if (!current[language]) return current;
+      const next = { ...current };
+      delete next[language];
+      return next;
+    });
+  };
+
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
+    const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
-      const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode);
-      const tagged = withRequestedAudioMode(result, exportOutput, requestedMode);
+      const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode);
+      const tagged = withRequestedTreatment(result, exportOutput, requestedMode, requestedVisualMode);
+      clearAttempt(tagged.targetLanguage);
       setExportResults((current) => [...current.filter((item) => item.targetLanguage !== tagged.targetLanguage), tagged]);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu export ngôn ngữ hiện tại.'));
@@ -297,9 +393,16 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
+    const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
-      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode);
-      setExportResults(result.exports.map((item) => withRequestedAudioMode(item, exportOutput, requestedMode)));
+      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode);
+      const tagged = result.exports.map((item) => withRequestedTreatment(item, exportOutput, requestedMode, requestedVisualMode));
+      setExportAttempts((current) => {
+        const next = { ...current };
+        for (const item of tagged) delete next[item.targetLanguage];
+        return next;
+      });
+      setExportResults(tagged);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu batch export.'));
     } finally {
@@ -311,11 +414,13 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     const prior = exportResults.find((item) => item.targetLanguage === language);
-    const requestedMode = prior?.output === 'dubbed' ? (prior.audioMode ?? audioMode) : 'dubbed_only';
     const requestedOutput = prior?.output ?? exportOutput;
+    const requestedMode = requestedOutput === 'dubbed' ? (prior?.audioMode ?? audioMode) : 'dubbed_only';
+    const requestedVisualMode = requestedOutput === 'dubbed' ? (prior?.visualMode ?? visualMode) : 'standard';
     try {
-      const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode);
-      const tagged = withRequestedAudioMode(result, requestedOutput, requestedMode);
+      const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode);
+      const tagged = withRequestedTreatment(result, requestedOutput, requestedMode, requestedVisualMode);
+      clearAttempt(language);
       setExportResults((current) => current.map((item) => item.targetLanguage === language ? tagged : item));
     } catch (error) {
       setExportError(message(error, 'Không thể thử lại export.'));
@@ -348,18 +453,25 @@ export function StudioShell(props: Props) {
                 onProcessLanguage={runLanguage}
               />
               <BatchExportPanelView
+                projectId={projectId}
                 currentTargetLanguage={exportTarget}
                 enabledLanguages={config.languages.map((entry) => entry.targetLanguage)}
                 selectedLanguages={selectedLanguages}
                 output={exportOutput}
                 audioMode={audioMode}
+                visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
                 busy={exportBusy}
                 results={exportResults}
+                attempts={exportAttempts}
                 error={exportError}
-                onOutputChange={setExportOutput}
+                onOutputChange={(next) => {
+                  setExportOutput(next);
+                  if (next !== 'dubbed') setVisualMode('standard');
+                }}
                 onAudioModeChange={setAudioMode}
+                onVisualModeChange={setVisualMode}
                 onToggleLanguage={toggleSelected}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}
