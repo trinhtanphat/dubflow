@@ -84,11 +84,23 @@ function withRequestedTreatment(
   return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
 }
 
-function attemptIsTerminal(result: ExportLaunchDto, attempt?: ExportAttemptDto) {
+export function acceptPolledExportAttempt(
+  result: ExportLaunchDto,
+  attempt: ExportAttemptDto,
+): ExportAttemptDto | null {
+  return attempt.id === result.exportId
+    && attempt.targetLanguage === result.targetLanguage
+    && attempt.output === result.output
+    ? attempt
+    : null;
+}
+
+export function isTerminalExportAttempt(result: ExportLaunchDto, attempt?: ExportAttemptDto): boolean {
   if (!attempt) return result.status === 'failed';
+  if (attempt.status === 'failed' || attempt.status === 'invalidated') return true;
   const visualRequested = result.visualMode === 'lip_sync' || attempt.lipSyncRequested;
   if (visualRequested) return attempt.lipSyncStatus === 'completed' || attempt.lipSyncStatus === 'failed';
-  return attempt.status === 'completed' || attempt.status === 'failed' || attempt.status === 'invalidated';
+  return attempt.status === 'completed';
 }
 
 export function StudioShell(props: Props) {
@@ -171,32 +183,63 @@ export function StudioShell(props: Props) {
 
   useEffect(() => {
     if (!isCloudProject || exportResults.length === 0) return;
-    const pending = exportResults.filter((result) => !attemptIsTerminal(result, exportAttempts[result.targetLanguage]));
-    if (pending.length === 0) return;
+    const remaining = new Map(
+      exportResults
+        .filter((result) => result.status !== 'failed')
+        .map((result) => [result.exportId, result] as const),
+    );
+    if (remaining.size === 0) return;
+
     let active = true;
+    let inFlight = false;
+    let timer: number | null = null;
 
     const refresh = async () => {
-      const settled = await Promise.allSettled(pending.map(async (result) => ({
-        language: result.targetLanguage,
-        attempt: await fetchLatestLanguageExport(projectId, result.targetLanguage, result.output),
-      })));
-      if (!active) return;
-      setExportAttempts((current) => {
-        const next = { ...current };
+      if (!active || inFlight || remaining.size === 0) return;
+      inFlight = true;
+      try {
+        const pending = [...remaining.values()];
+        const settled = await Promise.allSettled(pending.map(async (result) => ({
+          result,
+          attempt: await fetchLatestLanguageExport(projectId, result.targetLanguage, result.output),
+        })));
+        if (!active) return;
+
+        const accepted: Array<{ result: ExportLaunchDto; attempt: ExportAttemptDto }> = [];
         for (const item of settled) {
-          if (item.status === 'fulfilled') next[item.value.language] = item.value.attempt;
+          if (item.status !== 'fulfilled') continue;
+          const canonical = acceptPolledExportAttempt(item.value.result, item.value.attempt);
+          if (!canonical) continue;
+          accepted.push({ result: item.value.result, attempt: canonical });
+          if (isTerminalExportAttempt(item.value.result, canonical)) {
+            remaining.delete(item.value.result.exportId);
+          }
         }
-        return next;
-      });
+
+        if (accepted.length > 0) {
+          setExportAttempts((current) => {
+            const next = { ...current };
+            for (const item of accepted) next[item.result.targetLanguage] = item.attempt;
+            return next;
+          });
+        }
+
+        if (remaining.size === 0 && timer !== null) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+      } finally {
+        inFlight = false;
+      }
     };
 
+    timer = window.setInterval(() => { void refresh(); }, 2000);
     void refresh();
-    const timer = window.setInterval(() => { void refresh(); }, 2000);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, [exportAttempts, exportResults, isCloudProject, projectId]);
+  }, [exportResults, isCloudProject, projectId]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
