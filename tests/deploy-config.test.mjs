@@ -4,8 +4,16 @@ import fs from 'node:fs';
 
 const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const deploymentPolicy = fs.readFileSync(new URL('../docs/DEPLOYMENT-POLICY.md', import.meta.url), 'utf8');
+const deploymentStatus = fs.readFileSync(new URL('../docs/deployment-status.md', import.meta.url), 'utf8');
 
 const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
+
+function documentedProductionAccount(text, label) {
+  const match = text.match(/(?:Cloudflare production account|production account|Cloudflare account)\s+`([a-f0-9]{32})`/i);
+  assert.ok(match, `${label} must declare the canonical Cloudflare production account`);
+  return match[1];
+}
 
 test('deployment config contains no fake resource placeholder', () => {
   const d1 = config.d1_databases?.find((item) => item.binding === 'DB');
@@ -28,6 +36,13 @@ test('production custom domain stays pinned to yupvox.qs3d.site', () => {
 
 test('production deploy targets the Cloudflare account that owns the live yupvox domain and persisted projects', () => {
   assert.equal(config.account_id, productionAccountId);
+});
+
+test('checked-in Wrangler account must match the documented canonical production topology', () => {
+  const policyAccount = documentedProductionAccount(deploymentPolicy, 'DEPLOYMENT-POLICY.md');
+  const statusAccount = documentedProductionAccount(deploymentStatus, 'deployment-status.md');
+  assert.equal(policyAccount, statusAccount, 'deployment policy and status disagree on the canonical production account');
+  assert.equal(config.account_id, policyAccount, 'wrangler account drifted away from the documented domain/data-owning production account');
 });
 
 test('live dubbing runtime is declared on the production account', () => {
