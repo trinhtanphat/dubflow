@@ -3,7 +3,7 @@ import { TARGET_LANGUAGES, type TargetLanguage } from '../../domain/language';
 import type { SourceLanguage } from '../../domain/project';
 import { isTranslationContextActive, type TranslationContext } from './context';
 import { workersAISourceLanguage, workersAITargetLanguage } from './language-map';
-import type { TranslationItem, TranslationProvider, TranslationResult } from './types';
+import type { TranslationItem, TranslationProvider, TranslationProviderCapabilities, TranslationResult } from './types';
 import { TranslationProviderError } from './types';
 
 export const WORKERS_AI_TRANSLATION_MODEL = '@cf/meta/m2m100-1.2b';
@@ -17,9 +17,14 @@ function translatedText(response: unknown): string {
 }
 
 export class WorkersAITranslationProvider implements TranslationProvider {
-  readonly capabilities = { contextual: false, available: true, targets: TARGET_LANGUAGES } as const;
+  readonly capabilities: TranslationProviderCapabilities;
 
-  constructor(private readonly ai: AiBinding) {}
+  constructor(
+    private readonly ai: AiBinding,
+    private readonly enabled = false,
+  ) {
+    this.capabilities = { contextual: false, available: enabled, targets: TARGET_LANGUAGES };
+  }
 
   async translateBatch(
     items: TranslationItem[],
@@ -27,6 +32,12 @@ export class WorkersAITranslationProvider implements TranslationProvider {
     target: TargetLanguage,
     context?: TranslationContext,
   ): Promise<TranslationResult[]> {
+    if (!this.enabled) {
+      throw new TranslationProviderError(
+        'WORKERS_AI_PAID_OPT_IN_REQUIRED',
+        'Workers AI translation requires explicit paid opt-in.',
+      );
+    }
     if (context && isTranslationContextActive(context)) {
       throw new TranslationProviderError(
         'TRANSLATION_CONTEXT_UNSUPPORTED',

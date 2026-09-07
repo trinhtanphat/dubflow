@@ -22,9 +22,19 @@ function arrayBufferToBase64(audio: ArrayBuffer): string {
 }
 
 export class WorkersAIAsrProvider implements AsrProvider {
-  constructor(private readonly ai: AiBinding) {}
+  constructor(
+    private readonly ai: AiBinding,
+    private readonly enabled = false,
+  ) {}
 
   async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
+    if (!this.enabled) {
+      throw new AsrError(
+        'WORKERS_AI_PAID_OPT_IN_REQUIRED',
+        'Workers AI ASR requires explicit paid opt-in.',
+      );
+    }
+
     const input: Record<string, unknown> = {
       audio: arrayBufferToBase64(audio),
       task: 'transcribe',

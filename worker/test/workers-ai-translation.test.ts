@@ -17,8 +17,8 @@ const activeContext = {
 };
 
 describe('Workers AI translation', () => {
-  it('advertises raw-only availability for every Phase 4C target', () => {
-    const provider = new WorkersAITranslationProvider(new FakeAI());
+  it('advertises raw-only availability for every Phase 4C target when explicitly enabled', () => {
+    const provider = new WorkersAITranslationProvider(new FakeAI(), true);
     expect(provider).toHaveProperty('capabilities', {
       contextual: false,
       available: true,
@@ -28,7 +28,7 @@ describe('Workers AI translation', () => {
 
   it('preserves ids and maps source/target languages without trusting model identity', async () => {
     const ai = new FakeAI();
-    const provider = new WorkersAITranslationProvider(ai);
+    const provider = new WorkersAITranslationProvider(ai, true);
     const result = await provider.translateBatch([
       { id: 'seg-1', text: '你好' },
       { id: 'seg-2', text: '世界' },
@@ -46,7 +46,7 @@ describe('Workers AI translation', () => {
 
   it('keeps empty text empty without a provider call', async () => {
     const ai = new FakeAI();
-    const provider = new WorkersAITranslationProvider(ai);
+    const provider = new WorkersAITranslationProvider(ai, true);
     const result = await provider.translateBatch([{ id: 'seg-1', text: '   ' }], 'en', 'vi');
     expect(result).toEqual([{ id: 'seg-1', text: '', provider: 'workers-ai' }]);
     expect(ai.calls.length).toBe(0);
@@ -54,7 +54,7 @@ describe('Workers AI translation', () => {
 
   it('normalizes all supported resolved source language labels', async () => {
     const ai = new FakeAI();
-    const provider = new WorkersAITranslationProvider(ai);
+    const provider = new WorkersAITranslationProvider(ai, true);
     for (const [source, expected] of [['en','english'],['ja','japanese'],['ko','korean']] as const) {
       await provider.translateBatch([{ id: source, text: 'x' }], source, 'vi');
       expect(ai.calls.at(-1)?.input).toMatchObject({ source_lang: expected, target_lang: 'vietnamese' });
@@ -62,7 +62,7 @@ describe('Workers AI translation', () => {
   });
 
   it('fails closed if a direct raw-provider call would discard active context', async () => {
-    const provider = new WorkersAITranslationProvider(new FakeAI());
+    const provider = new WorkersAITranslationProvider(new FakeAI(), true);
     await expect((provider.translateBatch as any)([{ id: 'seg-1', text: 'Hello' }], 'en', 'vi', activeContext))
       .rejects.toMatchObject({ code: 'TRANSLATION_CONTEXT_UNSUPPORTED' });
   });

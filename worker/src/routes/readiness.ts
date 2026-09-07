@@ -1,4 +1,5 @@
 import { asrCapabilities, type AsrCapabilities } from '../services/asr/router';
+import { paidWorkersAiEnabled } from '../services/paid-provider-policy';
 
 export interface ReadinessStatementLike {
   first<T>(): Promise<T | null>;
@@ -20,12 +21,17 @@ export type MediaReadiness = {
   remux: 'ready' | 'unavailable';
 };
 
+export type InferenceReadiness = {
+  workersAI: 'enabled' | 'disabled';
+};
+
 export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
   schemaRevision: 14 | null;
   asr: AsrCapabilities;
+  inference: InferenceReadiness;
   media?: MediaReadiness;
 };
 
@@ -96,8 +102,12 @@ export async function checkReadiness(
   deepgramApiKey?: string,
   mediaConfig?: MediaReadinessConfig,
   paidDeepgramAsrEnabled?: string,
+  paidWorkersAiOptIn?: string,
 ): Promise<ReadinessResult> {
-  const asr = asrCapabilities(deepgramApiKey, paidDeepgramAsrEnabled);
+  const asr = asrCapabilities(deepgramApiKey, paidDeepgramAsrEnabled, paidWorkersAiOptIn);
+  const inference: InferenceReadiness = {
+    workersAI: paidWorkersAiEnabled(paidWorkersAiOptIn) ? 'enabled' : 'disabled',
+  };
   const media = mediaStatus(mediaConfig);
   try {
     const row = await db.prepare(`
@@ -121,10 +131,10 @@ export async function checkReadiness(
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
-      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr }, media);
+      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr, inference }, media);
     }
-    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr }, media);
+    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr, inference }, media);
   } catch {
-    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr }, media);
+    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr, inference }, media);
   }
 }
