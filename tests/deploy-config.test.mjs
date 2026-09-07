@@ -30,6 +30,7 @@ test('public custom domain belongs only to the account-2403 gateway', () => {
   assert.equal(config.routes, undefined);
   assert.equal(gateway.account_id, gatewayAccountId);
   assert.deepEqual(gateway.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
+  assert.equal(gateway.keep_vars, true, 'gateway deploys must preserve runtime BACKEND_ORIGIN configured outside source');
 });
 
 test('zero-container dubbing runtime stays on backend account 6666 with Stream', () => {
