@@ -22,6 +22,7 @@ function render({
   current = 'vi' as ('vi' | 'en'),
   selected = ['vi'] as ('vi' | 'en')[],
   clientVoiceAvailable = false,
+  clientVoiceCached = false,
   clientVoiceStatus = '',
 } = {}) {
   return renderToStaticMarkup(
@@ -34,6 +35,7 @@ function render({
       exportCapabilities={null}
       voiceCapabilities={unconfigured}
       clientVoiceAvailable={clientVoiceAvailable}
+      clientVoiceCached={clientVoiceCached}
       clientVoiceStatus={clientVoiceStatus}
       busy={false}
       results={[]}
@@ -52,6 +54,12 @@ describe('Vietnamese browser client voice admission', () => {
   it('allows vi when the server provider is unconfigured but the client lane is available', () => {
     expect(dubbedAvailability(unconfigured, 'vi', true)).toEqual({ allowed: true, reason: '' });
     const html = render({ clientVoiceAvailable: true });
+    expect(html).toMatch(/data-testid="export-current-language"(?![^>]*disabled)/);
+  });
+
+  it('allows exact-cache-complete vi even when browser Piper primitives are unavailable', () => {
+    expect(dubbedAvailability(unconfigured, 'vi', false, true)).toEqual({ allowed: true, reason: '' });
+    const html = render({ clientVoiceAvailable: false, clientVoiceCached: true });
     expect(html).toMatch(/data-testid="export-current-language"(?![^>]*disabled)/);
   });
 
