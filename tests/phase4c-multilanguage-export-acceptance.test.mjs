@@ -57,12 +57,13 @@ test('Phase 4C verification keeps prior safety acceptance lanes wired', () => {
   }
 });
 
-test('Phase 4C remains source-qualified while production follows the single Workers Builds lane', () => {
+test('Phase 4C remains source-qualified while production follows the split Cloudflare topology', () => {
   assert.match(deploymentStatus, /## Phase 4C .*multi-language.*export qualification/i);
   for (const target of ['vi', 'en', 'zh', 'ja', 'ko']) assert.match(deploymentStatus, new RegExp(`\\b${target}\\b`));
   assert.match(deploymentStatus, /Vietnamese[\s\S]*(?:compatibility|backward compatibility)/i);
   assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/i);
-  assert.match(deploymentPolicy, /Cloudflare Workers Builds is the only production deployment lane/i);
+  assert.match(deploymentPolicy, /Cloudflare Workers Builds remains the backend production deployment lane/i);
+  assert.match(deploymentPolicy, /wrangler\.gateway\.jsonc/);
   assert.match(deploymentStatus, /real .*provider.*media.*fixture/is);
   assert.doesNotMatch(deploymentStatus, /Phase 4C production runtime[^\n]*(?:PASS|qualified)/i);
 });

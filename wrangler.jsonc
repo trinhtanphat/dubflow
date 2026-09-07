@@ -1,36 +1,21 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dubflow",
-  "account_id": "50afb4fd3c4c7a1f3e1bdb7f22d4af7f",
+  "account_id": "6c5207813df3d5b83b9508125e0e9e12",
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-09-05",
   "compatibility_flags": ["nodejs_compat"],
-  "routes": [
-    { "pattern": "yupvox.qs3d.site", "custom_domain": true }
-  ],
+  "workers_dev": true,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "vars": {
-    "SEPARATION_RUNTIME_QUALIFIED": "false"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "MEDIA"
-    }
-  ],
-  "analytics_engine_datasets": [
-    { "binding": "ANALYTICS", "dataset": "dubflow_events" }
-  ],
+  "vars": { "SEPARATION_RUNTIME_QUALIFIED": "false" },
+  "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "MEDIA" }],
+  "analytics_engine_datasets": [{ "binding": "ANALYTICS", "dataset": "dubflow_events" }],
   "ratelimits": [
     { "name": "RATE_LIMIT_PROCESS", "namespace_id": "31001", "simple": { "limit": 4, "period": 60 } },
     { "name": "RATE_LIMIT_EXPORT", "namespace_id": "31002", "simple": { "limit": 4, "period": 60 } },
@@ -41,59 +26,18 @@
     { "name": "RATE_LIMIT_BATCH_EXPORT", "namespace_id": "31007", "simple": { "limit": 2, "period": 60 } },
     { "name": "RATE_LIMIT_SEPARATION", "namespace_id": "31008", "simple": { "limit": 2, "period": 60 } }
   ],
-  "ai": {
-    "binding": "AI"
-  },
+  "ai": { "binding": "AI" },
   "workflows": [
     { "binding": "DUBBING_WORKFLOW", "name": "dubflow-dubbing", "class_name": "DubbingWorkflow" },
     { "binding": "EXPORT_WORKFLOW", "name": "dubflow-export", "class_name": "ExportWorkflow" },
     { "binding": "LANGUAGE_TRANSLATION_WORKFLOW", "name": "dubflow-language-translation", "class_name": "LanguageTranslationWorkflow" },
     { "binding": "SEPARATION_WORKFLOW", "name": "dubflow-separation", "class_name": "SeparationWorkflow" }
   ],
-  "containers": [
-    {
-      "class_name": "FfmpegContainer",
-      "image": "./containers/ffmpeg/Dockerfile",
-      "max_instances": 4,
-      "instance_type": "standard-1"
-    },
-    {
-      "class_name": "SeparatorContainer",
-      "image": "./containers/separator/Dockerfile",
-      "max_instances": 2,
-      "instance_type": "standard-1"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      { "name": "FFMPEG_CONTAINER", "class_name": "FfmpegContainer" },
-      { "name": "SEPARATOR_CONTAINER", "class_name": "SeparatorContainer" }
-    ]
-  },
-  "exports": {
-    "FfmpegContainer": {
-      "type": "durable-object",
-      "state": "created",
-      "storage": "sqlite"
-    },
-    "SeparatorContainer": {
-      "type": "durable-object",
-      "state": "created",
-      "storage": "sqlite"
-    }
-  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
-    "logs": {
-      "enabled": true,
-      "invocation_logs": true,
-      "head_sampling_rate": 1
-    },
-    "traces": {
-      "enabled": true,
-      "head_sampling_rate": 0.05
-    },
+    "logs": { "enabled": true, "invocation_logs": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 },
     "redact_query_string": true
   }
 }

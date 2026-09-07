@@ -12,23 +12,23 @@ test('GitHub Actions never performs production deploys', () => {
   assert.doesNotMatch(ciWorkflow, /CLOUDFLARE_API_TOKEN/);
 });
 
-test('Cloudflare Workers Builds is the only production deployment lane', () => {
+test('Cloudflare Workers Builds remains the backend production deployment lane', () => {
   assert.equal(fs.existsSync(policyUrl), true, 'document the deployment policy');
   const policy = fs.readFileSync(policyUrl, 'utf8');
   assert.match(policy, /Cloudflare Workers Builds/i);
   assert.match(policy, /main/i);
-  assert.match(policy, /automatic(?:ally)? build/i);
-  assert.match(policy, /automatic(?:ally)? deploy/i);
+  assert.match(policy, /trinhtanphat6666/i);
+  assert.match(policy, /backend/i);
   assert.match(policy, /GitHub Actions.*CI/i);
   assert.match(policy, /must not deploy/i);
 });
 
-test('Workers Builds production lane is explicitly container-free on account 2403', () => {
+test('deployment policy explicitly disables paid Containers and separates the zone gateway', () => {
   const policy = fs.readFileSync(policyUrl, 'utf8');
-  assert.match(policy, /container-free/i);
-  assert.match(policy, /50afb4fd3c4c7a1f3e1bdb7f22d4af7f/i);
-  assert.match(policy, /removes `containers`.*`durable_objects`/is);
-  assert.match(policy, /without enabling paid Cloudflare Containers/i);
-  assert.match(policy, /hard-pins account/i);
-  assert.doesNotMatch(policy, /Containers Edit/i);
+  assert.match(policy, /trinhtanphat2403/i);
+  assert.match(policy, /yupvox\.qs3d\.site/i);
+  assert.match(policy, /gateway/i);
+  assert.match(policy, /Containers.*disabled|disabled.*Containers/is);
+  assert.match(policy, /Containers Edit.*not required|not require.*Containers Edit/is);
+  assert.doesNotMatch(policy, /token must include[\s\S]*Containers Edit/i);
 });
