@@ -5,6 +5,7 @@
   "main": "gateway/src/index.ts",
   "compatibility_date": "2026-09-05",
   "workers_dev": false,
+  "keep_vars": true,
   "routes": [
     { "pattern": "yupvox.qs3d.site", "custom_domain": true }
   ],
