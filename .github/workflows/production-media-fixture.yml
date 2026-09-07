@@ -1,6 +1,7 @@
 name: Production R2 Media Fixture
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
