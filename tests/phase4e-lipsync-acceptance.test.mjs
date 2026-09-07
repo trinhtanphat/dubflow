@@ -12,7 +12,7 @@ const visualRoute = read('worker/src/routes/visual-export-media.ts');
 const app = read('worker/src/app.ts');
 const workflow = read('worker/src/workflows/visualLipSync.ts');
 const exportWorkflow = read('worker/src/workflows/ExportWorkflow.ts');
-const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
+const zeroContainerExportPipeline = read('worker/src/workflows/zeroContainerExportPipeline.ts');
 const syncLabs = read('worker/src/services/lipsync/sync-labs.ts');
 const qualification = read('worker/src/services/lipsync/qualification.ts');
 const providerMedia = read('worker/src/routes/provider-media.ts');
@@ -62,10 +62,12 @@ test('Phase 4E provider media access stays token-hashed and bounded', () => {
 });
 
 test('Phase 4E keeps standard output canonical and visual output separate', () => {
-  const publishStandardIndex = exportPipeline.indexOf("step.do('publish standard export'");
-  const visualCallIndex = exportPipeline.indexOf('await runVisualLipSync(');
+  const publishStandardIndex = zeroContainerExportPipeline.indexOf("step.do('publish standard zero-container export'");
+  const visualCallIndex = zeroContainerExportPipeline.indexOf('await runVisualLipSync(');
   assert.ok(publishStandardIndex >= 0);
   assert.ok(visualCallIndex > publishStandardIndex);
+  assert.match(zeroContainerExportPipeline, /standardPublished\s*=\s*true/);
+  assert.match(zeroContainerExportPipeline, /standardPublished\s*&&\s*effective\.visualMode\s*===\s*['"]lip_sync['"]/);
   assert.match(workflow, /\.lipsync\.mp4/);
 });
 
