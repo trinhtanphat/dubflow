@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import { paidElevenLabsEnabled } from '../paid-provider-policy';
 import { ElevenLabsVoiceProvider } from './elevenlabs';
 import type { VoiceProvider } from './types';
 import { WorkersAIVoiceProvider } from './workers-ai';
@@ -10,13 +11,15 @@ export type VoiceProviderEnv = {
   AI?: Env['AI'];
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
+  PAID_ELEVENLABS_ENABLED?: string;
   PAID_GROK_TTS_ENABLED?: string;
 };
 
 export function createVoiceProvider(env: VoiceProviderEnv): VoiceProvider {
+  const elevenLabsEnabled = paidElevenLabsEnabled(env);
   const elevenLabs = new ElevenLabsVoiceProvider(
-    env.ELEVENLABS_API_KEY ?? '',
-    { defaultVoiceId: env.ELEVENLABS_DEFAULT_VOICE_ID },
+    elevenLabsEnabled ? env.ELEVENLABS_API_KEY ?? '' : '',
+    { defaultVoiceId: elevenLabsEnabled ? env.ELEVENLABS_DEFAULT_VOICE_ID : undefined },
   );
   if (elevenLabs.capabilities().configured || !env.AI) return elevenLabs;
 
