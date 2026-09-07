@@ -50,7 +50,9 @@ jobs:
         env:
           SMOKE_MEDIA_PATH: /tmp/real-media-smoke.mp4
           SMOKE_SUMMARY_PATH: real-media-smoke-summary.json
-        run: node scripts/real-media-smoke.mjs 2>&1 | tee real-media-smoke.log
+        run: |
+          set -o pipefail
+          node scripts/real-media-smoke.mjs 2>&1 | tee real-media-smoke.log
 
       - name: Upload production smoke evidence
         if: always()
