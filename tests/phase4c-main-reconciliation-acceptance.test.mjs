@@ -11,7 +11,11 @@ const wrangler = JSON.parse(read('wrangler.jsonc'));
 const app = read('worker/src/app.ts');
 const shares = read('worker/src/db/shares.ts');
 const shareRoutes = read('worker/src/routes/shares.ts');
-const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
+const exportPipeline = [
+  read('worker/src/workflows/exportPipeline.ts'),
+  read('worker/src/workflows/legacyExportPipeline.ts'),
+  read('worker/src/workflows/zeroContainerExportPipeline.ts'),
+].join('\n');
 
 const hasMigration = (name) => migrations.includes(name);
 
