@@ -33,24 +33,18 @@ If a Cloudflare build or deploy fails, fix the relevant source/configuration in 
 
 The repository-owned Workers Builds deploy command is `node scripts/cloudflare-workers-build-deploy.mjs`. The normal build phase remains remote-mutation free; the deployment phase owns the Worker upload, remote D1 migration application, and exact readiness qualification.
 
-## Workers Builds API token for Containers
+## Cloudflare Stream runtime configuration
 
-This project declares an FFmpeg Cloudflare Container, so the **API token selected by Cloudflare Workers Builds** must be authorized for any Container operation performed by the configured production deploy path. This is the token configured in the Cloudflare dashboard under the Worker at **Settings > Builds**; it is not a GitHub Actions secret and it must not be committed to this repository.
+The production media path is zero-container. `wrangler.jsonc` binds Cloudflare Stream as `STREAM`; the repository must not declare an FFmpeg Container, `FFMPEG_CONTAINER` Durable Object binding, or `FfmpegContainer` export.
 
-When Container publication is enabled in the production deploy path, the Workers Builds token must include the normal Worker/resource permissions needed by this project and **Containers Edit** for production account `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`.
+Dubbed export uses Cloudflare Stream APIs at runtime. The Worker runtime therefore requires `CLOUDFLARE_STREAM_API_TOKEN` and `STREAM_SOURCE_SIGNING_SECRET` in the canonical production account. Secret values must be configured in Cloudflare and must never be committed to Git, tests, screenshots, logs, or documentation.
 
-A characteristic permission failure is:
+Cloudflare Workers Builds itself still uses its configured deployment credential under the Worker at **Settings > Builds** to publish the Worker and its normal resources. No Container publication permission is required by this repository's production path. If deployment authorization fails, fix the Workers Builds credential in Cloudflare and let the normal `main` build deploy again; do not add a GitHub production deploy workflow as a workaround.
 
-1. Worker/assets upload succeeds.
-2. The FFmpeg Docker image builds successfully.
-3. Wrangler then ends with `Unauthorized` while publishing or applying the Container.
-
-When that sequence occurs, treat it as a Workers Builds token/Cloudflare authorization problem. Update or replace the **Workers Builds API token in Settings > Builds** with one that includes **Containers Edit**, then let the normal `main` build deploy again. Do not add a GitHub production deploy workflow as a workaround.
-
-The repository cannot grant Cloudflare account permissions to its own build token. Secret token values must never be stored in Git, tests, documentation, or CI configuration.
+The repository cannot grant Cloudflare account permissions to its own build token. Runtime provider/API secrets and Workers Builds deployment credentials are separate concerns and must remain managed by Cloudflare.
 
 ## Repository guard
 
-CI contains regression tests that fail if a GitHub production deployment workflow is reintroduced, if CI starts performing a non-dry-run Wrangler deploy, if the checked-in production account drifts away from the account that owns the public custom domain and persisted project data, or if a stale HTTP 200 readiness payload lacks the exact current schema revision.
+CI contains regression tests that fail if a GitHub production deployment workflow is reintroduced, if CI starts performing a non-dry-run Wrangler deploy, if the checked-in production account drifts away from the account that owns the public custom domain and persisted project data, if Container runtime configuration returns, or if a stale HTTP 200 readiness payload lacks the exact current schema revision.
 
 This policy is intentional and should be treated as a repository-level requirement.
