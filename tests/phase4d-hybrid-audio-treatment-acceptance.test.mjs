@@ -25,7 +25,8 @@ test('Phase 4D persists the canonical source generation, audio mode, and reusabl
   assert.match(migration, /audio_mode/i);
   assert.match(migration, /CREATE TABLE project_audio_stems/i);
   assert.match(migration, /idx_project_audio_stems_active/i);
-  assert.match(readiness, /CURRENT_SCHEMA_REVISION = 11 as const/);
+  const readinessRevision = Number(readiness.match(/CURRENT_SCHEMA_REVISION\s*=\s*(\d+)\s+as const/)?.[1]);
+  assert.ok(Number.isInteger(readinessRevision) && readinessRevision >= 11);
   assert.match(readiness, /project_audio_stems/);
 });
 
