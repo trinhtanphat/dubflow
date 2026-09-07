@@ -94,6 +94,13 @@ export function exportMediaUrl(
   return `${projectPath(projectId)}/exports/${encodeURIComponent(targetLanguage)}/media?output=${encodeURIComponent(output)}`;
 }
 
+export function visualExportMediaUrl(
+  projectId: string,
+  targetLanguage: TargetLanguage,
+) {
+  return `${exportMediaUrl(projectId, targetLanguage, 'dubbed')}&visualMode=lip_sync`;
+}
+
 export function startLanguageExport(
   projectId: string,
   targetLanguage: TargetLanguage,
