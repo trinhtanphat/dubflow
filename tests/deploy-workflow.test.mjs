@@ -12,22 +12,23 @@ test('GitHub Actions never performs production deploys', () => {
   assert.doesNotMatch(ciWorkflow, /CLOUDFLARE_API_TOKEN/);
 });
 
-test('Cloudflare Workers Builds is the only production deployment lane', () => {
+test('Cloudflare Workers Builds remains the backend production deployment lane', () => {
   assert.equal(fs.existsSync(policyUrl), true, 'document the deployment policy');
   const policy = fs.readFileSync(policyUrl, 'utf8');
   assert.match(policy, /Cloudflare Workers Builds/i);
   assert.match(policy, /main/i);
-  assert.match(policy, /automatic(?:ally)? build/i);
-  assert.match(policy, /automatic(?:ally)? deploy/i);
+  assert.match(policy, /trinhtanphat6666/i);
+  assert.match(policy, /backend/i);
   assert.match(policy, /GitHub Actions.*CI/i);
   assert.match(policy, /must not deploy/i);
 });
 
-test('Workers Builds container deploy token requirement is documented', () => {
+test('deployment policy explicitly disables paid Containers and separates the zone gateway', () => {
   const policy = fs.readFileSync(policyUrl, 'utf8');
-  assert.match(policy, /Workers Builds.*API token/is);
-  assert.match(policy, /Containers Edit/i);
-  assert.match(policy, /Settings\s*>\s*Builds/i);
-  assert.match(policy, /Unauthorized/i);
-  assert.match(policy, /do not.*GitHub.*deploy/is);
+  assert.match(policy, /trinhtanphat2403/i);
+  assert.match(policy, /yupvox\.qs3d\.site/i);
+  assert.match(policy, /gateway/i);
+  assert.match(policy, /Containers.*disabled|disabled.*Containers/is);
+  assert.match(policy, /Containers Edit.*not required|not require.*Containers Edit/is);
+  assert.doesNotMatch(policy, /token must include[\s\S]*Containers Edit/i);
 });
