@@ -1,0 +1,65 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+async function source(path) {
+  try {
+    return await readFile(new URL(path, import.meta.url), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+const [
+  packageSource,
+  panelSource,
+  studioSource,
+  preloadSource,
+  workerSource,
+  workerClientSource,
+  apiSource,
+  pcmSource,
+] = await Promise.all([
+  source('../package.json'),
+  source('../src/features/export/BatchExportPanel.tsx'),
+  source('../src/app/StudioShell.tsx'),
+  source('../src/features/voice/clientVoicePreload.ts'),
+  source('../src/features/voice/browserPiper.worker.ts'),
+  source('../src/features/voice/browserPiperClient.ts'),
+  source('../src/features/voice/clientVoiceApi.ts'),
+  source('../src/features/voice/clientPcm.ts'),
+]);
+
+test('browser Piper zero-cost lane pins the qualified dependency and voice', () => {
+  assert.match(packageSource, /"@mintplex-labs\/piper-tts-web"\s*:\s*"1\.0\.5"/);
+  assert.match(workerSource, /vi_VN-vais1000-medium/);
+  assert.match(workerSource, /@mintplex-labs\/piper-tts-web/);
+});
+
+test('browser Piper stays lazy and converts to the backend PCM contract', () => {
+  assert.match(workerClientSource, /new\s+Worker\s*\(\s*new\s+URL\([^)]*browserPiper\.worker\.ts/);
+  assert.match(workerClientSource, /type:\s*['"]module['"]/);
+  assert.match(pcmSource, /24_000|24000/);
+  assert.match(pcmSource, /8\s*\*\s*1024\s*\*\s*1024/);
+  assert.match(apiSource, /X-DubFlow-PCM-Format/);
+  assert.match(apiSource, /X-DubFlow-Translation-Version/);
+});
+
+test('Studio preloads exact-version Vietnamese voices before export', () => {
+  assert.match(preloadSource, /preloadVietnameseVoices/);
+  assert.match(preloadSource, /voiceStatus/);
+  assert.match(preloadSource, /dubbedObjectKey/);
+  assert.match(studioSource, /preloadVietnameseVoices/);
+  assert.match(studioSource, /clientVoiceStatus/);
+});
+
+test('export presentation can admit the Vietnamese client lane without broadening provider admission', () => {
+  assert.match(panelSource, /clientVoiceAvailable/);
+  assert.match(panelSource, /targetLanguage\s*===\s*['"]vi['"]/);
+  assert.match(panelSource, /dubbedAvailability/);
+});
+
+test('browser zero-cost lane has no paid, Stream, Container, or deploy coupling', () => {
+  const combined = [preloadSource, workerSource, workerClientSource, apiSource, pcmSource].join('\n');
+  assert.doesNotMatch(combined, /xai\/grok-tts|ElevenLabs|AI Gateway|CLOUDFLARE_STREAM|FFMPEG_CONTAINER|wrangler\s+deploy/i);
+});
