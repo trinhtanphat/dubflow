@@ -74,6 +74,8 @@ The workflow must not set any `PAID_*` flag, provider API key, AI Gateway credit
 
 The workflow remains `workflow_dispatch` only. Normal PR/main CI never runs the real production media fixture automatically.
 
+A real production dispatch is additionally blocked by a **zero-charge runtime gate**. Before dispatching, current account/provider state for every request the fixture will make (including production ASR/translation) must be verified to remain inside a free allocation or other hard no-charge boundary. If the account can create billable overage, remaining free allowance cannot be verified, or the cost boundary is ambiguous, do not dispatch. Keep #91 OPEN/UNQUALIFIED and record `ZERO_CHARGE_RUNTIME_UNVERIFIED` instead. Source/CI qualification may proceed without that dispatch.
+
 ## Failure Semantics
 
 - Readiness mismatch: fail before project creation.
@@ -110,8 +112,8 @@ Normal PR CI must remain FULL GREEN: source tests, all Vitest, production build,
 
 ### Runtime gate
 
-After merge and successful backend/gateway Workers Builds on the exact merge SHA, manually run `Production R2 Media Fixture`. A PASS is accepted only when the CDP-driven production browser path finishes and ffprobe/packet-preservation checks pass.
+After merge and successful backend/gateway Workers Builds on the exact merge SHA, the real `Production R2 Media Fixture` remains manual. It may be dispatched only after the zero-charge runtime gate above is positively verified for that run. A PASS is accepted only when the CDP-driven production browser path finishes and ffprobe/packet-preservation checks pass.
 
 ## Runtime Status Rule
 
-Issue #91 may be closed only after the real browser-driven production run passes every media acceptance gate. #128 must remain Draft after that until canonical `MEDIA_SOURCE_SIGNING_SECRET` usage is separately verified live without exposing secret material.
+Issue #91 may be closed only after the real browser-driven production run passes every media acceptance gate under a positively verified zero-charge boundary. If zero-charge runtime status cannot be proved, #91 remains OPEN/UNQUALIFIED. #128 must remain Draft after any media PASS until canonical `MEDIA_SOURCE_SIGNING_SECRET` usage is separately verified live without exposing secret material.
