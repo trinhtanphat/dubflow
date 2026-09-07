@@ -4,6 +4,7 @@ import { createAsrProvider, asrCapabilities } from '../src/services/asr/router';
 import { WorkersAITranslationProvider } from '../src/services/translation/workers-ai';
 import { ContextualWorkersAITranslationProvider } from '../src/services/translation/contextual';
 
+// TDD RED carrier: production code remains untouched until these behaviors fail for the intended reason.
 function aiSpy() {
   let calls = 0;
   const ai = {
