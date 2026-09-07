@@ -32,20 +32,22 @@ test('Workers Builds production deploy applies remote D1 migrations before readi
   ]);
 });
 
-test('Workers Builds production config keeps Stream and contains no FFmpeg Container runtime', () => {
+test('Workers Builds production config is R2-only and contains no Stream or FFmpeg Container runtime', () => {
   const wrangler = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
-  assert.deepEqual(wrangler.stream, { binding: 'STREAM' });
+  assert.equal(wrangler.stream, undefined);
+  assert.ok(wrangler.r2_buckets?.some((entry) => entry.binding === 'MEDIA'));
   assert.equal(wrangler.containers, undefined);
   assert.equal(wrangler.durable_objects, undefined);
   assert.equal(wrangler.exports?.FfmpegContainer, undefined);
-  assert.doesNotMatch(deployScript, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg/);
+  assert.doesNotMatch(deployScript, /FFMPEG_CONTAINER|FfmpegContainer|containers\/ffmpeg|CLOUDFLARE_STREAM_API_TOKEN/);
 });
 
-test('Workers Builds generator strips dormant paid runtime and custom-domain fields defense-in-depth', () => {
+test('Workers Builds generator strips dormant paid runtime, Stream, and custom-domain fields defense-in-depth', () => {
   assert.match(workersBuildConfigGenerator, /delete\s+source\.containers\b/);
   assert.match(workersBuildConfigGenerator, /delete\s+source\.durable_objects\b/);
   assert.match(workersBuildConfigGenerator, /delete\s+source\.exports\b/);
+  assert.match(workersBuildConfigGenerator, /delete\s+source\.stream\b/);
   assert.match(workersBuildConfigGenerator, /delete\s+source\.routes\b/);
 });
 
