@@ -270,4 +270,32 @@ describe('Phase 4D batch export studio controls', () => {
     );
     expect(html).not.toContain('disabled="" data-testid="export-current-language"');
   });
+
+  it('blocks Vietnamese dubbed_only when local Piper is unavailable even if a server provider is configured', () => {
+    expect(dubbedAvailability(voiceCapabilities, 'vi', false)).toMatchObject({ allowed: false });
+
+    const html = renderToStaticMarkup(
+      <BatchExportPanelView
+        currentTargetLanguage="vi"
+        enabledLanguages={['vi']}
+        selectedLanguages={['vi']}
+        output="dubbed"
+        audioMode="dubbed_only"
+        exportCapabilities={unavailableSeparation}
+        voiceCapabilities={voiceCapabilities}
+        localVietnameseVoiceAvailable={false}
+        busy={false}
+        results={[]}
+        error=""
+        onOutputChange={vi.fn()}
+        onAudioModeChange={vi.fn()}
+        onToggleLanguage={vi.fn()}
+        onExportCurrent={vi.fn()}
+        onBatchExport={vi.fn()}
+        onRetryFailed={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('disabled="" data-testid="export-current-language"');
+  });
 });
