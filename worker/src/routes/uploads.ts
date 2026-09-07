@@ -3,7 +3,7 @@ import type { Env } from '../env';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
 import { UploadInputError } from '../domain/upload';
-import { PREPARED_ASR_MAX_CHUNK_BYTES, UploadService, UploadServiceError } from '../services/uploads';
+import { UploadService, UploadServiceError } from '../services/uploads';
 import { ProjectRepository } from '../db/projects';
 import { errorBody } from '../http/json';
 
@@ -13,18 +13,10 @@ export type UploadRouteDeps = {
 
 function uploadError(error: unknown) {
   if (error instanceof UploadInputError || error instanceof UploadServiceError) {
-    const status = error.code === 'PROJECT_NOT_FOUND'
-      ? 404
-      : error.code === 'ASR_PREP_STALE' || error.code === 'PREPARED_ASR_SOURCE_CHANGED'
-        ? 409
-        : 400;
+    const status = error.code === 'PROJECT_NOT_FOUND' ? 404 : 400;
     return { status, body: errorBody(error.code, error.message) } as const;
   }
   return { status: 500, body: errorBody('UPLOAD_FAILED', 'Upload operation failed.') } as const;
-}
-
-function queryNumber(c: { req: { raw: Request } }, name: string): number {
-  return Number(new URL(c.req.raw.url).searchParams.get(name));
 }
 
 export function createUploadRoutes(deps: UploadRouteDeps = {}) {
@@ -69,45 +61,6 @@ export function createUploadRoutes(deps: UploadRouteDeps = {}) {
       const service = makeService(c.env);
       return c.json(await service.complete(
         c.req.param('id'), getCurrentUserId(), c.req.param('uploadId'), input.objectKey ?? '', input.parts ?? [],
-      ));
-    } catch (error) {
-      const result = uploadError(error);
-      return c.json(result.body, result.status);
-    }
-  });
-
-  routes.put('/:id/uploads/asr/chunks/:index', async (c) => {
-    try {
-      const contentLength = Number(c.req.header('content-length'));
-      if (Number.isFinite(contentLength) && contentLength > PREPARED_ASR_MAX_CHUNK_BYTES) {
-        return c.json(errorBody('ASR_PREP_WAV_INVALID', 'Prepared ASR WAV chunk exceeds the upload limit.'), 400);
-      }
-      const wav = await c.req.arrayBuffer();
-      const service = makeService(c.env);
-      return c.json(await service.uploadPreparedAsrChunk(
-        c.req.param('id'),
-        getCurrentUserId(),
-        {
-          sourceGeneration: queryNumber(c, 'sourceGeneration'),
-          index: Number(c.req.param('index')),
-          offsetMs: queryNumber(c, 'offsetMs'),
-          durationMs: queryNumber(c, 'durationMs'),
-          wav,
-        },
-      ));
-    } catch (error) {
-      const result = uploadError(error);
-      return c.json(result.body, result.status);
-    }
-  });
-
-  routes.post('/:id/uploads/asr/complete', async (c) => {
-    try {
-      const service = makeService(c.env);
-      return c.json(await service.completePreparedAsr(
-        c.req.param('id'),
-        getCurrentUserId(),
-        await c.req.json(),
       ));
     } catch (error) {
       const result = uploadError(error);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { R2BucketLike, R2MultipartUploadLike, R2UploadedPartLike, R2UploadValue } from '../src/cloudflare/r2';
+import type { R2BucketLike, R2MultipartUploadLike, R2UploadedPartLike } from '../src/cloudflare/r2';
 import type { Project, ProjectStatus, ProjectStore } from '../src/db/projects';
 import { normalizeUploadInput, UploadInputError } from '../src/domain/upload';
 import { UploadService } from '../src/services/uploads';
@@ -41,17 +41,8 @@ class MemoryMultipart implements R2MultipartUploadLike {
   async abort() {}
 }
 
-async function valueSize(value: R2UploadValue): Promise<number> {
-  if (typeof value === 'string') return new TextEncoder().encode(value).byteLength;
-  if (value instanceof ArrayBuffer) return value.byteLength;
-  if (ArrayBuffer.isView(value)) return value.byteLength;
-  if (value instanceof Blob) return value.size;
-  return (await new Response(value).arrayBuffer()).byteLength;
-}
-
 class MemoryBucket implements R2BucketLike {
   multipart?: MemoryMultipart;
-  objects = new Map<string, { size: number; value: R2UploadValue }>();
   async createMultipartUpload(key: string) {
     this.multipart = new MemoryMultipart(key, 'upload-1');
     return this.multipart;
@@ -60,41 +51,6 @@ class MemoryBucket implements R2BucketLike {
     if (!this.multipart || this.multipart.key !== key || this.multipart.uploadId !== uploadId) throw new Error('missing upload');
     return this.multipart;
   }
-  async put(key: string, value: R2UploadValue) {
-    const size = await valueSize(value);
-    this.objects.set(key, { size, value });
-    return { key, size };
-  }
-  async head(key: string) {
-    const object = this.objects.get(key);
-    return object ? { key, size: object.size } : null;
-  }
-}
-
-function pcmWav(durationMs = 1000): ArrayBuffer {
-  const sampleRate = 16_000;
-  const channels = 1;
-  const bitsPerSample = 16;
-  const dataBytes = Math.round(sampleRate * channels * (bitsPerSample / 8) * durationMs / 1000);
-  const buffer = new ArrayBuffer(44 + dataBytes);
-  const view = new DataView(buffer);
-  const write = (offset: number, value: string) => {
-    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
-  };
-  write(0, 'RIFF');
-  view.setUint32(4, 36 + dataBytes, true);
-  write(8, 'WAVE');
-  write(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * channels * bitsPerSample / 8, true);
-  view.setUint16(32, channels * bitsPerSample / 8, true);
-  view.setUint16(34, bitsPerSample, true);
-  write(36, 'data');
-  view.setUint32(40, dataBytes, true);
-  return buffer;
 }
 
 describe('R2 multipart upload service', () => {
@@ -140,73 +96,5 @@ describe('R2 multipart upload service', () => {
     const service = new UploadService(new MemoryBucket(), new MemoryProjectStore(), () => 'asset-1');
     await expect(service.uploadPart('project-1', 'dev-user', 'upload-1', 'projects/other/source/x.mp4', 1, new ReadableStream())).rejects.toMatchObject({ code: 'UPLOAD_KEY_INVALID' });
     await expect(service.uploadPart('project-1', 'dev-user', 'upload-1', 'projects/project-1/source/x.mp4', 0, new ReadableStream())).rejects.toMatchObject({ code: 'UPLOAD_PART_INVALID' });
-  });
-});
-
-describe('prepared long-form ASR uploads', () => {
-  it('stores a canonical current-generation PCM WAV chunk under a server-derived key', async () => {
-    const store = new MemoryProjectStore();
-    store.project.sourceObjectKey = 'projects/project-1/source/source.mp4';
-    store.project.sourceGeneration = 2;
-    const bucket = new MemoryBucket();
-    const service = new UploadService(bucket, store);
-
-    const descriptor = await service.uploadPreparedAsrChunk('project-1', 'dev-user', {
-      sourceGeneration: 2,
-      index: 0,
-      offsetMs: 0,
-      durationMs: 1000,
-      wav: pcmWav(1000),
-    });
-
-    expect(descriptor.objectKey).toBe('projects/project-1/asr/source-2/chunk-0.wav');
-    expect(descriptor.sizeBytes).toBe(32_044);
-    expect(bucket.objects.has(descriptor.objectKey)).toBe(true);
-  });
-
-  it('fails stale generations and malformed WAV input before writing R2', async () => {
-    const store = new MemoryProjectStore();
-    store.project.sourceObjectKey = 'projects/project-1/source/source.mp4';
-    store.project.sourceGeneration = 3;
-    const bucket = new MemoryBucket();
-    const service = new UploadService(bucket, store);
-
-    await expect(service.uploadPreparedAsrChunk('project-1', 'dev-user', {
-      sourceGeneration: 2, index: 0, offsetMs: 0, durationMs: 1000, wav: pcmWav(1000),
-    })).rejects.toMatchObject({ code: 'ASR_PREP_STALE' });
-    await expect(service.uploadPreparedAsrChunk('project-1', 'dev-user', {
-      sourceGeneration: 3, index: 0, offsetMs: 0, durationMs: 1000, wav: new ArrayBuffer(64),
-    })).rejects.toMatchObject({ code: 'ASR_PREP_WAV_INVALID' });
-    expect(bucket.objects.size).toBe(0);
-  });
-
-  it('commits only contiguous canonical descriptors whose objects exist at exact sizes', async () => {
-    const store = new MemoryProjectStore();
-    store.project.sourceObjectKey = 'projects/project-1/source/source.mp4';
-    store.project.sourceGeneration = 4;
-    const bucket = new MemoryBucket();
-    const service = new UploadService(bucket, store);
-
-    const first = await service.uploadPreparedAsrChunk('project-1', 'dev-user', {
-      sourceGeneration: 4, index: 0, offsetMs: 0, durationMs: 1000, wav: pcmWav(1000),
-    });
-    const second = await service.uploadPreparedAsrChunk('project-1', 'dev-user', {
-      sourceGeneration: 4, index: 1, offsetMs: 1000, durationMs: 1000, wav: pcmWav(1000),
-    });
-
-    const completed = await service.completePreparedAsr('project-1', 'dev-user', {
-      sourceGeneration: 4,
-      durationMs: 2000,
-      chunks: [first, second],
-    });
-    expect(completed.manifestKey).toBe('projects/project-1/asr/source-4/manifest.json');
-    expect(completed.chunkCount).toBe(2);
-    expect(bucket.objects.has(completed.manifestKey)).toBe(true);
-
-    await expect(service.completePreparedAsr('project-1', 'dev-user', {
-      sourceGeneration: 4,
-      durationMs: 2000,
-      chunks: [first, { ...second, objectKey: 'projects/other/asr/source-4/chunk-1.wav' }],
-    })).rejects.toMatchObject({ code: 'ASR_PREP_DESCRIPTOR_INVALID' });
   });
 });
