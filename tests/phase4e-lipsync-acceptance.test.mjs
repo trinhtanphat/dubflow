@@ -80,25 +80,29 @@ test('Phase 4E owner download remains a separate fail-closed route', () => {
   assert.match(studio, /Tải video lip-sync/);
 });
 
-test('Phase 4E zero-container readiness is schema 13 and runtime stays unqualified by default', () => {
-  assert.match(readiness, /CURRENT_SCHEMA_REVISION\s*=\s*13\s+as const/);
-  assert.match(verifyDeployment, /CURRENT_SCHEMA_REVISION\s*=\s*13/);
-  assert.match(deploymentStatus, /schema revision \*\*13\*\*/i);
+test('Phase 4E readiness uses schema 14 R2 media while lip-sync remains unqualified by default', () => {
+  assert.match(readiness, /CURRENT_SCHEMA_REVISION\s*=\s*14\s+as const/);
+  assert.match(verifyDeployment, /CURRENT_SCHEMA_REVISION\s*=\s*14/);
+  assert.match(readiness, /r2:\s*['"]ready['"]\s*\|\s*['"]unavailable['"]/);
+  assert.match(readiness, /remux:\s*['"]ready['"]\s*\|\s*['"]unavailable['"]/);
+  assert.match(deploymentStatus, /schema revision \*\*14\*\*/i);
   assert.match(deploymentStatus, /runtime remains \*\*UNQUALIFIED\*\*/i);
   assert.match(deploymentStatus, /SYNC_LIPSYNC_QUALIFIED/);
   assert.doesNotMatch(wrangler, /SYNC_LIPSYNC_QUALIFIED[\s\S]*true/i);
 });
 
-test('Phase 4E keeps GitHub CI-only and no Container runtime', () => {
+test('Phase 4E keeps GitHub CI-only and no Container or Stream runtime', () => {
   const deployLines = ci.split('\n').filter((line) => /wrangler\s+deploy/i.test(line));
   for (const line of deployLines) assert.match(line, /--dry-run/i);
   const config = JSON.parse(wrangler);
   assert.equal(config.containers, undefined);
   assert.equal(config.durable_objects, undefined);
   assert.equal(config.exports, undefined);
+  assert.equal(config.stream, undefined);
   assert.match(productionConfigGenerator, /delete\s+source\.containers/);
   assert.match(productionConfigGenerator, /delete\s+source\.durable_objects/);
   assert.match(productionConfigGenerator, /delete\s+source\.exports/);
+  assert.match(productionConfigGenerator, /delete\s+source\.stream/);
   assert.match(productionConfigGenerator, /delete\s+source\.routes/);
   assert.match(pkg.scripts['verify:deploy-config'], /phase4e-lipsync-acceptance\.test\.mjs/);
 });
