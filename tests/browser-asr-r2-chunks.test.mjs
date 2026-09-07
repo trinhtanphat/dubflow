@@ -14,6 +14,7 @@ test('long-form ASR is prepared in a browser worker and stored as generation-bou
   const uploads = await source('worker/src/routes/uploads.ts');
   const uploadService = await source('worker/src/services/uploads.ts');
   const r2Source = await source('worker/src/services/media/r2-source.ts');
+  const workflow = await source('worker/src/workflows/DubbingWorkflow.ts');
   const pipeline = await source('worker/src/workflows/pipeline.ts');
   const wrangler = await source('wrangler.jsonc');
 
@@ -48,7 +49,8 @@ test('long-form ASR is prepared in a browser worker and stored as generation-bou
   assert.match(r2Source, /manifest\.json/);
   assert.match(r2Source, /sourceGeneration/);
   assert.match(r2Source, /readPrepared|prepared/i);
-  assert.match(pipeline, /prepared/i);
+  assert.match(workflow, /runPreparedDubbingPipeline/);
+  assert.match(workflow, /bucket\s*:\s*this\.env\.MEDIA/);
   assert.match(pipeline, /offsetMs/);
 
   assert.doesNotMatch(wrangler, /PAID_WORKERS_AI_ENABLED\s*"?\s*:\s*"true"/i);
