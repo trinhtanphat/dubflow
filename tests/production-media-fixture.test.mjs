@@ -40,3 +40,16 @@ test('production media fixture reruns when the TTS fallback boundary changes', (
   assert.match(workflow, /worker\/src\/workflows\/zeroContainerExportPipeline\.ts/);
   assert.doesNotMatch(workflow, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
+
+test('production fixture persists the downloaded MP4 and proves H.264 plus AAC with ffprobe', () => {
+  const script = fs.readFileSync(scriptUrl, 'utf8');
+  const workflow = fs.readFileSync(workflowUrl, 'utf8');
+
+  assert.match(script, /PRODUCTION_MEDIA_OUTPUT_PATH/);
+  assert.match(script, /writeFileSync/);
+  assert.match(workflow, /PRODUCTION_MEDIA_OUTPUT_PATH/);
+  assert.match(workflow, /ffprobe/);
+  assert.match(workflow, /codec_name/);
+  assert.match(workflow, /h264/);
+  assert.match(workflow, /aac/);
+});
