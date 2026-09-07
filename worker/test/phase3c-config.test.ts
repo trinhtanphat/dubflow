@@ -1,4 +1,4 @@
-// @ts-expect-error This Vitest-only config check runs in Node; worker production types intentionally omit Node globals.
+// @ts-ignore This Vitest-only config check runs in Node; worker production types intentionally omit Node globals, but frontend dependencies may make node:fs resolvable during combined typechecking.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
