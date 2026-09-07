@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkReadiness } from '../src/routes/readiness';
 
-const schema12 = {
+const schema13 = {
   projects_table: 1,
   project_export_column: 1,
   usage_operation_column: 1,
@@ -16,14 +16,16 @@ const schema12 = {
   stream_ready_at_column: 1,
   export_stream_video_uid_column: 1,
   export_stream_source_object_key_column: 1,
+  project_exports_lip_sync_status_column: 1,
+  provider_media_grants_table: 1,
 };
 
 describe('zero-container media readiness', () => {
-  it('requires schema 12 and Stream configuration before reporting ready', async () => {
+  it('requires schema 13 and Stream configuration before reporting ready', async () => {
     const db = {
       prepare() {
         return {
-          async first<T>() { return schema12 as T; },
+          async first<T>() { return schema13 as T; },
         };
       },
     };
@@ -38,14 +40,14 @@ describe('zero-container media readiness', () => {
     expect(result).toMatchObject({
       ready: true,
       database: 'ready',
-      schemaRevision: 12,
+      schemaRevision: 13,
       media: { stream: 'ready' },
     });
   });
 
   it('reports media unavailable when Stream write configuration is incomplete', async () => {
-    const db = { prepare: () => ({ async first<T>() { return schema12 as T; } }) };
+    const db = { prepare: () => ({ async first<T>() { return schema13 as T; } }) };
     const result = await checkReadiness(db, 'dg-secret', { stream: {}, accountId: 'account' });
-    expect(result).toMatchObject({ ready: false, database: 'ready', schemaRevision: 12, media: { stream: 'unavailable' } });
+    expect(result).toMatchObject({ ready: false, database: 'ready', schemaRevision: 13, media: { stream: 'unavailable' } });
   });
 });

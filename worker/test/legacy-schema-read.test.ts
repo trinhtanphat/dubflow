@@ -116,9 +116,6 @@ describe('legacy production schema read compatibility', () => {
         exportObjectKey: null,
         durationMs: 120000,
         sizeBytes: 1024,
-        streamVideoUid: null,
-        streamSourceObjectKey: null,
-        streamReadyAt: null,
         createdAt: '2026-09-01T00:00:00Z',
         updatedAt: '2026-09-01T00:00:00Z',
       },
@@ -128,9 +125,6 @@ describe('legacy production schema read compatibility', () => {
       targetLanguagesRevision: 1,
       sourceGeneration: 1,
       exportObjectKey: null,
-      streamVideoUid: null,
-      streamSourceObjectKey: null,
-      streamReadyAt: null,
     });
   });
 
@@ -144,6 +138,7 @@ describe('legacy production schema read compatibility', () => {
         ttsAudioSeconds: 0,
         renderSeconds: 0,
         dialogueSeparationSeconds: 0,
+        lipSyncVideoSeconds: 0,
       },
       providers: {
         'deepgram-nova-3': {
@@ -152,6 +147,7 @@ describe('legacy production schema read compatibility', () => {
           ttsAudioSeconds: 0,
           renderSeconds: 0,
           dialogueSeparationSeconds: 0,
+          lipSyncVideoSeconds: 0,
         },
       },
     });

@@ -153,10 +153,6 @@ function harness(options: {
     RATE_LIMIT_EXPORT: allowedLimiter,
     RATE_LIMIT_BATCH_EXPORT: allowedLimiter,
     ANALYTICS: { writeDataPoint() {} },
-    STREAM: {},
-    CLOUDFLARE_ACCOUNT_ID: 'account',
-    STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
-    CLOUDFLARE_STREAM_API_TOKEN: 'stream-token',
     EXPORT_WORKFLOW: {
       async create(input: { params?: any }) {
         calls.workflow.push(input);
@@ -426,6 +422,10 @@ describe('Phase 4D export audio treatment admission', () => {
     await expect(response.json()).resolves.toEqual({
       duckOriginal: true,
       separation: unavailableSeparation,
+      visualLipSync: {
+        available: false,
+        provider: null,
+      },
     });
     expect(h.calls.separationCapabilities).toBe(1);
 
