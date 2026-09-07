@@ -174,7 +174,7 @@ describe('StreamMediaService dubbed export publication', () => {
         return Response.json({ success: true, result: { uid: 'audio-existing', label: 'dubflow-vi-e1', default: true, status: 'ready' } });
       }
       if (method === 'GET' && url === 'https://videodelivery.net/retry.mp4') {
-        return new Response('retry-mp4', { status: 200 });
+        return new Response('retry-mp4', { status: 200, headers: { 'content-type': 'video/mp4' } });
       }
       if (method === 'POST' && url.endsWith('/audio/copy')) {
         throw new Error('duplicate audio track copy must not happen on retry');
