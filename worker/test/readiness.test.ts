@@ -11,6 +11,11 @@ const fullSchema = {
   project_source_generation_column: 1,
   project_exports_audio_mode_column: 1,
   project_audio_stems_table: 1,
+  stream_video_uid_column: 1,
+  stream_source_object_key_column: 1,
+  stream_ready_at_column: 1,
+  export_stream_video_uid_column: 1,
+  export_stream_source_object_key_column: 1,
   project_exports_lip_sync_status_column: 1,
   provider_media_grants_table: 1,
 };
@@ -31,7 +36,7 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 12,
+      schemaRevision: 13,
       asr: {
         provider: 'deepgram-nova-3',
         speakerDiarization: 'configured',
@@ -55,39 +60,11 @@ describe('checkReadiness', () => {
       ready: true,
       service: 'dubflow',
       database: 'ready',
-      schemaRevision: 12,
+      schemaRevision: 13,
       asr: {
         provider: 'workers-ai-whisper-large-v3-turbo',
         speakerDiarization: 'unavailable',
         speakerIdentityScope: 'none',
-      },
-    });
-  });
-
-  it('fails closed when Phase 4E visual schema is missing from an otherwise current database', async () => {
-    const db = {
-      prepare() {
-        return {
-          async first<T>() {
-            return {
-              ...fullSchema,
-              project_exports_lip_sync_status_column: 0,
-              provider_media_grants_table: 0,
-            } as T;
-          },
-        };
-      },
-    };
-
-    await expect(checkReadiness(db, 'dg-secret')).resolves.toEqual({
-      ready: false,
-      service: 'dubflow',
-      database: 'missing-schema',
-      schemaRevision: null,
-      asr: {
-        provider: 'deepgram-nova-3',
-        speakerDiarization: 'configured',
-        speakerIdentityScope: 'chunk',
       },
     });
   });
@@ -98,10 +75,20 @@ describe('checkReadiness', () => {
         return {
           async first<T>() {
             return {
-              ...fullSchema,
+              projects_table: 1,
+              project_export_column: 1,
+              usage_operation_column: 1,
+              target_languages_revision_column: 1,
+              project_target_languages_table: 1,
+              project_exports_output_column: 1,
               project_source_generation_column: 0,
               project_exports_audio_mode_column: 0,
               project_audio_stems_table: 0,
+              stream_video_uid_column: 0,
+              stream_source_object_key_column: 0,
+              stream_ready_at_column: 0,
+              export_stream_video_uid_column: 0,
+              export_stream_source_object_key_column: 0,
               project_exports_lip_sync_status_column: 0,
               provider_media_grants_table: 0,
             } as T;

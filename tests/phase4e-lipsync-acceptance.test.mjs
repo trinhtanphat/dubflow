@@ -94,11 +94,11 @@ test('Phase 4E usage and durable status expose visual work without upgrading inc
   assert.match(studio, /Lip-sync hoàn tất/);
 });
 
-test('Phase 4E advances readiness to schema 12 and requires the visual schema itself', () => {
-  assert.match(readiness, /CURRENT_SCHEMA_REVISION\s*=\s*12\s+as const/);
+test('Phase 4E visual schema remains required while current readiness advances to schema 13', () => {
+  assert.match(readiness, /CURRENT_SCHEMA_REVISION\s*=\s*13\s+as const/);
   assert.match(readiness, /project_exports_lip_sync_status_column/);
   assert.match(readiness, /provider_media_grants_table/);
-  assert.match(verifyDeployment, /CURRENT_SCHEMA_REVISION\s*=\s*12/);
+  assert.match(verifyDeployment, /CURRENT_SCHEMA_REVISION\s*=\s*13/);
 });
 
 test('Phase 4E remains source-qualified until a real deployed Sync/provider/media fixture passes', () => {
