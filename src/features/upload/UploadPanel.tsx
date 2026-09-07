@@ -1,22 +1,28 @@
 import { useState, type ReactNode } from 'react';
 import { Panel } from '../../components/ui/Panel';
 import { validateMediaFile } from './mediaValidation';
+import type { CloudJob } from '../projects/jobApi';
 import type { CloudProject } from '../projects/projectApi';
 import { runCloudUploadFlow, type CloudUploadFlowResult } from './cloudUploadFlow';
 import './upload.css';
 
 export type UploadPanelProps = {
+  job?: CloudJob | null;
   onProcessStarted?: (result: CloudUploadFlowResult) => void;
   speakerSection?: ReactNode;
 };
 
-export function UploadPanel({ onProcessStarted, speakerSection }: UploadPanelProps) {
+export function UploadPanel({ job, onProcessStarted, speakerSection }: UploadPanelProps) {
   const [file, setFile] = useState<File | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState<CloudProject['sourceLanguage']>('zh');
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Chưa tải video lên cloud.');
   const [progress, setProgress] = useState(0);
   const [busy, setBusy] = useState(false);
+  const jobProgressPercent = job ? Math.round(Math.max(0, Math.min(1, job.progress)) * 100) : null;
+  const jobFailure = job && (job.errorCode || job.errorMessage)
+    ? [job.errorCode, job.errorMessage].filter(Boolean).join(' · ')
+    : '';
 
   const chooseFile = (next?: File) => {
     setError('');
@@ -56,7 +62,13 @@ export function UploadPanel({ onProcessStarted, speakerSection }: UploadPanelPro
         <div className="media-limit">MP4 · WebM · MKV · MOV · tối đa 5 GB / 3 giờ</div>
         {progress > 0 && <div className="upload-progress" aria-label="Tiến trình upload"><i style={{ width: `${Math.round(progress * 100)}%` }} /></div>}
         <div className="reference-upload-status"><p className="phase-note">{status}</p></div>
+        {job && (
+          <div className="reference-upload-status" aria-live="polite">
+            <p className="phase-note">AI · {job.currentStep ?? job.status} · {jobProgressPercent}%</p>
+          </div>
+        )}
         {error && <p className="error-banner" role="alert">{error}</p>}
+        {jobFailure && <p className="error-banner" role="alert">{jobFailure}</p>}
       </Panel>
 
       {speakerSection}

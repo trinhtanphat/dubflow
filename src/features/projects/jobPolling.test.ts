@@ -20,13 +20,32 @@ describe('job polling', () => {
   it('polls no faster than two seconds and stops at a terminal/review state', async () => {
     const queue = [job('running', 0.4), job('needs_review', 1)];
     const waits: number[] = [];
+    const updates: CloudJob[] = [];
     const result = await pollJobUntilTerminal('p1', 'j1', {
       getJob: async () => queue.shift()!,
       sleep: async (ms) => { waits.push(ms); },
+      onJob: (next) => { updates.push(next); },
     });
     expect(JOB_POLL_INTERVAL_MS).toBe(2000);
     expect(waits).toEqual([2000]);
     expect(result.status).toBe('needs_review');
+    expect(updates.map((entry) => entry.status)).toEqual(['running', 'needs_review']);
+  });
+
+  it('surfaces the persisted terminal error through onJob before returning', async () => {
+    const updates: CloudJob[] = [];
+    const failed = {
+      ...job('failed', 0.42),
+      currentStep: 'transcribing',
+      errorCode: 'ASR_FAILED',
+      errorMessage: 'Provider down',
+    };
+    const result = await pollJobUntilTerminal('p1', 'j1', {
+      getJob: async () => failed,
+      onJob: (next) => { updates.push(next); },
+    });
+    expect(result).toBe(failed);
+    expect(updates).toEqual([failed]);
   });
 
   it('treats durable cancellation as terminal without another wait', async () => {

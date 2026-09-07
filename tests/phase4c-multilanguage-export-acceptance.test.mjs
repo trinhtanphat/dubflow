@@ -7,7 +7,11 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const migration = read('migrations/0010_multilanguage_variants.sql');
 const router = read('worker/src/services/translation/router.ts');
 const languagePipeline = read('worker/src/workflows/languageTranslationPipeline.ts');
-const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
+const exportPipeline = [
+  read('worker/src/workflows/exportPipeline.ts'),
+  read('worker/src/workflows/legacyExportPipeline.ts'),
+  read('worker/src/workflows/zeroContainerExportPipeline.ts'),
+].join('\n');
 const exportRoute = read('worker/src/routes/export.ts');
 const studio = read('src/app/StudioShell.tsx');
 const packageJson = read('package.json');
@@ -57,13 +61,12 @@ test('Phase 4C verification keeps prior safety acceptance lanes wired', () => {
   }
 });
 
-test('Phase 4C remains source-qualified while production follows the split Cloudflare topology', () => {
+test('Phase 4C remains source-qualified while production follows the single Workers Builds lane', () => {
   assert.match(deploymentStatus, /## Phase 4C .*multi-language.*export qualification/i);
   for (const target of ['vi', 'en', 'zh', 'ja', 'ko']) assert.match(deploymentStatus, new RegExp(`\\b${target}\\b`));
   assert.match(deploymentStatus, /Vietnamese[\s\S]*(?:compatibility|backward compatibility)/i);
   assert.match(deploymentStatus, /Production runtime remains \*\*UNQUALIFIED\*\*/i);
-  assert.match(deploymentPolicy, /Cloudflare Workers Builds remains the backend production deployment lane/i);
-  assert.match(deploymentPolicy, /wrangler\.gateway\.jsonc/);
+  assert.match(deploymentPolicy, /Cloudflare Workers Builds is the only production deployment lane/i);
   assert.match(deploymentStatus, /real .*provider.*media.*fixture/is);
   assert.doesNotMatch(deploymentStatus, /Phase 4C production runtime[^\n]*(?:PASS|qualified)/i);
 });

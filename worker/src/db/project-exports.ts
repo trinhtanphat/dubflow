@@ -21,6 +21,8 @@ export type ProjectExport = {
   lipSyncObjectKey: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  streamVideoUid: string | null;
+  streamSourceObjectKey: string | null;
 };
 
 type ProjectExportRow = {
@@ -39,11 +41,14 @@ type ProjectExportRow = {
   lip_sync_object_key?: string | null;
   error_code: string | null;
   error_message: string | null;
+  stream_video_uid?: string | null;
+  stream_source_object_key?: string | null;
 };
 
 const EXPORT_COLUMNS = `e.id, e.project_id, e.target_language, e.output, e.batch_id, e.audio_mode, e.status,
   e.export_object_key, e.subtitle_object_key, e.lip_sync_requested, e.lip_sync_provider,
-  e.lip_sync_status, e.lip_sync_object_key, e.error_code, e.error_message`;
+  e.lip_sync_status, e.lip_sync_object_key, e.error_code, e.error_message,
+  e.stream_video_uid, e.stream_source_object_key`;
 
 function fromRow(row: ProjectExportRow): ProjectExport {
   return {
@@ -62,6 +67,8 @@ function fromRow(row: ProjectExportRow): ProjectExport {
     lipSyncObjectKey: row.lip_sync_object_key ?? null,
     errorCode: row.error_code,
     errorMessage: row.error_message,
+    streamVideoUid: row.stream_video_uid ?? null,
+    streamSourceObjectKey: row.stream_source_object_key ?? null,
   };
 }
 
@@ -131,6 +138,8 @@ export class ProjectExportRepository {
       lipSyncObjectKey: null,
       errorCode: null,
       errorMessage: null,
+      streamVideoUid: null,
+      streamSourceObjectKey: null,
     };
   }
 
@@ -189,6 +198,21 @@ export class ProjectExportRepository {
        ORDER BY e.created_at ASC, e.id ASC`,
     ).bind(projectId, batchId, userId).all<ProjectExportRow>();
     return (result.results ?? []).map(fromRow);
+  }
+
+  async setStreamProvenance(
+    projectId: string,
+    exportId: string,
+    userId: string,
+    sourceObjectKey: string,
+    videoUid: string,
+  ): Promise<void> {
+    await this.assertProject(projectId, userId);
+    await this.db.prepare(
+      `UPDATE project_exports
+       SET stream_video_uid = ?, stream_source_object_key = ?, updated_at = datetime('now')
+       WHERE id = ? AND project_id = ?`,
+    ).bind(videoUid, sourceObjectKey, exportId, projectId).run();
   }
 
   async complete(

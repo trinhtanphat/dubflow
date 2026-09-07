@@ -53,6 +53,21 @@ describe('ProjectDashboard', () => {
     expect(html).not.toContain('Hủy job');
   });
 
+  it('replaces the retired Container getByName crash with a retryable user-facing message', () => {
+    const html = render([project], {
+      p1: [job({
+        errorCode: 'MEDIA_PROCESSOR_FAILED',
+        errorMessage: "Cannot read properties of undefined (reading 'getByName')",
+        progress: 0.05,
+        currentStep: 'preparing',
+      })],
+    });
+    expect(html).toContain('Job cũ đã lỗi ở media runtime trước đây. Hãy thử lại để chạy bằng pipeline media hiện tại.');
+    expect(html).toContain('Thử lại');
+    expect(html).not.toContain('getByName');
+    expect(html).not.toContain('Cannot read properties of undefined');
+  });
+
   it('shows cancellation only for active durable jobs', () => {
     const html = render([project], { p1: [job({ status: 'running', errorCode: null, errorMessage: null, progress: 0.35 })] });
     expect(html).toContain('35%');

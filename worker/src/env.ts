@@ -1,7 +1,7 @@
 import type { D1DatabaseLike } from './db/projects';
 import type { AiBinding } from './cloudflare/ai';
 import type { R2BucketLike } from './cloudflare/r2';
-import type { ContainerNamespaceLike } from './services/media/container';
+import type { StreamBindingLike } from './cloudflare/stream';
 
 export interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
@@ -24,6 +24,7 @@ export interface RateLimitBindingLike {
 export interface Env {
   DB: D1DatabaseLike;
   MEDIA: R2BucketLike;
+  STREAM?: StreamBindingLike;
   AI: AiBinding;
   ASSETS: AssetFetcher;
   ANALYTICS: AnalyticsEngineDatasetLike;
@@ -34,14 +35,13 @@ export interface Env {
   RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
   RATE_LIMIT_BATCH_EXPORT: RateLimitBindingLike;
-  RATE_LIMIT_SEPARATION: RateLimitBindingLike;
-  FFMPEG_CONTAINER?: ContainerNamespaceLike;
-  SEPARATOR_CONTAINER?: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
   LANGUAGE_TRANSLATION_WORKFLOW: WorkflowBindingLike;
-  SEPARATION_WORKFLOW?: WorkflowBindingLike;
-  SEPARATION_RUNTIME_QUALIFIED?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  PUBLIC_ORIGIN?: string;
+  STREAM_SOURCE_SIGNING_SECRET?: string;
+  CLOUDFLARE_STREAM_API_TOKEN?: string;
   CONTEXT_TRANSLATION_MODEL?: string;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
   DEEPGRAM_API_KEY?: string;

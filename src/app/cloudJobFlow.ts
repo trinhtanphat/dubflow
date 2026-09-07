@@ -33,7 +33,6 @@ export async function followCloudJob(
   onJob?: (job: CloudJob) => void,
 ): Promise<StudioProject | null> {
   const terminal = await deps.poll(projectId, jobId, { onJob }, signal);
-  onJob?.(terminal);
   if (terminal.status === 'needs_review' || terminal.status === 'completed') {
     return deps.hydrate(projectId);
   }

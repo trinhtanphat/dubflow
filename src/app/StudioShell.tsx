@@ -13,11 +13,6 @@ import {
   type VisualMode,
 } from '../features/export/batchExportApi';
 import {
-  getSeparationStatus,
-  prepareSeparation,
-  type SeparationStateDto,
-} from '../features/export/separationApi';
-import {
   getProjectLanguages,
   getTranslationVariants,
   patchProjectLanguages,
@@ -123,8 +118,6 @@ export function StudioShell(props: Props) {
   const [processingLanguage, setProcessingLanguage] = useState<TargetLanguage | null>(null);
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null);
   const [exportCapabilities, setExportCapabilities] = useState<ExportCapabilitiesDto | null>(null);
-  const [separationState, setSeparationState] = useState<SeparationStateDto | null>(null);
-  const [separationBusy, setSeparationBusy] = useState(false);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
   const [audioMode, setAudioMode] = useState<DubbedAudioMode>('dubbed_only');
   const [visualMode, setVisualMode] = useState<VisualMode>('standard');
@@ -187,31 +180,6 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject, projectId]);
-
-  useEffect(() => {
-    if (!isCloudProject) return;
-    let active = true;
-    getSeparationStatus(projectId).then((next) => {
-      if (active) setSeparationState(next);
-    }).catch(() => {
-      if (active) setSeparationState(null);
-    });
-    return () => { active = false; };
-  }, [isCloudProject, projectId]);
-
-  useEffect(() => {
-    if (!isCloudProject || separationState?.status !== 'processing') return;
-    let active = true;
-    const timer = window.setInterval(() => {
-      getSeparationStatus(projectId).then((next) => {
-        if (active) setSeparationState(next);
-      }).catch(() => undefined);
-    }, 2000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [isCloudProject, projectId, separationState?.status]);
 
   useEffect(() => {
     if (!isCloudProject || exportResults.length === 0) return;
@@ -393,34 +361,16 @@ export function StudioShell(props: Props) {
       : [...current, language]);
   };
 
-  const prepareBackground = async () => {
-    if (!isCloudProject || separationBusy) return;
-    setSeparationBusy(true);
-    setExportError('');
-    try {
-      const next = await prepareSeparation(projectId, separationState?.status === 'failed');
-      setSeparationState(next);
-    } catch (error) {
-      setExportError(message(error, 'Không thể chuẩn bị background audio.'));
-      try {
-        setSeparationState(await getSeparationStatus(projectId));
-      } catch {
-        // Preserve the actionable prepare error when status refresh also fails.
-      }
-    } finally {
-      setSeparationBusy(false);
-    }
-  };
-
-  const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
-
   const clearAttempt = (language: TargetLanguage) => {
     setExportAttempts((current) => {
+      if (!current[language]) return current;
       const next = { ...current };
       delete next[language];
       return next;
     });
   };
+
+  const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const exportCurrent = async () => {
     setExportBusy(true);
@@ -512,8 +462,6 @@ export function StudioShell(props: Props) {
                 visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
-                separationState={separationState}
-                separationBusy={separationBusy}
                 busy={exportBusy}
                 results={exportResults}
                 attempts={exportAttempts}
@@ -525,7 +473,6 @@ export function StudioShell(props: Props) {
                 onAudioModeChange={setAudioMode}
                 onVisualModeChange={setVisualMode}
                 onToggleLanguage={toggleSelected}
-                onPrepareSeparation={prepareBackground}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}
                 onRetryFailed={retryFailed}

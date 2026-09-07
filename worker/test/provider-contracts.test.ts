@@ -48,15 +48,24 @@ const rateLimit = {
   },
 } satisfies Env['RATE_LIMIT_PROCESS'];
 
-const ffmpegContainer = {
-  getByName(_name: string) {
+const stream = {
+  async upload(_url: string) {
+    return { id: 'stream-video-1', readyToStream: true };
+  },
+  video(id: string) {
     return {
-      async fetch(_request: Request) {
-        return Response.json({ ok: true });
+      async details() {
+        return { id, readyToStream: true };
+      },
+      downloads: {
+        async generate(_type?: 'default' | 'audio') {},
+        async get() {
+          return { default: { status: 'ready', url: 'https://example.invalid/video.mp4' } };
+        },
       },
     };
   },
-} satisfies Env['FFMPEG_CONTAINER'];
+} satisfies NonNullable<Env['STREAM']>;
 
 const dubbingWorkflow = {
   async create(_input: { id?: string; params?: unknown }) {
@@ -77,10 +86,11 @@ const languageTranslationWorkflow = {
 } satisfies Env['LANGUAGE_TRANSLATION_WORKFLOW'];
 
 describe('Cloudflare provider contracts', () => {
-  it('accepts portable AI, R2, Analytics Engine, rate limits, Container and Workflow bindings plus provider secrets', () => {
+  it('accepts portable AI, R2, Analytics Engine, rate limits, Stream and Workflow bindings plus provider secrets', () => {
     const env = {
       DB: {} as Env['DB'],
       MEDIA: bucket,
+      STREAM: stream,
       AI: ai,
       ASSETS: { fetch: async () => new Response('asset') },
       ANALYTICS: analytics,
@@ -91,8 +101,6 @@ describe('Cloudflare provider contracts', () => {
       RATE_LIMIT_UPLOAD: rateLimit,
       RATE_LIMIT_VOICE_CLONE: rateLimit,
       RATE_LIMIT_BATCH_EXPORT: rateLimit,
-      RATE_LIMIT_SEPARATION: rateLimit,
-      FFMPEG_CONTAINER: ffmpegContainer,
       DUBBING_WORKFLOW: dubbingWorkflow,
       EXPORT_WORKFLOW: exportWorkflow,
       LANGUAGE_TRANSLATION_WORKFLOW: languageTranslationWorkflow,
@@ -102,6 +110,7 @@ describe('Cloudflare provider contracts', () => {
     } satisfies Env;
 
     expect(env.MEDIA).toBe(bucket);
+    expect(env.STREAM).toBe(stream);
     expect(env.AI).toBe(ai);
     expect(env.ANALYTICS).toBe(analytics);
     expect(env.RATE_LIMIT_PROCESS).toBe(rateLimit);
@@ -111,8 +120,6 @@ describe('Cloudflare provider contracts', () => {
     expect(env.RATE_LIMIT_UPLOAD).toBe(rateLimit);
     expect(env.RATE_LIMIT_VOICE_CLONE).toBe(rateLimit);
     expect(env.RATE_LIMIT_BATCH_EXPORT).toBe(rateLimit);
-    expect(env.RATE_LIMIT_SEPARATION).toBe(rateLimit);
-    expect(env.FFMPEG_CONTAINER).toBe(ffmpegContainer);
     expect(env.DUBBING_WORKFLOW).toBe(dubbingWorkflow);
     expect(env.EXPORT_WORKFLOW).toBe(exportWorkflow);
     expect(env.LANGUAGE_TRANSLATION_WORKFLOW).toBe(languageTranslationWorkflow);

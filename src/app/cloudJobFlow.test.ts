@@ -8,8 +8,10 @@ describe('cloud job follow flow', () => {
     const studio = await followCloudJob('p1', 'j1', {
       async poll(_projectId, _jobId, options) {
         const running = { id: 'j1', projectId: 'p1', type: 'dubbing', status: 'running' as const, progress: 0.6, currentStep: 'transcribing', errorCode: null, errorMessage: null };
+        const terminal = { ...running, status: 'needs_review' as const, progress: 1, currentStep: null };
         options.onJob?.(running);
-        return { ...running, status: 'needs_review' as const, progress: 1, currentStep: null };
+        options.onJob?.(terminal);
+        return terminal;
       },
       async hydrate(projectId) {
         calls.push(`hydrate:${projectId}`);

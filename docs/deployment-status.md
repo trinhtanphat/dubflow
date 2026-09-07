@@ -4,95 +4,96 @@ Canonical public hostname: `yupvox.qs3d.site`
 
 ## Current Cloudflare topology
 
-Production is intentionally split across two Cloudflare accounts.
+Production uses a split Cloudflare topology.
 
-- Public zone/gateway: `trinhtanphat2403` — `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. This account owns `qs3d.site`, the `yupvox.qs3d.site` custom domain, TLS, and the thin `dubflow-gateway` Worker.
-- Backend/state: `trinhtanphat6666` — `6c5207813df3d5b83b9508125e0e9e12`. This account owns the `dubflow` backend Worker and its persisted production data in D1/R2 together with Workers AI, Analytics Engine, Workflows, and rate-limit resources.
+- Public zone/gateway account: `50afb4fd3c4c7a1f3e1bdb7f22d4af7f`. It owns `qs3d.site`, the `yupvox.qs3d.site` custom domain, TLS, and the thin `dubflow-gateway` Worker.
+- Backend/state account: `6c5207813df3d5b83b9508125e0e9e12`. It owns the `dubflow` backend Worker and persisted production data in D1/R2 together with Workers AI, Analytics Engine, Workflows, rate-limit resources, and the media provider state used by the backend.
 
-The public gateway owns no DubFlow database or media state. It forwards `yupvox.qs3d.site` to the exact backend `workers.dev` origin configured as `BACKEND_ORIGIN`.
-
-`main` remains the repository source of truth. GitHub Actions is CI only. Cloudflare Workers Builds remains the backend deployment lane for `trinhtanphat6666`; gateway deployment uses `wrangler.gateway.jsonc` in the zone-owning `trinhtanphat2403` account. The historical manual-only GitHub production deployment lane remains removed. See `docs/DEPLOYMENT-POLICY.md` and `docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md`.
+The gateway owns no DubFlow database or media state. It forwards the public hostname to the configured backend origin. `main` remains the repository source of truth. GitHub Actions is CI only and **must not deploy production**. Cloudflare Workers Builds is the backend deployment lane; gateway deployment is defined by `wrangler.gateway.jsonc`.
 
 ## Containers disabled
 
-Cloudflare **Containers are disabled in production**. The production backend config does not declare Container resources, Container-backed Durable Objects, or Container exports. `Containers Edit` is not required for this topology.
+Cloudflare **Containers are disabled in production**. The current production source does not deploy `FFMPEG_CONTAINER`, `SEPARATOR_CONTAINER`, Container-backed Durable Objects, or `@cloudflare/containers`.
 
-The FFmpeg and Demucs adapters remain in source as optional implementation/test material, but there is no deployed `FFMPEG_CONTAINER` or `SEPARATOR_CONTAINER` binding. Media operations that require those bindings remain fail-closed. A GREEN source test does not mean a paid Container is running.
+The FFmpeg Container runtime has been removed from the active dubbing and `dubbed_only` export path. Historical FFmpeg/Demucs material does not imply a deployed Container. Hybrid audio modes that still need an unimplemented media treatment remain fail-closed instead of silently falling back.
 
-## Runtime qualification boundary
+## Current zero-container source path
 
-Worker-native project/state/UI/translation/observability paths can be deployed on the backend account. Media processing that requires the absent FFmpeg Container and dialogue separation that requires the absent Demucs Container remain **UNQUALIFIED** and unavailable until a different qualified media runtime is implemented.
+The current zero-container source path is: R2 multipart upload -> Cloudflare Stream source preparation -> remote ASR (Deepgram when configured, bounded Workers AI fallback where admitted) -> speaker reconciliation -> translation -> per-speaker ElevenLabs TTS -> Worker-native PCM/WAV soundtrack assembly -> Cloudflare Stream dubbed MP4 publishing.
 
-The cross-account gateway itself does not upgrade provider/media qualification. Public and backend readiness must be checked independently during rollout.
+Migration `0012_stream_media.sql` persists Stream source and per-export render provenance. Migration `0013_visual_lipsync.sql` then adds optional visual lip-sync state and bounded provider-media grants. The combined readiness contract is schema revision **13**. The deployment verifier rejects stale HTTP-200 payloads that do not report exact revision 13.
+
+Canonical target artifacts include:
+
+- voice clips: `projects/{projectId}/voices/{targetLanguage}/...`
+- soundtrack: `projects/{projectId}/soundtracks/{targetLanguage}/{exportId}.wav`
+- subtitles: `projects/{projectId}/subtitles/{targetLanguage}/{exportId}.srt`
+- standard dubbed export: `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`
+- optional visual result: `projects/{projectId}/exports/{targetLanguage}/{exportId}.lipsync.mp4`
+
+Visual lip-sync does **not** re-extract export audio with FFmpeg. Sync Labs receives the already-rendered standard MP4 plus the durable PCM/WAV soundtrack through bounded provider-media grants. Standard MP4 publication completes first and remains durable even if the optional visual operation fails.
+
+Stream write/signing configuration is required for dubbed export. `SYNC_API_KEY` is optional: when absent, standard zero-container dubbing/export stays available while visual lip-sync admission reports unavailable. Secret values are never committed. Source CI does not claim a real external provider is configured.
 
 ## Phase 3B usage qualification
 
-Phase 3B retains the durable idempotent usage ledger for ASR, translation, generated TTS audio and final render. Persisted/API units remain seconds for ASR/TTS/render and Unicode source characters for translation. `users.credit_balance` remains informational/read-only; no pricing or credit decrement is introduced by this deployment change.
+Phase 3B keeps the durable idempotent usage ledger authoritative for ASR, translation, generated TTS audio, final render, and optional visual lip-sync usage. Persisted/API units remain seconds for ASR/TTS/render/lip-sync and Unicode source characters for translation. Retry/provider operation identity prevents Workflow replay from duplicating the same logical completed provider work. `users.credit_balance` remains informational/read-only.
 
 ## Phase 3C observability, rate-limit, and sharing qualification
 
-Phase 3C keeps the `dubflow_events` Analytics Engine dataset and the five original isolated admission lanes: `RATE_LIMIT_PROCESS`, `RATE_LIMIT_EXPORT`, `RATE_LIMIT_TRANSLATE`, `RATE_LIMIT_VOICE`, and `RATE_LIMIT_UPLOAD`.
+Phase 3C source/CI qualification uses the `dubflow_events` Analytics Engine dataset and bounded operational telemetry. Payloads, transcripts, media contents, raw bearer tokens and provider secrets remain outside the telemetry schema.
 
-Sharing remains owner-managed and revocable. Invalid, missing, expired, revoked, or wrong anonymous share credentials continue to converge on `SHARE_NOT_FOUND`; raw bearer material is not persisted as public state. Cross-account routing does not move these backend responsibilities into the gateway account.
+The original isolated one-minute admission lanes remain `RATE_LIMIT_PROCESS`, `RATE_LIMIT_EXPORT`, `RATE_LIMIT_TRANSLATE`, `RATE_LIMIT_VOICE`, and `RATE_LIMIT_UPLOAD`; later feature-specific lanes are additive. Authorization/input validation precedes limiter consumption and expensive side effects.
 
-The historical manual-only GitHub production lane remains removed; source/CI qualification does not prove real provider or media execution. Production runtime status remains **UNQUALIFIED**.
+Export sharing remains owner-managed and revocable. Invalid, missing, expired, revoked, and wrong-token anonymous access converges on `SHARE_NOT_FOUND`. The historical manual-only GitHub production lane remains removed. Production provider/media runtime status remains **UNQUALIFIED** until real fixture verification.
 
 ## Phase 4A translation context qualification
 
-Phase 4A translation context remains **source-qualified only**. Project style/glossary settings are revision-safe and owner scoped. The contextual model runtime is not proven by source CI, and runtime status remains **UNQUALIFIED**.
+Phase 4A translation context remains **source-qualified only**. Project style/glossary settings are revision-safe and owner scoped. The contextual model runtime is not proven by source CI; runtime status remains **UNQUALIFIED**.
 
 ## Phase 4A project-stable diarization qualification
 
-Phase 4A diarization keeps 300-second ASR windows with a 15-second overlap. The canonical stride is 285 seconds (`300 - 15`), preserving the fixed overlap contract. Duplicate suppression and conservative speaker reconciliation remain deterministic across rerun paths.
+The current zero-container source prepares a Stream media source and sends remote ASR without the removed FFmpeg chunk-extraction runtime. Conservative deterministic speaker reconciliation and safe historical speaker-ID reuse remain in place; no biometric embedding or voiceprint store is introduced.
 
-Production runtime remains **UNQUALIFIED** until a supported real provider/media fixture proves cross-window persisted speaker linkage and safe rerun reconciliation.
+The former 300-second / 15-second overlapping FFmpeg chunk contract is historical, not the active source path. Production runtime remains **UNQUALIFIED** until a real Stream/ASR fixture proves persisted speaker linkage and rerun safety.
 
 ## Phase 4B safe managed voice clone qualification
 
-Phase 4B remains **source/CI qualification only** for managed ElevenLabs IVC enrollment. Explicit consent and project ownership boundaries are unchanged. The historical manual-only GitHub production path remains removed; production runtime remains **UNQUALIFIED** until a real authorized IVC fixture passes.
+Phase 4B remains **source/CI qualification only** for consent-gated ElevenLabs Instant Voice Clone (IVC) enrollment. Explicit rights/consent is required. Temporary samples remain bounded and managed cleanup is fail-closed. Production runtime remains **UNQUALIFIED** until a real authorized sample fixture passes.
 
 ## Phase 4C multi-language batch export qualification
 
-Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`. Vietnamese remains available for backward compatibility, including the legacy `vi` dubbing path, while target-language variants remain independently persisted.
+Phase 4C remains **source/CI qualification only** for `vi`, `en`, `ja`, `ko`, and `zh`. Target translations, voice artifacts, soundtracks and exports are persisted independently; Vietnamese backward compatibility remains intact without overwriting sibling targets.
 
-Canonical target artifact paths remain:
+`RATE_LIMIT_BATCH_EXPORT` remains the dedicated batch admission lane. Batch grouping is metadata only; child `project_exports` rows remain authoritative, so one failed target does not roll back completed siblings. The zero-container PCM/WAV + Stream publisher is the active `dubbed_only` render path.
 
-- `projects/{projectId}/voices/{targetLanguage}/...`
-- `projects/{projectId}/subtitles/{targetLanguage}/{exportId}.srt`
-- `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`
-
-`RATE_LIMIT_BATCH_EXPORT` remains the dedicated batch admission lane. Multi-language runtime that depends on final FFmpeg rendering is **UNQUALIFIED** while Containers are disabled.
-
-Production runtime remains **UNQUALIFIED** until a real authorized provider/media fixture proves at least two distinct target languages end-to-end through translation, TTS, final render, retrieval, and concrete export sharing.
+Production multi-language runtime remains **UNQUALIFIED** until a real authorized fixture proves at least two target languages through translation, TTS, soundtrack assembly, Stream publishing, retrieval and concrete export sharing.
 
 ## Phase 4D hybrid audio treatment qualification
 
-Phase 4D remains **source/CI qualification only** for `dubbed_only`, `duck_original`, and `separated_background`. Migration `0011_phase4d_audio_separation.sql` defines the source-generation/audio-mode/stem schema.
+Phase 4D retains the API/source vocabulary `dubbed_only`, `duck_original`, and `separated_background`. In the approved zero-container production architecture, `dubbed_only` is implemented by PCM/WAV + Stream. `duck_original` and `separated_background` remain intentionally fail-closed because no qualified zero-container equivalent is wired.
 
-`SEPARATION_RUNTIME_QUALIFIED` stays `false`. Because Containers are disabled and no `SEPARATOR_CONTAINER` binding is deployed, true separated-background preparation remains fail-closed and **UNQUALIFIED**. The source Demucs adapter may remain for future implementation work, but production must not claim it as live.
-
-Cloudflare Workers Builds can deploy the account-6666 Worker without publishing a Container image. GitHub Actions remains CI-only.
+Migration `0011_phase4d_audio_separation.sql` introduced source generation, audio mode and stem state. There is no silent downgrade from a requested hybrid mode to `dubbed_only`. Runtime remains **UNQUALIFIED** for the unavailable modes.
 
 ## Phase 4E optional visual lip-sync qualification
 
-Phase 4E is **source/CI qualification only** for optional visual lip-sync. Migration `0012_visual_lipsync.sql` advances the source readiness target to schema revision **12** and persists visual processing state plus bounded provider-media grant authority.
+Phase 4E is **source/CI qualification only** for optional Sync Labs visual lip-sync. In the reconciled zero-container architecture, migration `0013_visual_lipsync.sql` follows Stream migration `0012_stream_media.sql`, producing readiness schema revision **13** without migration-number collision.
 
-The canonical standard export remains `projects/{projectId}/exports/{targetLanguage}/{exportId}.mp4`; a successful visual result remains separate as `projects/{projectId}/exports/{targetLanguage}/{exportId}.lipsync.mp4`.
+The visual provider receives a bounded HTTPS grant for the standard MP4 and a second bounded grant for `projects/{projectId}/soundtracks/{targetLanguage}/{exportId}.wav`. A successful result is stored separately as `.lipsync.mp4`. Provider failures do not destroy or relabel the already-completed standard MP4.
 
-Sync Labs remains an optional configured provider. `SYNC_API_KEY` alone means only that the provider credential is configured; it does **not** qualify runtime behavior or enable visual lip-sync admission. `SYNC_LIPSYNC_QUALIFIED` is an explicit fail-closed runtime qualification latch and must remain unset or `false` until a real supported Sync provider/media fixture succeeds end-to-end. Source CI, mock-provider tests, Wrangler dry-run, schema checks, screenshots, a successful deployment, or the mere presence of `SYNC_API_KEY` must never flip that latch automatically. Only `SYNC_LIPSYNC_QUALIFIED=true` together with a configured Sync key may expose the provider as qualified to route admission and Workflow execution.
+Sync Labs remains optional and production runtime remains **UNQUALIFIED** until a real supported provider/media fixture completes end-to-end. `SYNC_API_KEY` configures the provider only; visual admission remains fail-closed unless `SYNC_LIPSYNC_QUALIFIED=true` is set after that real supported end-to-end fixture has been qualified.
 
-Production runtime remains **UNQUALIFIED** until a real supported Sync provider/media fixture completes end-to-end from a normal dubbed export through short-lived provider media delivery, Sync generation, canonical R2 visual publication, persisted completion state, and owner download. After that evidence is reviewed, an operator may explicitly set `SYNC_LIPSYNC_QUALIFIED=true`; until then UI/API/Workflow remain fail-closed even if the Sync credential exists.
+## Studio reference qualification
 
-This cross-account deployment change does not preclaim Phase 4E runtime qualification.
+Studio CI captures the canonical reference viewports from the exact tested SHA. Screenshots qualify presentation only. Durable dubbing/export state is surfaced in the UI so queued/running/error state does not appear as an inert action.
 
 ## Deployment verification
 
-The safe rollout order is:
+Safe rollout order:
 
-1. Merge a fully green commit to `main`.
-2. Deploy the backend in `trinhtanphat6666` with `wrangler.jsonc` and confirm its exact `workers.dev` origin.
-3. Verify backend `/api/ready` directly.
-4. Configure `BACKEND_ORIGIN` on `dubflow-gateway` and deploy `wrangler.gateway.jsonc` in `trinhtanphat2403`.
-5. Verify `https://yupvox.qs3d.site/api/ready` reaches the intended backend state/schema.
+1. Merge an exact fully-green commit to `main`.
+2. Let Cloudflare Workers Builds deploy the backend account from that exact main commit and apply pending D1 migrations.
+3. Verify backend `/api/ready` reports database ready and exact schema revision 13 with Stream readiness.
+4. Verify the gateway points at the intended backend and `https://yupvox.qs3d.site/api/ready` returns the same current state.
 
-No successful deploy, source CI result, screenshot, or Wrangler dry-run alone upgrades provider/media runtime from **UNQUALIFIED**.
+A GREEN CI run, screenshot, Wrangler dry-run, or successful deploy alone does not upgrade paid/external provider runtime qualification. GitHub Actions remains CI only.

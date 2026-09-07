@@ -23,10 +23,7 @@ export class DeepgramNova3AsrProvider implements AsrProvider {
     private readonly fetcher: FetchLike = fetch,
   ) {}
 
-  async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
-    const apiKey = this.apiKey.trim();
-    if (!apiKey) throw new AsrError('ASR_PROVIDER_UNCONFIGURED', 'Deepgram API key is required for diarized ASR.');
-
+  private requestUrl(context: AsrContext): URL {
     const url = new URL('https://api.deepgram.com/v1/listen');
     url.searchParams.set('model', 'nova-3');
     url.searchParams.set('diarize_model', 'latest');
@@ -34,15 +31,16 @@ export class DeepgramNova3AsrProvider implements AsrProvider {
     url.searchParams.set('smart_format', 'true');
     url.searchParams.set('punctuate', 'true');
     if (context.sourceLanguage !== 'auto') url.searchParams.set('language', context.sourceLanguage);
+    return url;
+  }
 
-    const response = await this.fetcher(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${apiKey}`,
-        'content-type': 'audio/wav',
-      },
-      body: audio,
-    });
+  private authorization(): string {
+    const apiKey = this.apiKey.trim();
+    if (!apiKey) throw new AsrError('ASR_PROVIDER_UNCONFIGURED', 'Deepgram API key is required for diarized ASR.');
+    return `Token ${apiKey}`;
+  }
+
+  private async parseResponse(response: Response): Promise<AsrChunkResult> {
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       throw new AsrError(
@@ -81,5 +79,39 @@ export class DeepgramNova3AsrProvider implements AsrProvider {
       text: typeof transcript === 'string' ? transcript : segments.map((segment) => segment.text).join(' '),
       segments,
     };
+  }
+
+  async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
+    const response = await this.fetcher(this.requestUrl(context), {
+      method: 'POST',
+      headers: {
+        Authorization: this.authorization(),
+        'content-type': 'audio/wav',
+      },
+      body: audio,
+    });
+    return this.parseResponse(response);
+  }
+
+  async transcribeUrl(mediaUrl: string, context: AsrContext): Promise<AsrChunkResult> {
+    let remote: URL;
+    try {
+      remote = new URL(mediaUrl);
+    } catch {
+      throw new AsrError('ASR_REMOTE_URL_INVALID', 'Deepgram remote media URL is invalid.');
+    }
+    if (remote.protocol !== 'https:') {
+      throw new AsrError('ASR_REMOTE_URL_INVALID', 'Deepgram remote media URL must use HTTPS.');
+    }
+
+    const response = await this.fetcher(this.requestUrl(context), {
+      method: 'POST',
+      headers: {
+        Authorization: this.authorization(),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ url: remote.toString() }),
+    });
+    return this.parseResponse(response);
   }
 }

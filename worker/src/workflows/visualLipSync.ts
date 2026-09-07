@@ -7,7 +7,6 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
 import { LipSyncProviderError, type LipSyncProvider } from '../services/lipsync/types';
-import type { MediaProcessor } from '../services/media/types';
 import { isJobCancelledError } from './jobCancellation';
 
 const GRANT_TTL_MS = 15 * 60 * 1000;
@@ -21,7 +20,6 @@ export type VisualLipSyncDeps = {
   exports: Pick<ProjectExportRepository, 'get' | 'setLipSyncState'>;
   providerMediaGrants: Pick<ProviderMediaGrantRepository, 'create' | 'expire'>;
   lipSync: LipSyncProvider;
-  media: Pick<MediaProcessor, 'extractExportAudio'>;
   bucket: {
     put?(key: string, value: R2UploadValue, options?: R2PutOptionsLike): Promise<unknown>;
   };
@@ -42,6 +40,7 @@ export type VisualLipSyncContext = {
   targetLanguage: TargetLanguage;
   exportId: string;
   standardObjectKey: string;
+  soundtrackObjectKey: string;
   durationMs: number;
 };
 
@@ -53,8 +52,8 @@ function canonicalLipSyncKey(context: VisualLipSyncContext): string {
   return `projects/${context.projectId}/exports/${context.targetLanguage}/${context.exportId}.lipsync.mp4`;
 }
 
-function expectedAudioKey(context: VisualLipSyncContext): string {
-  return `projects/${context.projectId}/exports/${context.targetLanguage}/${context.exportId}.audio.wav`;
+function expectedSoundtrackKey(context: VisualLipSyncContext): string {
+  return `projects/${context.projectId}/soundtracks/${context.targetLanguage}/${context.exportId}.wav`;
 }
 
 function operationKey(context: VisualLipSyncContext, provider: string): string {
@@ -97,6 +96,10 @@ export async function runVisualLipSync(
   if (!Number.isFinite(context.durationMs) || context.durationMs <= 0) {
     throw new LipSyncProviderError('LIP_SYNC_INPUT_INVALID', 'Project duration is invalid for visual lip-sync.');
   }
+  const audioObjectKey = expectedSoundtrackKey(context);
+  if (context.soundtrackObjectKey !== audioObjectKey) {
+    throw new LipSyncProviderError('LIP_SYNC_INPUT_INVALID', 'Dubbed soundtrack has an invalid object key.');
+  }
 
   const existing = await step.do('load durable visual lip-sync state', () =>
     deps.exports.get(context.projectId, context.exportId, context.userId),
@@ -132,19 +135,6 @@ export async function runVisualLipSync(
 
   try {
     await step.do('check cancellation before visual lip-sync preparation', ensureActive);
-
-    const audio = await step.do('extract final dubbed audio for visual lip-sync', () =>
-      deps.media.extractExportAudio(
-        context.projectId,
-        context.standardObjectKey,
-        context.targetLanguage,
-        context.exportId,
-      ),
-    );
-    const audioObjectKey = expectedAudioKey(context);
-    if (audio.audioObjectKey !== audioObjectKey) {
-      throw new LipSyncProviderError('LIP_SYNC_INPUT_INVALID', 'Dubbed audio sidecar has an invalid object key.');
-    }
 
     await step.do('persist visual lip-sync processing state', () => deps.exports.setLipSyncState(
       context.projectId,

@@ -8,8 +8,6 @@ export function prepareWorkersBuildConfig() {
   const source = JSON.parse(
     fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'),
   );
-  delete source.containers;
-  delete source.durable_objects;
   delete source.routes;
   fs.writeFileSync(
     new URL(`../${PRODUCTION_CONFIG_PATH}`, import.meta.url),
