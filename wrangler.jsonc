@@ -37,11 +37,6 @@
     { "binding": "EXPORT_WORKFLOW", "name": "dubflow-export", "class_name": "ExportWorkflow" },
     { "binding": "LANGUAGE_TRANSLATION_WORKFLOW", "name": "dubflow-language-translation", "class_name": "LanguageTranslationWorkflow" }
   ],
-  "containers": [
-    { "class_name": "FfmpegContainer", "image": "./containers/ffmpeg/Dockerfile", "max_instances": 4, "instance_type": "standard-1" }
-  ],
-  "durable_objects": { "bindings": [{ "name": "FFMPEG_CONTAINER", "class_name": "FfmpegContainer" }] },
-  "exports": { "FfmpegContainer": { "type": "durable-object", "state": "created", "storage": "sqlite" } },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
