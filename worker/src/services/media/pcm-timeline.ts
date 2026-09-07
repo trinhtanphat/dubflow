@@ -4,10 +4,12 @@ export type PcmTimelineConfig = {
   chunkSamples?: number;
 };
 
+export type PcmTimelineSource = ArrayBuffer | (() => Promise<ArrayBuffer>);
+
 export type PcmTimelineClip = {
   startMs: number;
   endMs: number;
-  pcm: ArrayBuffer;
+  pcm: PcmTimelineSource;
 };
 
 const BYTES_PER_SAMPLE = 2;
@@ -115,7 +117,7 @@ export class PcmTimelineAssembler {
       if (endFrame > totalFrames) {
         throw new Error(`PCM_TIMELINE_INVALID: clip ${index} is outside the project timeline.`);
       }
-      this.frameCount(clip.pcm.byteLength);
+      if (clip.pcm instanceof ArrayBuffer) this.frameCount(clip.pcm.byteLength);
       return { ...clip, startFrame, endFrame };
     });
 
@@ -150,7 +152,7 @@ export class PcmTimelineAssembler {
     };
 
     return new ReadableStream<Uint8Array>({
-      pull: (controller) => {
+      pull: async (controller) => {
         if (headerPending) {
           headerPending = false;
           controller.enqueue(wavHeader(this.sampleRate, this.channels, totalFrames));
@@ -171,7 +173,8 @@ export class PcmTimelineAssembler {
         }
 
         if (nextClip && cursorFrame === nextClip.startFrame) {
-          activeClip = new Uint8Array(this.fitFrames(nextClip.pcm, nextClip.endFrame - nextClip.startFrame));
+          const pcm = nextClip.pcm instanceof ArrayBuffer ? nextClip.pcm : await nextClip.pcm();
+          activeClip = new Uint8Array(this.fitFrames(pcm, nextClip.endFrame - nextClip.startFrame));
           activeClipOffset = 0;
           enqueueActive(controller);
           return;
