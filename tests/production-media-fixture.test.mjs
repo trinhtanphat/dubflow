@@ -4,28 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runProductionMediaFixture } from '../scripts/verify-production-media-fixture.mjs';
+import './production-browser-piper-fixture.test.mjs';
 
 const scriptUrl = new URL('../scripts/verify-production-media-fixture.mjs', import.meta.url);
+const browserScriptUrl = new URL('../scripts/verify-production-browser-piper-fixture.mjs', import.meta.url);
 const workflowUrl = new URL('../.github/workflows/production-media-fixture.yml', import.meta.url);
 const exportWorkflowUrl = new URL('../worker/src/workflows/ExportWorkflow.ts', import.meta.url);
 const exportRouteUrl = new URL('../worker/src/routes/export.ts', import.meta.url);
 
 test('production media fixture runner is checked in and remains verification-only', () => {
-  assert.equal(fs.existsSync(scriptUrl), true, 'missing production media fixture runner');
+  assert.equal(fs.existsSync(scriptUrl), true, 'missing legacy production media fixture runner');
+  assert.equal(fs.existsSync(browserScriptUrl), true, 'missing browser Piper production fixture runner');
   assert.equal(fs.existsSync(workflowUrl), true, 'missing production media fixture workflow');
 
-  const script = fs.readFileSync(scriptUrl, 'utf8');
+  const browserScript = fs.readFileSync(browserScriptUrl, 'utf8');
   const workflow = fs.readFileSync(workflowUrl, 'utf8');
-  assert.match(script, /yupvox\.qs3d\.site/);
-  assert.match(script, /\/api\/projects/);
-  assert.match(script, /\/process/);
-  assert.match(script, /\/export/);
-  assert.match(script, /video\/mp4/);
-  assert.match(workflow, /verify-production-media-fixture\.mjs/);
-  assert.doesNotMatch(`${script}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
+  assert.match(browserScript, /yupvox\.qs3d\.site/);
+  assert.match(browserScript, /\/api\/projects/);
+  assert.match(browserScript, /\/process/);
+  assert.match(browserScript, /exports\/vi/);
+  assert.match(browserScript, /video\/mp4/);
+  assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
+  assert.doesNotMatch(`${browserScript}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
-test('production media fixture reports sanitized voice capability diagnostics', () => {
+test('legacy production media fixture reports sanitized voice capability diagnostics', () => {
   const script = fs.readFileSync(scriptUrl, 'utf8');
   assert.match(script, /\/api\/voice\/capabilities/);
   assert.match(script, /Production voice capability/);
@@ -45,14 +48,14 @@ test('production export admission and workflow share the voice provider selector
   assert.doesNotMatch(exportRoute, /new\s+ElevenLabsVoiceProvider/);
 });
 
-test('production media fixture is manual-only while zero-cost Vietnamese TTS is unavailable', () => {
+test('production media fixture remains manual-only', () => {
   const workflow = fs.readFileSync(workflowUrl, 'utf8');
   assert.match(workflow, /workflow_dispatch:/);
   assert.doesNotMatch(workflow, /^\s*push:\s*$/m);
   assert.doesNotMatch(workflow, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
-test('production media fixture preflights selected Vietnamese voice capability before project creation', async () => {
+test('legacy production media fixture still fails closed before project creation when server voice is unavailable', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dubflow-media-fixture-'));
   const fixturePath = path.join(tempDir, 'fixture.mp4');
   fs.writeFileSync(fixturePath, new Uint8Array([1, 2, 3, 4]));
@@ -107,8 +110,8 @@ test('production media fixture preflights selected Vietnamese voice capability b
   }
 });
 
-test('production fixture persists the downloaded MP4 and proves H.264 plus AAC with ffprobe', () => {
-  const script = fs.readFileSync(scriptUrl, 'utf8');
+test('production browser fixture persists the downloaded MP4 and proves H.264 plus AAC with ffprobe', () => {
+  const script = fs.readFileSync(browserScriptUrl, 'utf8');
   const workflow = fs.readFileSync(workflowUrl, 'utf8');
 
   assert.match(script, /PRODUCTION_MEDIA_OUTPUT_PATH/);
