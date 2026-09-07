@@ -19,12 +19,12 @@ const unavailable = {
     dialogueStem: false,
     qualification: 'unavailable' as const,
   },
-  visualLipSync: { available: false, provider: null },
+  visualLipSync: { available: false, provider: null, qualification: 'unavailable' as const },
 };
 
 const available = {
   ...unavailable,
-  visualLipSync: { available: true, provider: 'sync-labs' },
+  visualLipSync: { available: true, provider: 'sync-labs', qualification: 'qualified' as const },
 };
 
 function render(overrides: Record<string, unknown> = {}) {
@@ -63,7 +63,7 @@ describe('Phase 4E Studio visual mode UX', () => {
     expect(html).toMatch(/lip-sync.*chưa khả dụng|unavailable/i);
   });
 
-  it('enables Visual lip-sync only when capability is available', () => {
+  it('enables Visual lip-sync only when capability is qualified', () => {
     const html = render({ visualMode: 'lip_sync', exportCapabilities: available });
     expect(html).toContain('value="lip_sync" selected=""');
     expect(html).not.toMatch(/<option value="lip_sync"[^>]*disabled/);
