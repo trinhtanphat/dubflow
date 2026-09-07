@@ -34,10 +34,14 @@ export interface Env {
   RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
   RATE_LIMIT_BATCH_EXPORT: RateLimitBindingLike;
+  RATE_LIMIT_SEPARATION: RateLimitBindingLike;
   FFMPEG_CONTAINER: ContainerNamespaceLike;
+  SEPARATOR_CONTAINER?: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
   LANGUAGE_TRANSLATION_WORKFLOW: WorkflowBindingLike;
+  SEPARATION_WORKFLOW?: WorkflowBindingLike;
+  SEPARATION_RUNTIME_QUALIFIED?: string;
   CONTEXT_TRANSLATION_MODEL?: string;
   GOOGLE_CLOUD_TRANSLATE_API_KEY?: string;
   DEEPGRAM_API_KEY?: string;
