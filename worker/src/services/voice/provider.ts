@@ -10,6 +10,7 @@ export type VoiceProviderEnv = {
   AI?: Env['AI'];
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
+  PAID_GROK_TTS_ENABLED?: string;
 };
 
 export function createVoiceProvider(env: VoiceProviderEnv): VoiceProvider {
@@ -18,6 +19,10 @@ export function createVoiceProvider(env: VoiceProviderEnv): VoiceProvider {
     { defaultVoiceId: env.ELEVENLABS_DEFAULT_VOICE_ID },
   );
   if (elevenLabs.capabilities().configured || !env.AI) return elevenLabs;
+
+  if (env.PAID_GROK_TTS_ENABLED !== 'true') {
+    return new WorkersAIVoiceProvider(env.AI);
+  }
 
   return new WorkersAIVoiceProvider(env.AI, {
     model: GROK_TTS_MODEL,
