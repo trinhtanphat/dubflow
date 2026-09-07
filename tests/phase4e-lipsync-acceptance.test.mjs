@@ -21,7 +21,7 @@ const readiness = read('worker/src/routes/readiness.ts');
 const verifyDeployment = read('scripts/verify-deployment.mjs');
 const studio = read('src/features/export/BatchExportPanel.tsx');
 const api = read('src/features/export/batchExportApi.ts');
-const deployScript = read('scripts/cloudflare-workers-build-deploy.mjs');
+const productionConfigGenerator = read('scripts/cloudflare-workers-build-config.mjs');
 const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
 const viteConfig = read('vite.config.ts');
@@ -114,7 +114,9 @@ test('Phase 4E keeps GitHub Actions CI-only and the repository acceptance gate w
   const wranglerDeployLines = ci.split('\n').filter((line) => /wrangler\s+deploy/i.test(line));
   assert.ok(wranglerDeployLines.length > 0, 'CI must retain Wrangler dry-run validation.');
   for (const line of wranglerDeployLines) assert.match(line, /--dry-run/i);
-  assert.match(deployScript, /delete\s+source\.containers/);
+  assert.match(productionConfigGenerator, /delete\s+source\.containers/);
+  assert.match(productionConfigGenerator, /delete\s+source\.durable_objects/);
+  assert.match(productionConfigGenerator, /delete\s+source\.exports/);
   assert.match(pkg.scripts['verify:deploy-config'], /phase4e-lipsync-acceptance\.test\.mjs/);
 });
 
