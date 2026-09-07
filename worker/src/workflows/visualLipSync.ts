@@ -1,4 +1,4 @@
-import type { R2BucketLike } from '../cloudflare/r2';
+import type { R2PutOptionsLike, R2UploadValue } from '../cloudflare/r2';
 import type { ProjectExportRepository } from '../db/project-exports';
 import type { ProviderMediaGrantRepository } from '../db/provider-media-grants';
 import type { UsageStore } from '../db/usage';
@@ -21,7 +21,9 @@ export type VisualLipSyncDeps = {
   providerMediaGrants: Pick<ProviderMediaGrantRepository, 'create' | 'expire'>;
   lipSync: LipSyncProvider;
   media: Pick<MediaProcessor, 'extractExportAudio'>;
-  bucket: Pick<R2BucketLike, 'put'>;
+  bucket: {
+    put?(key: string, value: R2UploadValue, options?: R2PutOptionsLike): Promise<unknown>;
+  };
   usage: Pick<UsageStore, 'record' | 'getByOperation'>;
   telemetry: TelemetrySink;
   makeProviderMediaToken?: typeof createProviderMediaToken;
