@@ -10,9 +10,8 @@ export interface ReadinessDatabaseLike {
 
 export type MediaReadinessConfig = {
   stream?: unknown;
-  accountId?: string;
   sourceSigningSecret?: string;
-  streamApiToken?: string;
+  publicOrigin?: string;
 };
 
 export type ReadinessResult = {
@@ -71,9 +70,8 @@ function mediaStatus(config?: MediaReadinessConfig): { stream: 'ready' | 'unavai
   if (!config) return undefined;
   const ready = Boolean(
     config.stream &&
-    config.accountId?.trim() &&
     config.sourceSigningSecret?.trim() &&
-    config.streamApiToken?.trim()
+    config.publicOrigin?.trim()
   );
   return { stream: ready ? 'ready' : 'unavailable' };
 }

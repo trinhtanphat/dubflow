@@ -36,9 +36,8 @@ app.get('/api/health', (c) => c.json(healthPayload()));
 app.get('/api/ready', async (c) => {
   const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY, {
     stream: c.env.STREAM,
-    accountId: c.env.CLOUDFLARE_ACCOUNT_ID,
     sourceSigningSecret: c.env.STREAM_SOURCE_SIGNING_SECRET,
-    streamApiToken: c.env.CLOUDFLARE_STREAM_API_TOKEN,
+    publicOrigin: c.env.PUBLIC_ORIGIN,
   });
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
 });

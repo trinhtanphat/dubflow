@@ -23,9 +23,9 @@ The FFmpeg and Demucs adapters remain in source as optional implementation/test 
 
 The primary production dubbing ingest path is Cloudflare Stream, not the retired FFmpeg Container path. `wrangler.jsonc` binds `STREAM`; source media remains canonical in private R2 and is exposed to Stream only through a short-lived HMAC-signed `/api/stream-source/{projectId}` URL with range support. Stream provenance is persisted against the exact source object so retries can safely reuse the same ingest when the source has not changed.
 
-Dubbing admission fails closed before creating a job when the Stream binding or source-signing secret is missing. Deepgram Nova-3 can transcribe the Stream-generated HTTPS audio URL remotely without buffering the full source into the Worker. A bounded direct Workers AI fallback is allowed only for short payloads; long-form media without a remote-capable ASR provider fails explicitly instead of falling back to a Container.
+Dubbing admission fails closed before creating a job when the Stream binding, source-signing secret, or public source origin is missing. Deepgram Nova-3 can transcribe the Stream-generated HTTPS audio URL remotely without buffering the full source into the Worker. A bounded direct Workers AI fallback is allowed only for short payloads; long-form media without a remote-capable ASR provider fails explicitly instead of falling back to a Container.
 
-Migration `0013_stream_media.sql` adds nullable Stream provenance to projects and immutable project export attempts and advances the current deployment readiness target to schema revision **13**. Media readiness additionally requires the `STREAM` binding plus `CLOUDFLARE_ACCOUNT_ID`, `STREAM_SOURCE_SIGNING_SECRET`, and `CLOUDFLARE_STREAM_API_TOKEN`. `PUBLIC_ORIGIN` remains pinned to `https://yupvox.qs3d.site`. The two credential values are deployment secrets and must not be committed to Git.
+Migration `0013_stream_media.sql` adds nullable Stream provenance to projects and immutable project export attempts and advances the current deployment readiness target to schema revision **13**. Media readiness for this source path requires the `STREAM` Workers binding, `STREAM_SOURCE_SIGNING_SECRET`, and `PUBLIC_ORIGIN` (pinned to `https://yupvox.qs3d.site`). The Stream Workers binding performs the Stream operations directly, so a separate Stream REST API token is not a readiness requirement for dubbing source ingest. `STREAM_SOURCE_SIGNING_SECRET` is a deployment secret and must not be committed to Git.
 
 ## Runtime qualification boundary
 
@@ -98,7 +98,7 @@ This zero-container dubbing change does not preclaim Phase 4E runtime qualificat
 The safe rollout order is:
 
 1. Merge a fully green commit to `main`.
-2. Ensure `STREAM_SOURCE_SIGNING_SECRET` and `CLOUDFLARE_STREAM_API_TOKEN` are configured as backend Worker secrets in `trinhtanphat6666`.
+2. Ensure `STREAM_SOURCE_SIGNING_SECRET` is configured as a backend Worker secret in `trinhtanphat6666`; `PUBLIC_ORIGIN` remains the checked-in non-secret canonical origin.
 3. Deploy the backend in `trinhtanphat6666` with `wrangler.jsonc`; Workers Builds applies migration `0013_stream_media.sql` before readiness verification.
 4. Verify the backend `/api/ready` directly returns schema revision 13 and `media.stream = "ready"`.
 5. Confirm `BACKEND_ORIGIN` on `dubflow-gateway` still targets the exact backend `workers.dev` origin in `trinhtanphat2403`.

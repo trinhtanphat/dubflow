@@ -19,6 +19,9 @@ function streamAdmissionError(env: Env) {
   if (!env.STREAM_SOURCE_SIGNING_SECRET?.trim()) {
     return errorBody('STREAM_SOURCE_SIGNING_UNAVAILABLE', 'Stream source signing secret is unavailable.');
   }
+  if (!env.PUBLIC_ORIGIN?.trim()) {
+    return errorBody('STREAM_PUBLIC_ORIGIN_UNAVAILABLE', 'Stream public source origin is unavailable.');
+  }
   return null;
 }
 
