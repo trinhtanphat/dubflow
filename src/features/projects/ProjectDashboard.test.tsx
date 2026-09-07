@@ -68,6 +68,34 @@ describe('ProjectDashboard', () => {
     expect(html).not.toContain('Cannot read properties of undefined');
   });
 
+  it('replaces historical Cloudflare Stream runtime failures without hiding the retired provider detail', () => {
+    const html = render([project], {
+      p1: [job({
+        errorCode: 'MEDIA_PROCESSOR_FAILED',
+        errorMessage: 'Authorization Failure: Cloudflare Stream not enabled',
+        progress: 0.05,
+        currentStep: 'preparing',
+      })],
+    });
+    expect(html).toContain('Job cũ đã lỗi ở media runtime trước đây. Hãy thử lại để chạy bằng pipeline media hiện tại.');
+    expect(html).toContain('Thử lại');
+    expect(html).not.toContain('Cloudflare Stream');
+    expect(html).not.toContain('Authorization Failure');
+  });
+
+  it('keeps new R2 remux admission failures visible instead of rewriting them as retired Stream errors', () => {
+    const message = 'VIDEO_TRANSCODE_REQUIRED: Source video codec hevc requires transcoding.';
+    const html = render([project], {
+      p1: [job({
+        errorCode: 'EXPORT_FAILED',
+        errorMessage: message,
+        currentStep: 'rendering_export',
+      })],
+    });
+    expect(html).toContain(message);
+    expect(html).not.toContain('Job cũ đã lỗi ở media runtime trước đây.');
+  });
+
   it('shows cancellation only for active durable jobs', () => {
     const html = render([project], { p1: [job({ status: 'running', errorCode: null, errorMessage: null, progress: 0.35 })] });
     expect(html).toContain('35%');
