@@ -29,6 +29,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
     );
     const sourceMedia = new R2SourceMediaService({
       projects,
+      bucket: this.env.MEDIA,
       publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
       signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET
         ?? this.env.STREAM_SOURCE_SIGNING_SECRET
