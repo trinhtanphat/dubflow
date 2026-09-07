@@ -145,6 +145,7 @@ function translationEnv(db: TranslationDb, model = '@cf/example/context-model'):
     RATE_LIMIT_TRANSLATE: { async limit() { return { success: true }; } },
     CONTEXT_TRANSLATION_MODEL: model,
     GOOGLE_CLOUD_TRANSLATE_API_KEY: 'google-key',
+    PAID_GOOGLE_TRANSLATE_ENABLED: 'true',
   } as unknown as Env;
 }
 

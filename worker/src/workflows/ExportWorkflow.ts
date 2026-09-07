@@ -20,9 +20,14 @@ import { UnavailableDialogueSeparationProvider } from '../services/separation/un
 import { createVoiceProvider } from '../services/voice/provider';
 import { runExportPipeline, type ExportWorkflowParams } from './exportPipeline';
 
+type SyncPaidOptInEnv = Env & {
+  PAID_SYNC_LIPSYNC_ENABLED?: string;
+};
+
 export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams> {
   async run(event: WorkflowEvent<ExportWorkflowParams>, step: WorkflowStep) {
     const subtitleOnly = event.payload.output === 'subtitles';
+    const paidEnv = this.env as SyncPaidOptInEnv;
 
     const projects = new ProjectRepository(this.env.DB);
     const exports = new ProjectExportRepository(this.env.DB);
@@ -48,6 +53,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
             this.env.SYNC_API_KEY,
             this.env.SYNC_LIPSYNC_QUALIFIED,
           ),
+          paidEnabled: paidEnv.PAID_SYNC_LIPSYNC_ENABLED,
         }),
         makeProviderMediaToken: createProviderMediaToken,
         providerMediaOrigin: 'https://yupvox.qs3d.site',

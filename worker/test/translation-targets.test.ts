@@ -25,7 +25,12 @@ class RecordingProvider implements TranslationProvider {
 describe('Phase 4C multi-target translation providers', () => {
   it('declares the exact five supported targets on raw providers', () => {
     const workers = new WorkersAITranslationProvider({ async run() { return { translated_text: 'ok' }; } } as AiBinding);
-    const google = new GoogleCloudTranslationProvider('key', async () => Response.json({ data: { translations: [] } }));
+    const google = new GoogleCloudTranslationProvider(
+      'key',
+      async () => Response.json({ data: { translations: [] } }),
+      15_000,
+      'true',
+    );
     expect((workers.capabilities as any).targets).toEqual(TARGETS);
     expect((google.capabilities as any).targets).toEqual(TARGETS);
   });
@@ -49,7 +54,7 @@ describe('Phase 4C multi-target translation providers', () => {
     const provider = new GoogleCloudTranslationProvider('key', async (_input, init) => {
       body = JSON.parse(String(init?.body));
       return Response.json({ data: { translations: [{ translatedText: '訳' }] } });
-    });
+    }, 15_000, 'true');
 
     await (provider.translateBatch as any)([{ id: 's1', text: 'hello' }], 'en', 'ja');
     expect(body).toMatchObject({ source: 'en', target: 'ja', format: 'text' });
