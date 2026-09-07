@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import type { AiBinding } from '../../cloudflare/ai';
 import type { AsrChunkResult, AsrContext, AsrProvider } from './types';
 import { AsrError } from './types';
@@ -6,13 +5,28 @@ import { AsrError } from './types';
 export const WORKERS_AI_ASR_MODEL = '@cf/openai/whisper-large-v3-turbo';
 
 const DEFAULT_DIRECT_SOURCE_MEDIA_TYPE = 'video/mp4';
+const BASE64_CHUNK_BYTES = 24_576;
 
 type RawSegment = { start?: number; end?: number; text?: string };
 type RawResponse = { text?: string; segments?: RawSegment[] };
 
+function arrayBufferToBase64(audio: ArrayBuffer): string {
+  const bytes = new Uint8Array(audio);
+  const parts: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_BYTES) {
+    const end = Math.min(offset + BASE64_CHUNK_BYTES, bytes.length);
+    let binary = '';
+    for (let index = offset; index < end; index += 1) {
+      binary += String.fromCharCode(bytes[index]);
+    }
+    parts.push(btoa(binary));
+  }
+  return parts.join('');
+}
+
 function mediaInput(audio: ArrayBuffer, mediaType?: string) {
   return {
-    body: Buffer.from(audio).toString('base64'),
+    body: arrayBufferToBase64(audio),
     contentType: mediaType?.trim() || DEFAULT_DIRECT_SOURCE_MEDIA_TYPE,
   };
 }
