@@ -9,11 +9,21 @@ const ENTRY = 'worker/src/spikes/aac-wasm-decoder-worker.ts';
 const PORT = 8797;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 
-async function waitForLocalWorker(child) {
+function diagnosticTail(stdout, stderr) {
+  return [
+    stdout.trim() ? `stdout:\n${stdout.slice(-4000)}` : '',
+    stderr.trim() ? `stderr:\n${stderr.slice(-4000)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+async function waitForLocalWorker(child, getDiagnostics) {
   let lastError = null;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     if (child.exitCode !== null) {
-      throw new Error(`wrangler dev exited before the local Worker became ready (exit ${child.exitCode}).`);
+      const diagnostics = getDiagnostics();
+      throw new Error(
+        `wrangler dev exited before the local Worker became ready (exit ${child.exitCode}).${diagnostics ? `\n${diagnostics}` : ''}`,
+      );
     }
     try {
       const response = await fetch(`${ORIGIN}/health`);
@@ -24,7 +34,10 @@ async function waitForLocalWorker(child) {
     }
     await delay(250);
   }
-  throw new Error(`local workerd did not become ready: ${lastError instanceof Error ? lastError.message : 'unknown error'}`);
+  const diagnostics = getDiagnostics();
+  throw new Error(
+    `local workerd did not become ready: ${lastError instanceof Error ? lastError.message : 'unknown error'}${diagnostics ? `\n${diagnostics}` : ''}`,
+  );
 }
 
 test('AAC WASM decoder bundles and decodes a real ADTS frame inside local workerd', { timeout: 45_000 }, async () => {
@@ -36,14 +49,17 @@ test('AAC WASM decoder bundles and decodes a real ADTS frame inside local worker
     ['wrangler', 'dev', '--local', '--config', CONFIG, '--ip', '127.0.0.1', '--port', String(PORT), '--log-level', 'error'],
     { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CI: '1' } },
   );
+  let stdout = '';
   let stderr = '';
+  child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
   child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+  const getDiagnostics = () => diagnosticTail(stdout, stderr);
 
   try {
-    await waitForLocalWorker(child);
+    await waitForLocalWorker(child, getDiagnostics);
     const response = await fetch(`${ORIGIN}/decode`);
     const body = await response.json().catch(() => null);
-    assert.equal(response.status, 200, `decode failed: ${JSON.stringify(body)}\n${stderr.slice(-4000)}`);
+    assert.equal(response.status, 200, `decode failed: ${JSON.stringify(body)}\n${getDiagnostics()}`);
     assert.equal(body?.ok, true);
     assert.equal(typeof body?.sampleRate, 'number');
     assert.ok(body.sampleRate >= 8_000);
