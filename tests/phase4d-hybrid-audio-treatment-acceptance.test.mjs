@@ -8,10 +8,10 @@ function source(path) {
 
 const migration = source('migrations/0011_phase4d_audio_separation.sql');
 const audioMode = source('worker/src/domain/audio-mode.ts');
-const render = source('containers/ffmpeg/render-export.mjs');
 const separationTypes = source('worker/src/services/separation/types.ts');
 const unavailable = source('worker/src/services/separation/unavailable.ts');
 const exportRoute = source('worker/src/routes/export.ts');
+const exportPipeline = source('worker/src/workflows/exportPipeline.ts');
 const exportWorkflow = source('worker/src/workflows/ExportWorkflow.ts');
 const studio = source('src/features/export/BatchExportPanel.tsx');
 const readiness = source('worker/src/routes/readiness.ts');
@@ -33,12 +33,12 @@ test('Phase 4D exposes exactly three backwards-compatible dubbed audio modes', (
   assert.match(audioMode, /value === undefined\) return 'dubbed_only'/);
 });
 
-test('Phase 4D locks deterministic ducking and separated-background rendering constants', () => {
-  assert.match(render, /DUCK_GAIN_DB\s*=\s*-18/);
-  assert.match(render, /DUCK_ATTACK_MS\s*=\s*80/);
-  assert.match(render, /DUCK_RELEASE_MS\s*=\s*120/);
-  assert.match(render, /duck_original/);
-  assert.match(render, /separated_background/);
+test('zero-container production selects Stream publishing only for dubbed_only and keeps legacy hybrid modes fail-closed', () => {
+  assert.match(exportPipeline, /value\.output === 'dubbed' && value\.audioMode === 'dubbed_only'/);
+  assert.match(exportPipeline, /if \(!deps\.media && value\.output !== 'subtitles'\)/);
+  assert.doesNotMatch(exportWorkflow, /ContainerMediaProcessor|FFMPEG_CONTAINER|ffmpeg-container/);
+  assert.match(exportWorkflow, /PcmSoundtrackService/);
+  assert.match(exportWorkflow, /StreamMediaService/);
 });
 
 test('Phase 4D separation stays fail-closed with stable errors and an unavailable production adapter', () => {
