@@ -210,7 +210,7 @@ No new settings page or voice picker is required in this carrier. The Vietnamese
 
 ## Dependency and bundle policy
 
-Add exact dependency `@mintplex-labs/piper-tts-web: 1.0.5` to `package.json` and the lockfile. Import it only from the lazy worker runtime so normal Studio startup and Node/Vitest module loading do not execute browser-only Piper code.
+Add exact dependency `@mintplex-labs/piper-tts-web: 1.0.5` to `package.json`. This repository currently does not track a package-manager lockfile, so this carrier preserves the existing manifest-only convention rather than introducing a new lockfile policy. Import Piper only from the lazy worker runtime so normal Studio startup and Node/Vitest module loading do not execute browser-only Piper code.
 
 Do not copy the 60+ MiB Vietnamese model into the repository, Vite public assets, R2, or Worker bundle. CI may fake only the worker/Piper boundary where browser inference cannot run; PCM conversion, API serialization, cache selection, and orchestration must run as real code.
 
