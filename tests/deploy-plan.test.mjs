@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { deploymentPlan } from '../scripts/cloudflare-deploy.mjs';
 
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-const workersBuildDeployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
+const workersBuildConfigGenerator = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-config.mjs', import.meta.url), 'utf8');
 
 test('deployment verifies, provisions, migrates, deploys and checks readiness in order', () => {
   assert.deepEqual(deploymentPlan(), [
@@ -42,7 +42,10 @@ test('checked-in backend production config is Workers-only and needs no containe
 });
 
 test('Workers Builds generator strips dormant Durable Object lifecycle exports defense-in-depth', () => {
-  assert.match(workersBuildDeployScript, /delete\s+source\.exports\b/);
+  assert.match(workersBuildConfigGenerator, /delete\s+source\.containers\b/);
+  assert.match(workersBuildConfigGenerator, /delete\s+source\.durable_objects\b/);
+  assert.match(workersBuildConfigGenerator, /delete\s+source\.exports\b/);
+  assert.match(workersBuildConfigGenerator, /delete\s+source\.routes\b/);
 });
 
 test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {
