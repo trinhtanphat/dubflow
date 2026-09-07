@@ -22,7 +22,6 @@ test('production media fixture runner is checked in and remains verification-onl
   assert.match(script, /\/export/);
   assert.match(script, /video\/mp4/);
   assert.match(workflow, /verify-production-media-fixture\.mjs/);
-  assert.match(workflow, /worker\/src\/services\/asr\/workers-ai\.ts/);
   assert.doesNotMatch(`${script}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
@@ -46,13 +45,10 @@ test('production export admission and workflow share the voice provider selector
   assert.doesNotMatch(exportRoute, /new\s+ElevenLabsVoiceProvider/);
 });
 
-test('production media fixture reruns when the TTS fallback boundary changes', () => {
+test('production media fixture is manual-only while zero-cost Vietnamese TTS is unavailable', () => {
   const workflow = fs.readFileSync(workflowUrl, 'utf8');
-  assert.match(workflow, /worker\/src\/services\/voice\/\*\*/);
-  assert.match(workflow, /worker\/src\/routes\/voice\.ts/);
-  assert.match(workflow, /worker\/src\/routes\/export\.ts/);
-  assert.match(workflow, /worker\/src\/workflows\/ExportWorkflow\.ts/);
-  assert.match(workflow, /worker\/src\/workflows\/zeroContainerExportPipeline\.ts/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /^\s*push:\s*$/m);
   assert.doesNotMatch(workflow, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
