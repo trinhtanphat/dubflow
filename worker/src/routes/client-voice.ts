@@ -8,6 +8,7 @@ import {
 } from '../db/segment-translations';
 import { errorBody } from '../http/json';
 import { getCurrentUserId } from '../security/current-user';
+import { enforceRateLimit } from '../security/rate-limit';
 import { targetVoiceObjectKey } from '../services/voice/object-key';
 
 const CLIENT_PCM_SAMPLE_RATE = 24_000;
@@ -112,6 +113,9 @@ export function createClientVoiceRoutes(deps: ClientVoiceRouteDeps = {}) {
           'Translation variant changed on the server.',
         ), 409);
       }
+
+      const rateLimited = await enforceRateLimit(c, 'voice', userId, projectId);
+      if (rateLimited) return rateLimited;
 
       const audio = await c.req.raw.arrayBuffer();
       if (audio.byteLength === 0 || audio.byteLength % 2 !== 0) {
