@@ -59,4 +59,15 @@ jobs:
       - name: Verify deployed R2-only media path
         env:
           PRODUCTION_MEDIA_FIXTURE_PATH: ${{ runner.temp }}/production-r2-fixture.mp4
+          PRODUCTION_MEDIA_OUTPUT_PATH: ${{ runner.temp }}/production-r2-output.mp4
         run: node scripts/verify-production-media-fixture.mjs
+
+      - name: Prove H.264 video and AAC dubbed soundtrack
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/production-r2-output.mp4"
+          video_codec="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$RUNNER_TEMP/production-r2-output.mp4")"
+          audio_codec="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$RUNNER_TEMP/production-r2-output.mp4")"
+          test "$video_codec" = "h264"
+          test "$audio_codec" = "aac"

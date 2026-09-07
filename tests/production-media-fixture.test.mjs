@@ -110,3 +110,16 @@ test('production media fixture preflights selected Vietnamese voice capability b
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('production fixture persists the downloaded MP4 and proves H.264 plus AAC with ffprobe', () => {
+  const script = fs.readFileSync(scriptUrl, 'utf8');
+  const workflow = fs.readFileSync(workflowUrl, 'utf8');
+
+  assert.match(script, /PRODUCTION_MEDIA_OUTPUT_PATH/);
+  assert.match(script, /writeFileSync/);
+  assert.match(workflow, /PRODUCTION_MEDIA_OUTPUT_PATH/);
+  assert.match(workflow, /ffprobe/);
+  assert.match(workflow, /codec_name/);
+  assert.match(workflow, /h264/);
+  assert.match(workflow, /aac/);
+});

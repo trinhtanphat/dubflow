@@ -95,6 +95,7 @@ export async function runProductionMediaFixture({
   fetchImpl = fetch,
   origin = PRODUCTION_ORIGIN,
   fixturePath = process.env.PRODUCTION_MEDIA_FIXTURE_PATH,
+  outputPath = process.env.PRODUCTION_MEDIA_OUTPUT_PATH,
   pollAttempts,
   pollDelayMs,
 } = {}) {
@@ -183,6 +184,7 @@ export async function runProductionMediaFixture({
   const contentType = mediaResponse.headers.get('content-type') ?? '';
   const outputBytes = new Uint8Array(await mediaResponse.arrayBuffer());
   assertMp4(outputBytes, contentType);
+  if (outputPath) fs.writeFileSync(outputPath, outputBytes);
 
   return {
     ok: true,
