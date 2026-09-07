@@ -30,7 +30,7 @@ import {
   recoverProjectLanguagesConflict,
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
-import { BrowserPiperClient, browserPiperAvailable } from '../features/voice/browserPiperClient';
+import { BrowserPiperClient, BrowserPiperError, browserPiperAvailable } from '../features/voice/browserPiperClient';
 import { preloadVietnameseVoices, type ClientVoiceProgress } from '../features/voice/clientVoicePreload';
 import { uploadVietnameseVoicePcm } from '../features/voice/clientVoiceApi';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
@@ -419,7 +419,13 @@ export function StudioShell(props: Props) {
       setClientVoiceStatus('Giọng Việt cục bộ đã sẵn sàng.');
       return verified;
     } catch (error) {
-      setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+      if (error instanceof BrowserPiperError && error.code === 'PIPER_INIT_FAILED') {
+        piperClientRef.current?.dispose();
+        piperClientRef.current = null;
+        setClientVoiceState('unavailable');
+      } else {
+        setClientVoiceState(browserPiperAvailable() ? 'available' : 'unavailable');
+      }
       setClientVoiceStatus('');
       throw error;
     }
