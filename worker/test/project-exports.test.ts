@@ -4,6 +4,17 @@ import { ProjectExportRepository, type ProjectExport } from '../src/db/project-e
 
 type Call = { sql: string; values: unknown[] };
 
+function visualDefaults() {
+  return {
+    lipSyncRequested: false,
+    lipSyncProvider: null,
+    lipSyncStatus: 'not_requested' as const,
+    lipSyncObjectKey: null,
+    streamVideoUid: null,
+    streamSourceObjectKey: null,
+  };
+}
+
 class ExportDb implements D1DatabaseLike {
   readonly calls: Call[] = [];
   readonly project = { id: 'p1', user_id: 'u1' };
@@ -30,6 +41,7 @@ class ExportStatement implements D1StatementLike {
       this.db.rows.push({
         id, projectId, targetLanguage, output, batchId, audioMode,
         status: 'pending', exportObjectKey: null, subtitleObjectKey: null,
+        ...visualDefaults(),
         errorCode: null, errorMessage: null,
       });
       return { meta: { changes: 1 } };
@@ -106,12 +118,12 @@ describe('project export repository', () => {
       {
         id: 'export-completed', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
         audioMode: 'dubbed_only', status: 'completed', exportObjectKey: 'projects/p1/exports/vi/export-completed.mp4',
-        subtitleObjectKey: null, errorCode: null, errorMessage: null,
+        subtitleObjectKey: null, ...visualDefaults(), errorCode: null, errorMessage: null,
       },
       {
         id: 'export-pending', projectId: 'p1', targetLanguage: 'vi', output: 'dubbed', batchId: null,
         audioMode: 'duck_original', status: 'pending', exportObjectKey: null, subtitleObjectKey: null,
-        errorCode: null, errorMessage: null,
+        ...visualDefaults(), errorCode: null, errorMessage: null,
       },
     );
     const repo = new ProjectExportRepository(db);
