@@ -30,20 +30,54 @@ function schemaDb() {
   };
 }
 
+const mediaReady = {
+  r2: {},
+  publicOrigin: 'https://yupvox.qs3d.site',
+  sourceSigningSecret: 'source-secret',
+  remuxReady: true,
+};
+
+const voiceReady = {
+  apiKey: 'elevenlabs-secret',
+  defaultVoiceId: 'voice-id',
+};
+
 describe('R2-only media readiness', () => {
-  it('reports schema 14 ready with R2, public origin, signing secret, and remux capability only', async () => {
-    const result = await checkReadiness(schemaDb(), 'dg-secret', {
-      r2: {},
-      publicOrigin: 'https://yupvox.qs3d.site',
-      sourceSigningSecret: 'source-secret',
-      remuxReady: true,
-    });
+  it('reports schema 14 ready only with R2/remux plus remote ASR and production voice configuration', async () => {
+    const result = await checkReadiness(schemaDb(), 'dg-secret', mediaReady, voiceReady);
 
     expect(result).toMatchObject({
       ready: true,
       database: 'ready',
       schemaRevision: 14,
+      asr: { provider: 'deepgram-nova-3' },
+      voice: { provider: 'elevenlabs', configured: true },
       media: { r2: 'ready', remux: 'ready' },
+    });
+  });
+
+  it('fails production readiness when remote ASR is unavailable even though R2/remux are ready', async () => {
+    const result = await checkReadiness(schemaDb(), undefined, mediaReady, voiceReady);
+
+    expect(result).toMatchObject({
+      ready: false,
+      database: 'ready',
+      schemaRevision: 14,
+      asr: { provider: 'workers-ai-whisper-large-v3-turbo' },
+      voice: { provider: 'elevenlabs', configured: true },
+      media: { r2: 'ready', remux: 'ready' },
+    });
+  });
+
+  it('fails production readiness when the ElevenLabs key/default voice contract is incomplete', async () => {
+    const missingVoice = await checkReadiness(schemaDb(), 'dg-secret', mediaReady, {
+      apiKey: 'elevenlabs-secret',
+      defaultVoiceId: '',
+    });
+
+    expect(missingVoice).toMatchObject({
+      ready: false,
+      voice: { provider: 'elevenlabs', configured: false },
     });
   });
 
@@ -52,7 +86,7 @@ describe('R2-only media readiness', () => {
       r2: {},
       sourceSigningSecret: 'source-secret',
       remuxReady: true,
-    });
+    }, voiceReady);
 
     expect(result).toMatchObject({
       ready: false,
@@ -68,7 +102,7 @@ describe('R2-only media readiness', () => {
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
       remuxReady: false,
-    });
+    }, voiceReady);
 
     expect(result).toMatchObject({
       ready: false,
