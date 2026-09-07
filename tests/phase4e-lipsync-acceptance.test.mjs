@@ -14,6 +14,7 @@ const workflow = read('worker/src/workflows/visualLipSync.ts');
 const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
 const syncLabs = read('worker/src/services/lipsync/sync-labs.ts');
 const providerMedia = read('worker/src/routes/provider-media.ts');
+const providerGrants = read('worker/src/db/provider-media-grants.ts');
 const providerToken = read('worker/src/security/provider-media-token.ts');
 const readiness = read('worker/src/routes/readiness.ts');
 const verifyDeployment = read('scripts/verify-deployment.mjs');
@@ -40,13 +41,16 @@ test('Phase 4E provider boundary and admission stay explicit and fail closed', (
   assert.match(exportRoute, /SYNC_API_KEY/);
   assert.match(exportRoute, /LIP_SYNC_UNAVAILABLE/);
   assert.match(exportRoute, /visualLipSync/);
-  assert.match(exportRoute, /provider:\s*available\s*\?\s*['"]sync-labs['"]/);
+  assert.match(exportRoute, /provider:\s*lipSyncAvailable\s*\?\s*['"]sync-labs['"]/);
 });
 
 test('Phase 4E provider media access is token-hashed, bounded and never canonical provider state', () => {
   assert.match(providerToken, /SHA-256|SHA-?256|digest\(['"]SHA-256['"]/i);
-  assert.match(providerMedia, /expiresAt|expires_at/);
-  assert.match(providerMedia, /consum/i);
+  assert.match(providerMedia, /resolveActive/);
+  assert.match(providerMedia, /markAccessed/);
+  assert.match(providerGrants, /expires_at/);
+  assert.match(providerGrants, /consumed_at/);
+  assert.match(providerGrants, /expires_at\s*>\s*\?/);
   assert.match(workflow, /15\s*\*\s*60\s*\*\s*1000/);
   assert.match(workflow, /providerMediaGrants\.expire/);
   assert.match(workflow, /fetchImpl\(result\.outputUrl/);
@@ -54,9 +58,10 @@ test('Phase 4E provider media access is token-hashed, bounded and never canonica
 });
 
 test('Phase 4E keeps standard output canonical first and publishes visual output under a separate exact R2 key', () => {
-  assert.match(exportPipeline, /publish standard export/);
-  assert.match(exportPipeline, /runVisualLipSync/);
-  assert.ok(exportPipeline.indexOf('publish standard export') < exportPipeline.indexOf('runVisualLipSync'));
+  const publishStandardIndex = exportPipeline.indexOf("step.do('publish standard export'");
+  const visualCallIndex = exportPipeline.indexOf('await runVisualLipSync(');
+  assert.ok(publishStandardIndex >= 0);
+  assert.ok(visualCallIndex > publishStandardIndex);
   assert.match(workflow, /\.lipsync\.mp4/);
   assert.match(workflow, /projects\/\$\{context\.projectId\}\/exports\/\$\{context\.targetLanguage\}\/\$\{context\.exportId\}\.lipsync\.mp4/);
   assert.match(exportPipeline, /standardPublished\s*&&\s*effective\.visualMode\s*===\s*['"]lip_sync['"]/);
@@ -98,7 +103,9 @@ test('Phase 4E remains source-qualified until a real deployed Sync/provider/medi
 });
 
 test('Phase 4E keeps GitHub Actions CI-only and the repository acceptance gate wired', () => {
-  assert.doesNotMatch(ci, /wrangler\s+deploy/i);
+  const wranglerDeployLines = ci.split('\n').filter((line) => /wrangler\s+deploy/i.test(line));
+  assert.ok(wranglerDeployLines.length > 0, 'CI must retain Wrangler dry-run validation.');
+  for (const line of wranglerDeployLines) assert.match(line, /--dry-run/i);
   assert.match(deployScript, /delete\s+source\.containers/);
   assert.match(pkg.scripts['verify:deploy-config'], /phase4e-lipsync-acceptance\.test\.mjs/);
 });
