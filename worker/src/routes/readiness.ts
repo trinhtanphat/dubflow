@@ -20,12 +20,23 @@ export type MediaReadiness = {
   remux: 'ready' | 'unavailable';
 };
 
+export type VoiceReadinessConfig = {
+  apiKey?: string;
+  defaultVoiceId?: string;
+};
+
+export type VoiceReadiness = {
+  provider: 'elevenlabs';
+  configured: boolean;
+};
+
 export type ReadinessResult = {
   ready: boolean;
   service: 'dubflow';
   database: 'ready' | 'missing-schema' | 'unavailable';
   schemaRevision: 14 | null;
   asr: AsrCapabilities;
+  voice?: VoiceReadiness;
   media?: MediaReadiness;
 };
 
@@ -85,19 +96,42 @@ function mediaStatus(config?: MediaReadinessConfig): MediaReadiness | undefined 
   };
 }
 
-function result(input: Omit<ReadinessResult, 'ready'>, media?: MediaReadiness): ReadinessResult {
-  const ready = input.database === 'ready'
-    && (!media || (media.r2 === 'ready' && media.remux === 'ready'));
-  return { ready, ...input, ...(media ? { media } : {}) };
+function voiceStatus(config?: VoiceReadinessConfig): VoiceReadiness | undefined {
+  if (!config) return undefined;
+  return {
+    provider: 'elevenlabs',
+    configured: Boolean(config.apiKey?.trim() && config.defaultVoiceId?.trim()),
+  };
+}
+
+function result(
+  input: Omit<ReadinessResult, 'ready'>,
+  media?: MediaReadiness,
+  voice?: VoiceReadiness,
+): ReadinessResult {
+  const mediaReady = !media || (media.r2 === 'ready' && media.remux === 'ready');
+  const productionProvidersReady = !media || (
+    input.asr.provider === 'deepgram-nova-3'
+    && voice?.configured === true
+  );
+  const ready = input.database === 'ready' && mediaReady && productionProvidersReady;
+  return {
+    ready,
+    ...input,
+    ...(voice ? { voice } : {}),
+    ...(media ? { media } : {}),
+  };
 }
 
 export async function checkReadiness(
   db: ReadinessDatabaseLike,
   deepgramApiKey?: string,
   mediaConfig?: MediaReadinessConfig,
+  voiceConfig?: VoiceReadinessConfig,
 ): Promise<ReadinessResult> {
   const asr = asrCapabilities(deepgramApiKey);
   const media = mediaStatus(mediaConfig);
+  const voice = voiceStatus(voiceConfig);
   try {
     const row = await db.prepare(`
       SELECT
@@ -120,10 +154,10 @@ export async function checkReadiness(
     `).first<ReadinessSchemaRow>();
 
     if (!hasCurrentSchema(row)) {
-      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr }, media);
+      return result({ service: 'dubflow', database: 'missing-schema', schemaRevision: null, asr }, media, voice);
     }
-    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr }, media);
+    return result({ service: 'dubflow', database: 'ready', schemaRevision: CURRENT_SCHEMA_REVISION, asr }, media, voice);
   } catch {
-    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr }, media);
+    return result({ service: 'dubflow', database: 'unavailable', schemaRevision: null, asr }, media, voice);
   }
 }
