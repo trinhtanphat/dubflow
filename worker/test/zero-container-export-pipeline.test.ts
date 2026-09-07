@@ -7,7 +7,7 @@ function step() {
 }
 
 describe('zero-container dubbed export pipeline', () => {
-  it('generates PCM clips, streams one soundtrack, and publishes the exact MP4 through Stream', async () => {
+  it('generates PCM clips, streams one soundtrack, and publishes the exact MP4 through R2 remux', async () => {
     const usageEvents: UsageRecordInput[] = [];
     const project = {
       id: 'p1', userId: 'dev-user', title: 'Demo', sourceLanguage: 'zh' as const, targetLanguage: 'vi' as const,
@@ -45,8 +45,9 @@ describe('zero-container dubbed export pipeline', () => {
         storeSoundtrack: vi.fn(async () => 'projects/p1/soundtracks/vi/legacy.wav'),
       },
       publisher: {
+        inspect: vi.fn(async () => ({ codec: 'avc', durationSeconds: 10 })),
         publishDubbedExport: vi.fn(async () => ({
-          exportObjectKey: 'projects/p1/export/dubbed.mp4', audioTrackUid: 'audio-1',
+          exportObjectKey: 'projects/p1/export/dubbed.mp4',
         })),
       },
       usage: {
@@ -62,6 +63,7 @@ describe('zero-container dubbed export pipeline', () => {
       step() as never,
     );
 
+    expect(deps.publisher.inspect).toHaveBeenCalledWith('projects/p1/source/video.mp4');
     expect(deps.voice.generate).toHaveBeenCalledWith({
       text: 'Xin chào', language: 'vi', outputFormat: 'pcm_24000',
     });
@@ -78,8 +80,8 @@ describe('zero-container dubbed export pipeline', () => {
       exportObjectKey: 'projects/p1/export/dubbed.mp4',
     });
     expect(usageEvents.filter((event) => event.kind === 'render_second')).toEqual([
-      expect.objectContaining({ units: 10, provider: 'cloudflare-stream', phase: 'started', operationKey: 'job:j1:retry:0:render:final:cloudflare-stream' }),
-      expect.objectContaining({ units: 10, provider: 'cloudflare-stream', phase: 'completed', operationKey: 'job:j1:retry:0:render:final:cloudflare-stream' }),
+      expect.objectContaining({ units: 10, provider: 'r2-remux', phase: 'started', operationKey: 'job:j1:retry:0:render:final:r2-remux' }),
+      expect.objectContaining({ units: 10, provider: 'r2-remux', phase: 'completed', operationKey: 'job:j1:retry:0:render:final:r2-remux' }),
     ]);
     expect(deps.projects.setExportObject).toHaveBeenCalledWith('p1', 'dev-user', 'projects/p1/export/dubbed.mp4');
     expect(deps.jobs.complete).toHaveBeenCalledWith('j1');
@@ -132,8 +134,9 @@ describe('zero-container dubbed export pipeline', () => {
         storeSoundtrack: vi.fn(async () => 'projects/p1/soundtracks/ja/export-ja.wav'),
       },
       publisher: {
+        inspect: vi.fn(async () => ({ codec: 'avc', durationSeconds: 12 })),
         publishDubbedExport: vi.fn(async () => ({
-          exportObjectKey: 'projects/p1/exports/ja/export-ja.mp4', audioTrackUid: 'audio-ja',
+          exportObjectKey: 'projects/p1/exports/ja/export-ja.mp4',
         })),
       },
       usage: {
@@ -148,6 +151,7 @@ describe('zero-container dubbed export pipeline', () => {
       targetLanguage: 'ja', output: 'dubbed', audioMode: 'dubbed_only',
     }, deps as never, step() as never);
 
+    expect(deps.publisher.inspect).toHaveBeenCalledWith('projects/p1/source/video.mp4');
     expect(deps.voice.generate).toHaveBeenCalledWith({
       text: 'こんにちは', language: 'ja', outputFormat: 'pcm_24000',
     });
@@ -167,12 +171,12 @@ describe('zero-container dubbed export pipeline', () => {
     });
     expect(usageEvents.filter((event) => event.kind === 'render_second')).toEqual([
       expect.objectContaining({
-        units: 12, provider: 'cloudflare-stream', phase: 'started',
-        operationKey: 'job:j-ja:retry:1:render:ja:final:cloudflare-stream',
+        units: 12, provider: 'r2-remux', phase: 'started',
+        operationKey: 'job:j-ja:retry:1:render:ja:final:r2-remux',
       }),
       expect.objectContaining({
-        units: 12, provider: 'cloudflare-stream', phase: 'completed',
-        operationKey: 'job:j-ja:retry:1:render:ja:final:cloudflare-stream',
+        units: 12, provider: 'r2-remux', phase: 'completed',
+        operationKey: 'job:j-ja:retry:1:render:ja:final:r2-remux',
       }),
     ]);
     expect(deps.exports.complete).toHaveBeenCalledWith(
