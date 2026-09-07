@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../lib/api/client';
-import type { TranslationVariantDto } from '../translation/languageVariantsApi';
+import type { SegmentTranslationDto, TranslationVariantDto } from '../translation/languageVariantsApi';
 import {
   PIPER_VI_VOICE_ID,
   prepareVietnameseClientVoiceCache,
   type ClientPiperVoiceServices,
 } from './clientPiperVoice';
 
+type TranslationOverride = Partial<Pick<
+  SegmentTranslationDto,
+  'translatedText' | 'translationStatus' | 'voiceStatus' | 'dubbedObjectKey'
+>>;
+
 function variant(
   segmentId: string,
   version: number,
-  overrides: Partial<NonNullable<TranslationVariantDto['translation']>> = {},
+  overrides: TranslationOverride = {},
 ): TranslationVariantDto {
   return {
     segmentId,
