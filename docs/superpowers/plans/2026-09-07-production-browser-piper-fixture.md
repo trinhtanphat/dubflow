@@ -2,259 +2,284 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a manual, verification-only production fixture that drives the deployed browser Piper Vietnamese lane and proves the final R2 MP4 preserves H.264 video while carrying AAC dubbed audio.
+**Goal:** Add a manual, verification-only production fixture that drives the deployed Vietnamese browser-Piper lane and proves the final private-R2 MP4 contains AAC dubbed audio while preserving the original H.264 elementary stream.
 
-**Architecture:** Keep server setup and final artifact checks in a Node runner, but use real Chromium controlled by pinned `playwright-core@1.63.0` for the one operation that must happen in a browser: production Studio exact-cache/Piper preload and per-language export launch. Do not add runtime endpoints or test hooks.
+**Architecture:** Reuse the existing Node production fixture setup for readiness, project creation, multipart upload, processing, durable polling, final download, and ffmpeg/ffprobe proof. The browser-only phase launches the Chrome/Chromium binary already present on the GitHub-hosted runner and controls the deployed Studio directly through Chrome DevTools Protocol (CDP) using only Node 22 built-ins; no Playwright, Puppeteer, Selenium, runtime endpoint, or application dependency is added.
 
-**Tech Stack:** Node 22, `playwright-core@1.63.0` installed `--no-save` in the manual workflow, system Chrome/Chromium, existing production REST API, ffmpeg/ffprobe.
+**Tech Stack:** Node 22 built-ins (`fetch`, `WebSocket`, `child_process`, `fs`), system Chrome/Chromium, existing production REST API, GitHub Actions `workflow_dispatch`, ffmpeg/ffprobe.
 
 **Spec:** `docs/superpowers/specs/2026-09-07-production-browser-piper-fixture-design.md`
 
 ## Global Constraints
 
-- Production origin is `https://yupvox.qs3d.site`.
-- GitHub Actions remains verification-only; no workflow deploy command.
+- Production origin is exactly `https://yupvox.qs3d.site`.
+- GitHub Actions is verification-only and must never deploy production.
+- Cloudflare Workers Builds remains the only production deploy lane.
+- Workflow remains `workflow_dispatch` only.
 - No Cloudflare Stream or Containers.
-- No AI Gateway top-up or paid-provider activation.
-- Vietnamese TTS must be executed by the deployed browser Piper Studio path.
-- The workflow remains `workflow_dispatch` only.
-- #128 remains blocked after media qualification until canonical signing-secret provenance is independently verified live.
+- No AI Gateway top-up and no paid Google, ElevenLabs, Grok, or Deepgram activation.
+- Vietnamese voice generation must run through the deployed browser Piper path from #122.
+- No Playwright, Puppeteer, Selenium, browser extension, public debug endpoint, or application/runtime dependency.
+- `package.json` must end identical to base `70bf0bb4423886e5f639cb33cee0d8ffbc5374c3`.
+- #128 remains Draft after media PASS until canonical `MEDIA_SOURCE_SIGNING_SECRET` provenance is separately proven live.
 
 ---
 
-### Task 1: Lock the browser-production fixture contract
+### Task 1: Lock the native-CDP source contract
 
 **Files:**
-- Create: `tests/production-browser-piper-fixture.test.mjs`
-- Modify: `package.json`
+- Modify: `tests/production-browser-piper-fixture.test.mjs`
+- Modify: `tests/production-media-fixture.test.mjs`
+- Revert-only: `package.json`
 
 **Interfaces:**
 - Consumes: `.github/workflows/production-media-fixture.yml`, `scripts/verify-production-browser-piper-fixture.mjs`.
-- Produces: a source contract included in `npm run verify:deploy-config`.
+- Produces: CI-enforced source checks without changing package scripts or dependencies.
 
-- [ ] **Step 1: Write the failing source contract**
+- [ ] **Step 1: Keep the RED contract focused on missing workflow integration**
 
-Create a Node test that reads the manual workflow and browser runner and requires:
+The browser fixture source test must require all of these concrete markers:
 
 ```js
 assert.match(workflow, /workflow_dispatch/);
-assert.match(workflow, /playwright-core@1\.63\.0/);
 assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
-assert.doesNotMatch(workflow, /wrangler\s+deploy|PAID_.*=true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
-assert.match(runner, /\/projects\/\$\{encodeURIComponent\(projectId\)\}/);
+assert.doesNotMatch(workflow, /playwright|puppeteer|selenium|wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
+assert.match(runner, /--remote-debugging-port=0/);
+assert.match(runner, /new WebSocket\s*\(/);
+assert.match(runner, /Network\.requestWillBeSent/);
+assert.match(runner, /Page\.reload/);
 assert.match(runner, /data-testid=["']export-current-language["']/);
-assert.match(runner, /exports\/vi/);
-assert.match(runner, /page\.reload\s*\(/);
 assert.match(runner, /PRODUCTION_MEDIA_OUTPUT_PATH/);
+assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|PAID_/i);
 ```
 
-Update `verify:deploy-config` to include `tests/production-browser-piper-fixture.test.mjs`.
+Add a contract that the export control is polled until enabled rather than failing merely because it initially exists disabled:
 
-- [ ] **Step 2: Run the source contract and verify RED**
+```js
+assert.match(runner, /button[^\n]*&&\s*!button\.disabled/);
+```
+
+- [ ] **Step 2: Make the existing production fixture Node test load the browser contract**
+
+At the top of `tests/production-media-fixture.test.mjs`, import the browser contract:
+
+```js
+import './production-browser-piper-fixture.test.mjs';
+```
+
+Update its workflow assertions so the manual workflow is expected to invoke `verify-production-browser-piper-fixture.mjs`, while the legacy server fixture script remains checked in as historical/diagnostic source and is not used by the manual workflow.
+
+- [ ] **Step 3: Restore package.json exactly to base**
+
+Remove the temporary explicit `tests/production-browser-piper-fixture.test.mjs` entry from `verify:deploy-config`; CI reaches the contract through the existing `tests/production-media-fixture.test.mjs` import.
+
+- [ ] **Step 4: Run the focused Node tests**
 
 Run:
 
 ```bash
-node --test tests/production-browser-piper-fixture.test.mjs
+node --test tests/production-media-fixture.test.mjs
 ```
 
-Expected: FAIL because the browser runner/workflow integration does not exist yet.
+Expected before workflow wiring: FAIL only because the workflow still invokes the legacy server fixture and/or the enabled-button contract is not satisfied.
 
-- [ ] **Step 3: Commit RED**
-
-```bash
-git add tests/production-browser-piper-fixture.test.mjs package.json
-git commit -m "test(prod): require browser Piper fixture"
-```
-
-### Task 2: Add the browser-driven production runner
+### Task 2: Harden the native-CDP runner
 
 **Files:**
-- Create: `scripts/verify-production-browser-piper-fixture.mjs`
+- Modify: `scripts/verify-production-browser-piper-fixture.mjs`
 - Test: `tests/production-browser-piper-fixture.test.mjs`
 
 **Interfaces:**
-- Consumes environment variables `PRODUCTION_MEDIA_FIXTURE_PATH`, `PRODUCTION_MEDIA_OUTPUT_PATH`, optional `PRODUCTION_BROWSER_EXECUTABLE`.
-- Produces a terminal JSON PASS line containing `projectId`, process job id, export id/job id, source/output bytes, and content type.
+- Consumes: `PRODUCTION_MEDIA_FIXTURE_PATH`, `PRODUCTION_MEDIA_OUTPUT_PATH`, optional `PRODUCTION_BROWSER_EXECUTABLE`.
+- Produces: final JSON PASS with `projectId`, `processJobId`, `exportId`, `exportJobId`, source/output bytes, content type, ASR provider, and browser-Piper voice lane.
 
-- [ ] **Step 1: Implement shared request/poll helpers**
+- [ ] **Step 1: Keep server setup fail-closed and zero-cost**
 
-Implement JSON request handling with bounded polling. Treat project job states `failed` and `cancelled`, and export states `failed` and `invalidated`, as immediate terminal failures with durable error code/message included.
-
-- [ ] **Step 2: Implement production setup**
-
-Perform:
+The runner must:
 
 ```text
-GET /api/ready
-POST /api/projects                  { title, sourceLanguage: "en", targetLanguage: "vi" }
+GET  /api/ready
+POST /api/projects                         { sourceLanguage: "en", targetLanguage: "vi" }
 POST /api/projects/:id/uploads
-PUT  /api/projects/:id/uploads/:uploadId/parts/:partNumber?objectKey=...
+PUT  /api/projects/:id/uploads/:uploadId/parts/:part?objectKey=...
 POST /api/projects/:id/uploads/:uploadId/complete
 POST /api/projects/:id/process
-GET  /api/projects/:id/jobs/:jobId  until needs_review/completed
+GET  /api/projects/:id/jobs/:jobId
 GET  /api/projects/:id/translations/vi
 ```
 
-Require schema revision 14, R2 ready, remux ready, and at least one completed Vietnamese translation with non-empty text and positive integer version.
+Require schema revision 14, R2 ready, remux ready, and ASR provider `workers-ai-whisper-large-v3-turbo`. Do not call `/api/voice/capabilities`.
 
-- [ ] **Step 3: Launch production Studio in system Chromium**
+- [ ] **Step 2: Keep Chromium/CDP dependency-free**
 
-Resolve Chrome from `PRODUCTION_BROWSER_EXECUTABLE` first, then known GitHub runner locations/`which` candidates. Import `chromium` from `playwright-core`, launch with `executablePath` and `--no-sandbox`, and navigate to:
-
-```js
-`${origin}/projects/${encodeURIComponent(projectId)}`
-```
-
-Capture `console` and `pageerror` events into bounded diagnostic arrays for failure messages.
-
-- [ ] **Step 4: Trigger the real browser Piper export path**
-
-Open the Studio `details` element whose summary is `Ngôn ngữ & export`, wait for `[data-testid="export-current-language"]` to become enabled, and register `page.waitForResponse()` for the exact production request:
+Resolve an existing Chrome/Chromium executable, spawn it with an isolated temporary profile plus:
 
 ```text
-POST /api/projects/:projectId/exports/vi
+--headless=new
+--no-sandbox
+--disable-dev-shm-usage
+--remote-debugging-port=0
+--remote-allow-origins=*
 ```
 
-Click the button only after the response waiter is installed. Require a 2xx response with `exportId` and `jobId`. Do not call any server voice capability endpoint and do not call the export POST directly from Node.
+Read `DevToolsActivePort`, connect to the page target with Node's built-in `WebSocket`, and enable `Page`, `Runtime`, and `Network`.
 
-- [ ] **Step 5: Prove reload durability**
+- [ ] **Step 3: Wait for the real export button to become enabled**
 
-Call `page.reload()`, then execute same-origin `fetch('/api/projects/:id/exports/vi?output=dubbed')` in page context. Require HTTP 200 and `attempt.id === exportId` from the launch response.
+After opening the `Ngôn ngữ & export` details element, poll the deployed button and return a truthy value only when it both exists and is enabled:
 
-- [ ] **Step 6: Poll and persist final media**
+```js
+(() => {
+  const button = document.querySelector('[data-testid="export-current-language"]');
+  if (!button || button.disabled) return null;
+  return { text: button.textContent?.trim() ?? '', disabled: false };
+})()
+```
 
-After browser close, poll `/api/projects/:id/exports/vi?output=dubbed` until `completed`. Download `/api/projects/:id/exports/vi/media?output=dubbed`, require `video/mp4` and an `ftyp` box, and write bytes to `PRODUCTION_MEDIA_OUTPUT_PATH`.
+If the deployed UI surfaces `.batch-export__error`, fail with that visible error and sanitized CDP diagnostics rather than falling back to server TTS.
 
-- [ ] **Step 7: Run source contract GREEN**
+- [ ] **Step 4: Observe the exact UI-triggered export POST**
+
+Register CDP `Network.requestWillBeSent`, `Network.responseReceived`, `Network.loadingFinished`, and `Network.loadingFailed` listeners before the click. Accept only:
+
+```text
+POST https://yupvox.qs3d.site/api/projects/:projectId/exports/vi
+```
+
+Read the response body with `Network.getResponseBody` and require 2xx plus non-empty `exportId` and `jobId`. Node must not POST this export endpoint directly.
+
+- [ ] **Step 5: Prove exact-version PCM before accepting the launch**
+
+After the browser-triggered POST returns, fetch `/translations/vi` through the normal production API and require every row to have:
+
+```text
+translationStatus = completed
+translatedText non-empty
+version >= 1
+voiceStatus = completed
+dubbedObjectKey = projects/:projectId/voices/vi/:segmentId/:version.pcm
+```
+
+- [ ] **Step 6: Prove reload durability**
+
+Issue CDP `Page.reload`, wait for the deployed page to load, then run a same-origin page `fetch('/api/projects/:id/exports/vi?output=dubbed')`. Require HTTP 200 and the same export id returned by the UI-triggered POST.
+
+- [ ] **Step 7: Persist final MP4**
+
+After browser close, poll the latest per-language export until `completed`; fail immediately on `failed` or `invalidated`. Download `/api/projects/:id/exports/vi/media?output=dubbed`, require `video/mp4` and the MP4 `ftyp` marker, then write `PRODUCTION_MEDIA_OUTPUT_PATH`.
+
+- [ ] **Step 8: Run the focused Node tests GREEN**
 
 Run:
 
 ```bash
-node --test tests/production-browser-piper-fixture.test.mjs
+node --test tests/production-media-fixture.test.mjs
 ```
 
-Expected: PASS.
+Expected after Task 3 workflow wiring: PASS.
 
-- [ ] **Step 8: Commit runner**
-
-```bash
-git add scripts/verify-production-browser-piper-fixture.mjs tests/production-browser-piper-fixture.test.mjs package.json
-git commit -m "test(prod): drive browser Piper fixture"
-```
-
-### Task 3: Wire the manual workflow and media proof
+### Task 3: Wire the manual workflow and preserve media proof
 
 **Files:**
 - Modify: `.github/workflows/production-media-fixture.yml`
-- Test: `tests/production-browser-piper-fixture.test.mjs`
+- Test: `tests/production-media-fixture.test.mjs`
 
 **Interfaces:**
-- Consumes system Chrome already present on the GitHub runner and generated fixture MP4.
-- Produces final MP4 evidence checked by ffprobe and H.264 packet SHA.
+- Consumes: deterministic generated H.264/AAC speech fixture and the runner's system Chrome discovery.
+- Produces: output MP4 checked by ffprobe and H.264 elementary-stream SHA.
 
-- [ ] **Step 1: Install pinned browser driver without production dependency changes**
+- [ ] **Step 1: Keep fixture generation unchanged**
 
-After normal checkout/setup, add:
+Continue installing only `ffmpeg` and `espeak-ng`, then generate the deterministic 12-second baseline H.264/AAC MP4. Do not install any npm browser driver.
 
-```bash
-npm install --no-save --no-audit --no-fund playwright-core@1.63.0
-```
+- [ ] **Step 2: Switch the verification step to the browser runner**
 
-Do not run `playwright install`; use the Chrome/Chromium already available on the hosted runner.
-
-- [ ] **Step 2: Replace server-voice runner with browser runner**
-
-Keep the existing deterministic ffmpeg/espeak fixture generation and set:
+Keep:
 
 ```yaml
 PRODUCTION_MEDIA_FIXTURE_PATH: ${{ runner.temp }}/production-r2-fixture.mp4
 PRODUCTION_MEDIA_OUTPUT_PATH: ${{ runner.temp }}/production-r2-output.mp4
 ```
 
-Run:
+Run exactly:
 
 ```bash
 node scripts/verify-production-browser-piper-fixture.mjs
 ```
 
-- [ ] **Step 3: Preserve codec and packet checks**
+- [ ] **Step 3: Preserve the existing final gates byte-for-byte where possible**
 
-Keep the existing ffprobe checks requiring `h264` and `aac`, extract the input/output H.264 elementary streams with stream copy, and require identical SHA-256 values.
+Require with `ffprobe`:
+
+```text
+video codec = h264
+audio codec = aac
+```
+
+Extract both source and output H.264 elementary streams using `-c:v copy -bsf:v h264_mp4toannexb -f h264`, SHA-256 both files, and require equality.
 
 - [ ] **Step 4: Run full source verification**
 
-Run:
+Run through CI:
 
-```bash
-npm install --no-audit --no-fund
+```text
+agent coordination
 npm run verify
-npx wrangler deploy --dry-run
-node --input-type=module -e "import('./scripts/cloudflare-workers-build-config.mjs').then(({ prepareWorkersBuildConfig }) => prepareWorkersBuildConfig())"
-npx wrangler deploy --dry-run --config .wrangler-production.json
+wrangler dry-run
+generated-production wrangler dry-run
+reference screenshots
+artifact upload
 ```
 
-Expected: all PASS.
+All must be terminal SUCCESS on the exact PR head.
 
-- [ ] **Step 5: Commit workflow**
-
-```bash
-git add .github/workflows/production-media-fixture.yml
-git commit -m "test(prod): wire browser Piper qualification"
-```
-
-### Task 4: PR qualification and production runtime gate
+### Task 4: Merge and runtime qualification
 
 **Files:**
-- Update PR metadata only; no source file required.
+- PR metadata / issue state only.
 
 **Interfaces:**
-- Consumes exact-head CI and stable current `main`.
-- Produces one merged verification-only carrier and one manual production E2E result.
+- Consumes: exact-head CI, stable main, exact-SHA Cloudflare Workers Builds, manual production fixture.
+- Produces: source-qualified merged carrier; #91 closes only on real browser E2E PASS.
 
-- [ ] **Step 1: Open one Draft PR for issue #91**
+- [ ] **Step 1: Revalidate exact head and main drift**
 
-Reserve only:
+Require PR mergeable, non-stale base with no overlapping drift, and exact head unchanged after terminal GREEN CI.
 
-```text
-.github/workflows/production-media-fixture.yml
-scripts/verify-production-browser-piper-fixture.mjs
-tests/production-browser-piper-fixture.test.mjs
-package.json
-docs/superpowers/specs/2026-09-07-production-browser-piper-fixture-design.md
-docs/superpowers/plans/2026-09-07-production-browser-piper-fixture.md
-```
+- [ ] **Step 2: Mark Ready and merge expected head only**
 
-Declare `Paid-Resources: FORBIDDEN` and note #128 remains blocked.
+Use the exact PR head SHA as the merge precondition; do not merge RED or moved head.
 
-- [ ] **Step 2: Require fresh exact-head FULL GREEN**
+- [ ] **Step 3: Require post-merge stability before the live fixture**
 
-Require coordination, source/Vitest/build, both Wrangler dry-runs, screenshots, and artifact all terminal SUCCESS.
-
-- [ ] **Step 3: Revalidate and merge exact head**
-
-Check current main drift for overlap, ensure PR is mergeable and exact head is unchanged, then merge with expected-head SHA only.
-
-- [ ] **Step 4: Wait for production deploy stability**
-
-Require on the merge SHA:
+On the exact merge SHA require:
 
 ```text
-GitHub verify = SUCCESS
-Workers Builds: dubflow = SUCCESS
-Workers Builds: dubflow-gateway = SUCCESS
+GitHub CI = SUCCESS
+Cloudflare Workers Build dubflow = SUCCESS
+Cloudflare Workers Build dubflow-gateway = SUCCESS
 ```
 
-Do not start the production fixture before these are terminal.
+Do not run the production fixture before both production builds are stable.
 
-- [ ] **Step 5: Run the manual browser production fixture**
+- [ ] **Step 4: Manually dispatch Production R2 Media Fixture**
 
-Dispatch `Production R2 Media Fixture` on the stable merge SHA and inspect terminal job logs. A PASS must include browser export launch, durable reload identity, completed per-language export, video/mp4 download, H.264, AAC, and packet-preservation checks.
+A runtime PASS must prove:
 
-- [ ] **Step 6: Update issue #91 truthfully**
+```text
+schema-14 R2/remux readiness
+Workers AI ASR
+real H.264 upload + processing
+completed Vietnamese translations
+real production Studio browser Piper
+exact-version PCM durability
+UI-triggered /exports/vi POST
+same export identity after browser reload
+completed private-R2 dubbed MP4
+H.264 + AAC
+source/output H.264 packet SHA equality
+```
 
-Close #91 only if the real browser fixture is fully green. If any runtime step fails, keep #91 open, record the exact failing stage/code, and fix via a new RED→GREEN carrier without enabling paid resources.
+- [ ] **Step 5: Update runtime truth**
 
-- [ ] **Step 7: Keep #128 blocked pending signing-secret provenance**
-
-Even after #91 media PASS, do not merge #128 until canonical `MEDIA_SOURCE_SIGNING_SECRET` use has separate sanitized live evidence.
+Close #91 only if every runtime gate passes. On any failure keep #91 open, record the exact stage/code, and fix in a new RED→GREEN carrier without enabling paid resources. Keep #128 Draft until canonical signing-secret provenance is separately verified live.
