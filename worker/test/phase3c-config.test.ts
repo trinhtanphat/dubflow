@@ -1,3 +1,4 @@
+// @ts-ignore This Vitest-only config check runs in Node; keep worker production types independent of whether a dependency exposes Node module declarations.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
