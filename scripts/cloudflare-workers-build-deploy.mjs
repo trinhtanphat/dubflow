@@ -13,6 +13,7 @@ export {
 export function workersBuildDeploymentPlan() {
   return [
     ['npx', ['wrangler', 'deploy', '--config', PRODUCTION_CONFIG_PATH]],
+    ['node', ['scripts/reconcile-d1-migration-history.mjs']],
     ['npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote', '--config', PRODUCTION_CONFIG_PATH]],
     ['node', ['scripts/verify-deployment.mjs']],
   ];
