@@ -19,6 +19,7 @@ const unavailableSeparation = {
   visualLipSync: {
     available: false,
     provider: null,
+    qualification: 'unavailable' as const,
   },
 };
 const qualifiedSeparation = {
@@ -33,6 +34,7 @@ const qualifiedSeparation = {
   visualLipSync: {
     available: false,
     provider: null,
+    qualification: 'unavailable' as const,
   },
 };
 

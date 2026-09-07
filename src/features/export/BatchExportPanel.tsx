@@ -47,7 +47,18 @@ export function visualLipSyncAvailability(
 ): { allowed: boolean; reason: string } {
   const visual = capabilities?.visualLipSync;
   if (
+    visual?.qualification === 'unqualified'
+    && typeof visual.provider === 'string'
+    && visual.provider.trim() !== ''
+  ) {
+    return {
+      allowed: false,
+      reason: 'Visual lip-sync đã cấu hình nhưng runtime chưa được xác nhận (unqualified).',
+    };
+  }
+  if (
     visual?.available !== true
+    || visual.qualification !== 'qualified'
     || typeof visual.provider !== 'string'
     || visual.provider.trim() === ''
   ) {
