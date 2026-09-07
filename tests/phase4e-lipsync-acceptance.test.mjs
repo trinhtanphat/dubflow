@@ -11,6 +11,7 @@ const exportRoute = read('worker/src/routes/export.ts');
 const visualRoute = read('worker/src/routes/visual-export-media.ts');
 const app = read('worker/src/app.ts');
 const workflow = read('worker/src/workflows/visualLipSync.ts');
+const exportWorkflow = read('worker/src/workflows/ExportWorkflow.ts');
 const exportPipeline = read('worker/src/workflows/exportPipeline.ts');
 const syncLabs = read('worker/src/services/lipsync/sync-labs.ts');
 const providerMedia = read('worker/src/routes/provider-media.ts');
@@ -40,9 +41,13 @@ test('Phase 4E migration persists visual state and short-lived provider grant au
 test('Phase 4E provider boundary and admission stay explicit and fail closed', () => {
   assert.match(syncLabs, /class\s+SyncLabsLipSyncProvider/);
   assert.match(exportRoute, /SYNC_API_KEY/);
+  assert.match(exportRoute, /SYNC_LIPSYNC_QUALIFIED/);
   assert.match(exportRoute, /LIP_SYNC_UNAVAILABLE/);
   assert.match(exportRoute, /visualLipSync/);
-  assert.match(exportRoute, /provider:\s*lipSyncAvailable\s*\?\s*['"]sync-labs['"]/);
+  assert.match(exportRoute, /qualification:\s*qualified\s*\?\s*['"]qualified['"]\s*:\s*['"]unqualified['"]/);
+  assert.match(exportRoute, /visualMode\s*===\s*['"]lip_sync['"]\s*&&\s*!visualLipSyncAvailable/);
+  assert.match(exportWorkflow, /qualifiedSyncLabsApiKey/);
+  assert.match(exportWorkflow, /SYNC_LIPSYNC_QUALIFIED/);
 });
 
 test('Phase 4E provider media access is token-hashed, bounded and never canonical provider state', () => {
@@ -101,6 +106,8 @@ test('Phase 4E remains source-qualified until a real deployed Sync/provider/medi
   assert.match(deploymentStatus, /schema revision \*\*12\*\*/i);
   assert.match(deploymentStatus, /runtime remains \*\*UNQUALIFIED\*\*/i);
   assert.match(deploymentStatus, /real.*Sync.*fixture/i);
+  assert.match(deploymentStatus, /SYNC_API_KEY/);
+  assert.match(deploymentStatus, /SYNC_LIPSYNC_QUALIFIED/);
 });
 
 test('Phase 4E keeps GitHub Actions CI-only and the repository acceptance gate wired', () => {
