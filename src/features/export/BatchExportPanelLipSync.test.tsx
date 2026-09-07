@@ -123,9 +123,11 @@ describe('Phase 4E Studio visual-mode UX', () => {
     expect(html).not.toContain('.lipsync.mp4');
   });
 
-  it('does not present the standard artifact as a failure fallback after visual completion', () => {
+  it('publishes the owner visual download only after lip-sync completion without presenting the standard fallback', () => {
     const html = render({ available: true, visualMode: 'lip_sync', results: [result('completed')] });
     expect(html).toContain('Lip-sync hoàn tất');
+    expect(html).toContain('Tải video lip-sync');
+    expect(html).toContain('/api/projects/p1/exports/ja/media?output=dubbed&amp;visualMode=lip_sync');
     expect(html).not.toContain('Thử lại lip-sync');
     expect(html).not.toContain('Tải video dubbed chuẩn');
   });
