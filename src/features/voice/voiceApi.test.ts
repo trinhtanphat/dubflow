@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchVoiceCapabilities, fetchVoicePreview } from './voiceApi';
+import { ApiError } from '../../lib/api/client';
+import { fetchVoiceCapabilities, fetchVoicePreview, uploadClientVoicePcm } from './voiceApi';
 
 describe('voiceApi', () => {
   it('loads live voice capabilities from the Worker including managed clone enrollment', async () => {
@@ -35,5 +36,39 @@ describe('voiceApi', () => {
       status: 503,
       code: 'VOICE_PROVIDER_UNCONFIGURED',
     });
+  });
+
+  it('uploads byte-identical exact-version 24 kHz mono s16le PCM to the Vietnamese cache route', async () => {
+    const pcm = new Uint8Array([0, 1, 254, 255]);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/projects/project%2Fone/translations/vi/segment%2Fone/voice-pcm');
+      expect(init?.method).toBe('PUT');
+      expect(init?.headers).toMatchObject({
+        'content-type': 'application/octet-stream',
+        'X-DubFlow-PCM-Format': 's16le',
+        'X-DubFlow-PCM-Sample-Rate': '24000',
+        'X-DubFlow-PCM-Channels': '1',
+        'X-DubFlow-Translation-Version': '7',
+      });
+      expect([...new Uint8Array(init?.body as ArrayBuffer)]).toEqual([...pcm]);
+      return Response.json({
+        targetLanguage: 'vi', segmentId: 'segment/one', version: 7, voiceStatus: 'completed', objectKey: 'voice.pcm',
+      });
+    });
+
+    await expect(uploadClientVoicePcm('project/one', 'segment/one', 7, pcm, fetcher as typeof fetch)).resolves.toMatchObject({
+      targetLanguage: 'vi', segmentId: 'segment/one', version: 7, voiceStatus: 'completed', objectKey: 'voice.pcm',
+    });
+  });
+
+  it('surfaces stale translation conflicts without provider fallback', async () => {
+    const fetcher = vi.fn(async () => Response.json({
+      code: 'TRANSLATION_VARIANT_CONFLICT', message: 'Translation variant changed on the server.',
+    }, { status: 409 }));
+
+    const promise = uploadClientVoicePcm('p1', 's1', 2, new Uint8Array([0, 0]), fetcher as typeof fetch);
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    await expect(promise).rejects.toMatchObject({ status: 409, code: 'TRANSLATION_VARIANT_CONFLICT' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
