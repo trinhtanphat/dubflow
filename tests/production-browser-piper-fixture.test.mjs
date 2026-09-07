@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
+// Keep this source-only RED carrier synchronized after PR coordination metadata normalization.
 async function source(path) {
   try {
     return await readFile(new URL(path, import.meta.url), 'utf8');
