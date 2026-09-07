@@ -20,3 +20,9 @@ test('production ExportWorkflow constructs PCM soundtrack and Stream publishing 
   assert.match(workflowSource, /accountId:\s*this\.env\.CLOUDFLARE_ACCOUNT_ID/);
   assert.match(workflowSource, /apiToken:\s*this\.env\.CLOUDFLARE_STREAM_API_TOKEN/);
 });
+
+test('subtitle-only production export does not require Stream publishing configuration', () => {
+  assert.match(workflowSource, /const\s+subtitleOnly\s*=\s*event\.payload\.output\s*===\s*'subtitles'/);
+  assert.match(workflowSource, /if\s*\(\s*!subtitleOnly\s*&&\s*!this\.env\.STREAM\s*\)/);
+  assert.match(workflowSource, /subtitleOnly\s*\?\s*undefined\s*:\s*new\s+StreamMediaService/);
+});
