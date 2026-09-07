@@ -205,25 +205,24 @@ export async function runVisualLipSync(
     }
 
     await step.do('check cancellation before visual lip-sync publish', ensureActive);
-    const providerOutput = await step.do('download visual lip-sync provider output', () =>
-      fetchImpl(result.outputUrl, { redirect: 'follow' }),
-    );
-    const contentType = providerOutput.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-    if (!providerOutput.ok || !providerOutput.body || !contentType.startsWith('video/')) {
-      throw new LipSyncProviderError('LIP_SYNC_RESPONSE_INVALID', 'Visual lip-sync provider returned an invalid media output.');
-    }
-
-    await step.do('publish canonical visual lip-sync output', async () => {
-      await deps.bucket.put!(canonicalKey, providerOutput.body!, {
+    await step.do('download and publish canonical visual lip-sync output', async () => {
+      const providerOutput = await fetchImpl(result.outputUrl, { redirect: 'follow' });
+      const contentType = providerOutput.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+      if (!providerOutput.ok || !providerOutput.body || !contentType.startsWith('video/')) {
+        throw new LipSyncProviderError('LIP_SYNC_RESPONSE_INVALID', 'Visual lip-sync provider returned an invalid media output.');
+      }
+      await deps.bucket.put!(canonicalKey, providerOutput.body, {
         httpMetadata: { contentType: 'video/mp4' },
       });
-      await deps.exports.setLipSyncState(
-        context.projectId,
-        context.exportId,
-        context.userId,
-        { requested: true, provider, status: 'completed', objectKey: canonicalKey },
-      );
+      return canonicalKey;
     });
+
+    await step.do('persist completed visual lip-sync state', () => deps.exports.setLipSyncState(
+      context.projectId,
+      context.exportId,
+      context.userId,
+      { requested: true, provider, status: 'completed', objectKey: canonicalKey },
+    ));
 
     await step.do('record visual lip-sync completed usage', () => deps.usage.record({
       userId: context.userId,
