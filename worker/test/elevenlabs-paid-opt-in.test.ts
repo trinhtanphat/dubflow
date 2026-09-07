@@ -25,15 +25,15 @@ const clone: VoiceClone = {
   updatedAt: '2026-09-07T00:00:00Z',
 };
 
-function cloneStore(): VoiceCloneStore {
+function cloneStore(row: VoiceClone = clone): VoiceCloneStore {
   return {
-    async create() { return clone; },
-    async list() { return [clone]; },
-    async get() { return clone; },
-    async markProviderResult() { return clone; },
-    async markFailed() { return { ...clone, status: 'failed' }; },
-    async markDeleting() { return { ...clone, status: 'deleting' }; },
-    async markDeleted() { return { ...clone, status: 'deleted' }; },
+    async create() { return row; },
+    async list() { return [row]; },
+    async get() { return row; },
+    async markProviderResult() { return row; },
+    async markFailed() { return { ...row, status: 'failed' }; },
+    async markDeleting() { return { ...row, status: 'deleting' }; },
+    async markDeleted() { return { ...row, status: 'deleted' }; },
   } as VoiceCloneStore;
 }
 
@@ -110,5 +110,30 @@ describe('paid ElevenLabs opt-in', () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({ code: 'VOICE_CLONE_PROVIDER_UNCONFIGURED' });
     expect(mediaReads).toBe(0);
+  });
+
+  it('rejects paid ElevenLabs remote clone deletion before local cleanup without explicit opt-in', async () => {
+    let mediaDeletes = 0;
+    let providerDeletes = 0;
+    const remoteClone = { ...clone, status: 'ready', providerVoiceId: 'voice-remote-1' } as VoiceClone;
+    const routes = createVoiceCloneRoutes(
+      () => cloneStore(remoteClone),
+      () => ({
+        async enroll() { throw new Error('should-not-enroll'); },
+        async deleteClone() { providerDeletes += 1; },
+      } as never),
+    );
+    const response = await routes.fetch(new Request('https://yupvox.test/project-1/voice-clones/clone-1', {
+      method: 'DELETE',
+    }), paidCredentialsEnv({
+      MEDIA: {
+        async delete() { mediaDeletes += 1; },
+      } as Env['MEDIA'],
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: 'VOICE_CLONE_PROVIDER_UNCONFIGURED' });
+    expect(mediaDeletes).toBe(0);
+    expect(providerDeletes).toBe(0);
   });
 });
