@@ -13,15 +13,16 @@ class FakeAI implements AiBinding {
 }
 
 describe('Workers AI ASR', () => {
-  it('uses whisper-large-v3-turbo in transcribe mode with VAD and optional language', async () => {
+  it('uses whisper-large-v3-turbo with base64 audio, transcribe mode, VAD and optional language', async () => {
     const ai = new FakeAI();
     const provider = new WorkersAIAsrProvider(ai);
     const audio = new Uint8Array([1, 2, 3]).buffer;
     const result = await provider.transcribe(audio, { sourceLanguage: 'zh' });
     expect(ai.calls[0]).toMatchObject({
       model: '@cf/openai/whisper-large-v3-turbo',
-      input: { audio, task: 'transcribe', language: 'zh', vad_filter: true },
+      input: { audio: 'AQID', task: 'transcribe', language: 'zh', vad_filter: true },
     });
+    expect(typeof ai.calls[0].input.audio).toBe('string');
     expect(result.segments).toEqual([{ startMs: 500, endMs: 1250, text: 'hello' }]);
   });
 
