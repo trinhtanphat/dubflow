@@ -18,7 +18,11 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
   const routes = new Hono<WorkerHonoEnv>();
 
   routes.get('/capabilities', (c) => {
-    return c.json(createVoiceProvider(c.env).capabilities());
+    const capabilities = createVoiceProvider(c.env).capabilities();
+    return c.json({
+      ...capabilities,
+      preview: hasElevenLabsPreview(c.env),
+    });
   });
 
   routes.post('/preview', async (c) => {
