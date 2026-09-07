@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const config = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const backendSourceUrl = new URL('../worker/src/index.ts', import.meta.url);
 const gatewayConfigUrl = new URL('../wrangler.gateway.jsonc', import.meta.url);
 const gatewaySourceUrl = new URL('../gateway/src/index.ts', import.meta.url);
 const architectureUrl = new URL('../docs/CLOUDFLARE-CROSS-ACCOUNT-WORKERS-ONLY.md', import.meta.url);
@@ -37,6 +38,13 @@ test('production backend does not declare paid Cloudflare Containers', () => {
   assert.equal(config.containers, undefined);
   assert.equal(config.durable_objects, undefined);
   assert.equal(config.exports, undefined);
+});
+
+test('production backend entrypoint does not export container runtime classes', () => {
+  const backendSource = fs.readFileSync(backendSourceUrl, 'utf8');
+  assert.doesNotMatch(backendSource, /export\s+\{\s*ContainerProxy\s*\}/);
+  assert.doesNotMatch(backendSource, /export\s+\{\s*FfmpegContainer\s*\}/);
+  assert.doesNotMatch(backendSource, /export\s+\{\s*SeparatorContainer\s*\}/);
 });
 
 test('zone-owner gateway is the only config that attaches yupvox.qs3d.site', () => {
