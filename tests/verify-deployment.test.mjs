@@ -7,10 +7,16 @@ const readyBody = {
   service: 'dubflow',
   database: 'ready',
   schemaRevision: 14,
+  asr: {
+    provider: 'deepgram-nova-3',
+    speakerDiarization: 'configured',
+    speakerIdentityScope: 'chunk',
+  },
+  voice: { provider: 'elevenlabs', configured: true },
   media: { r2: 'ready', remux: 'ready' },
 };
 
-test('deployment probe requires HTTP 200, schema revision 14, and R2/remux readiness', async () => {
+test('deployment probe requires HTTP 200, schema revision 14, providers, and R2/remux readiness', async () => {
   assert.equal(CURRENT_SCHEMA_REVISION, 14);
   const fetchOk = async () => ({
     ok: true,
@@ -25,7 +31,7 @@ test('deployment probe rejects a stale HTTP 200 readiness payload without curren
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', media: { r2: 'ready', remux: 'ready' } };
+      return { ...readyBody, schemaRevision: undefined };
     },
   });
   const result = await probeDeployment(fetchStale);
@@ -59,12 +65,41 @@ test('deployment probe rejects a response without database readiness', async () 
   assert.equal(result.status, 503);
 });
 
+test('deployment probe rejects unavailable remote ASR even when media readiness is green', async () => {
+  const fetchFallbackAsr = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        ...readyBody,
+        asr: {
+          provider: 'workers-ai-whisper-large-v3-turbo',
+          speakerDiarization: 'unavailable',
+          speakerIdentityScope: 'none',
+        },
+      };
+    },
+  });
+  assert.equal((await probeDeployment(fetchFallbackAsr)).ok, false);
+});
+
+test('deployment probe rejects unavailable production voice configuration', async () => {
+  const fetchVoiceUnavailable = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { ...readyBody, voice: { provider: 'elevenlabs', configured: false } };
+    },
+  });
+  assert.equal((await probeDeployment(fetchVoiceUnavailable)).ok, false);
+});
+
 test('deployment probe rejects Stream-shaped or unavailable media readiness', async () => {
   const fetchStream = async () => ({
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 14, media: { stream: 'ready' } };
+      return { ...readyBody, media: { stream: 'ready' } };
     },
   });
   assert.equal((await probeDeployment(fetchStream)).ok, false);
