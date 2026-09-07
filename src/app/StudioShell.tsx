@@ -3,9 +3,15 @@ import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
   startBatchExport,
   startLanguageExport,
+  type DubbedMixMode,
   type ExportLaunchDto,
   type ExportOutput,
 } from '../features/export/batchExportApi';
+import {
+  getSeparationStatus,
+  prepareSeparation,
+  type SeparationStateDto,
+} from '../features/export/separationApi';
 import {
   getProjectLanguages,
   getTranslationVariants,
@@ -46,6 +52,12 @@ const FALLBACK_CONFIG: ProjectLanguageConfigDto = {
   languages: [{ targetLanguage: 'vi', status: 'pending' }],
 };
 
+const EMPTY_SEPARATION: SeparationStateDto = {
+  status: 'not_prepared',
+  qualified: false,
+  separation: null,
+};
+
 function message(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
@@ -84,6 +96,10 @@ export function StudioShell(props: Props) {
   const [processingLanguage, setProcessingLanguage] = useState<TargetLanguage | null>(null);
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null);
   const [exportOutput, setExportOutput] = useState<ExportOutput>('dubbed');
+  const [mixMode, setMixMode] = useState<DubbedMixMode>('dubbed_only');
+  const [separationState, setSeparationState] = useState<SeparationStateDto>(EMPTY_SEPARATION);
+  const [separationBusy, setSeparationBusy] = useState(false);
+  const [separationError, setSeparationError] = useState('');
   const [exportBusy, setExportBusy] = useState(false);
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportError, setExportError] = useState('');
@@ -131,6 +147,36 @@ export function StudioShell(props: Props) {
     });
     return () => { active = false; };
   }, [isCloudProject]);
+
+  useEffect(() => {
+    if (!isCloudProject) return;
+    let active = true;
+    getSeparationStatus(projectId).then((next) => {
+      if (active) setSeparationState(next);
+    }).catch((error) => {
+      if (active) setSeparationError(message(error, 'Không thể tải trạng thái background.'));
+    });
+    return () => { active = false; };
+  }, [isCloudProject, projectId]);
+
+  useEffect(() => {
+    if (!isCloudProject || !['queued', 'running', 'retrying'].includes(separationState.status)) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      getSeparationStatus(projectId).then((next) => {
+        if (active) setSeparationState(next);
+      }).catch((error) => {
+        if (active) setSeparationError(message(error, 'Không thể cập nhật trạng thái background.'));
+      });
+    }, 2500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [isCloudProject, projectId, separationState.status]);
+
+  useEffect(() => {
+    if (mixMode === 'preserve_background' && !(separationState.qualified && separationState.status === 'completed')) {
+      setMixMode('dubbed_only');
+    }
+  }, [mixMode, separationState.qualified, separationState.status]);
 
   const targetLanguage = currentLanguage === 'source' ? null : currentLanguage;
   const currentDrafts = useMemo(() => {
@@ -249,13 +295,31 @@ export function StudioShell(props: Props) {
       : [...current, language]);
   };
 
+  const prepareBackground = async (retry: boolean) => {
+    if (separationBusy) return;
+    setSeparationBusy(true);
+    setSeparationError('');
+    try {
+      const launched = await prepareSeparation(projectId, retry);
+      setSeparationState((current) => ({
+        status: launched.status === 'retrying' ? 'running' : launched.status,
+        qualified: current.qualified,
+        separation: launched.separation,
+      }));
+    } catch (error) {
+      setSeparationError(message(error, retry ? 'Không thể thử lại background.' : 'Không thể chuẩn bị background.'));
+    } finally {
+      setSeparationBusy(false);
+    }
+  };
+
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startLanguageExport(projectId, exportTarget, exportOutput);
+      const result = await startLanguageExport(projectId, exportTarget, exportOutput, mixMode);
       setExportResults((current) => [...current.filter((item) => item.targetLanguage !== result.targetLanguage), result]);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu export ngôn ngữ hiện tại.'));
@@ -268,7 +332,7 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startBatchExport(projectId, selectedLanguages, exportOutput);
+      const result = await startBatchExport(projectId, selectedLanguages, exportOutput, mixMode);
       setExportResults(result.exports);
     } catch (error) {
       setExportError(message(error, 'Không thể bắt đầu batch export.'));
@@ -281,7 +345,7 @@ export function StudioShell(props: Props) {
     setExportBusy(true);
     setExportError('');
     try {
-      const result = await startLanguageExport(projectId, language, exportOutput);
+      const result = await startLanguageExport(projectId, language, exportOutput, mixMode);
       setExportResults((current) => current.map((item) => item.targetLanguage === language ? result : item));
     } catch (error) {
       setExportError(message(error, 'Không thể thử lại export.'));
@@ -322,11 +386,17 @@ export function StudioShell(props: Props) {
                 busy={exportBusy}
                 results={exportResults}
                 error={exportError}
+                mixMode={mixMode}
+                separationState={separationState}
+                separationBusy={separationBusy}
+                separationError={separationError}
                 onOutputChange={setExportOutput}
                 onToggleLanguage={toggleSelected}
                 onExportCurrent={exportCurrent}
                 onBatchExport={exportBatch}
                 onRetryFailed={retryFailed}
+                onMixModeChange={setMixMode}
+                onPrepareBackground={prepareBackground}
               />
             </div>
           </details>

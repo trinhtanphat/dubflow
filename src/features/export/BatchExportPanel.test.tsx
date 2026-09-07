@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -27,18 +28,18 @@ const partial = [
   },
 ];
 
-function baseProps() {
+function baseProps(): ComponentProps<typeof BatchExportPanelView> {
   return {
-    currentTargetLanguage: 'ja' as const,
+    currentTargetLanguage: 'ja',
     enabledLanguages: [...enabledLanguages],
-    selectedLanguages: ['vi', 'ja'] as const,
-    output: 'dubbed' as const,
+    selectedLanguages: ['vi', 'ja'],
+    output: 'dubbed',
     voiceCapabilities: {
       configured: true,
-      languages: ['vi', 'ja'] as const,
+      languages: ['vi', 'ja'],
       cloning: true,
       preview: true,
-      cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: true },
+      cloneEnrollment: { provider: 'elevenlabs', mode: 'ivc', available: true },
     },
     busy: false,
     results: partial,
@@ -53,7 +54,7 @@ function baseProps() {
 
 describe('Phase 4C batch export studio controls', () => {
   it('keeps partial batch results and exposes retry only for failed targets', () => {
-    const html = renderToStaticMarkup(<BatchExportPanelView {...baseProps()} selectedLanguages={['vi', 'ja']} />);
+    const html = renderToStaticMarkup(<BatchExportPanelView {...baseProps()} />);
 
     expect(html).toContain('Export current language');
     expect(html).toContain('Batch export selected languages');
@@ -117,31 +118,32 @@ describe('Phase 4C batch export studio controls', () => {
   });
 
   it('allows preserve mode only for a qualified completed separation', () => {
-    const props = {
-      ...baseProps(),
-      mixMode: 'preserve_background',
-      separationState: {
-        status: 'completed',
-        qualified: true,
-        separation: {
-          id: 'sep-1',
+    const html = renderToStaticMarkup(
+      <BatchExportPanelView
+        {...baseProps()}
+        mixMode="preserve_background"
+        separationState={{
           status: 'completed',
-          sourceRevision: 2,
-          provider: 'demucs',
-          modelId: 'htdemucs',
-          jobId: 'job-sep',
-          errorCode: null,
-          errorMessage: null,
-          createdAt: '2026-09-07T00:00:00Z',
-          completedAt: '2026-09-07T00:01:00Z',
-        },
-      },
-      separationBusy: false,
-      separationError: '',
-      onMixModeChange: vi.fn(),
-      onPrepareBackground: vi.fn(),
-    } as any;
-    const html = renderToStaticMarkup(<BatchExportPanelView {...props} />);
+          qualified: true,
+          separation: {
+            id: 'sep-1',
+            status: 'completed',
+            sourceRevision: 2,
+            provider: 'demucs',
+            modelId: 'htdemucs',
+            jobId: 'job-sep',
+            errorCode: null,
+            errorMessage: null,
+            createdAt: '2026-09-07T00:00:00Z',
+            completedAt: '2026-09-07T00:01:00Z',
+          },
+        }}
+        separationBusy={false}
+        separationError=""
+        onMixModeChange={vi.fn()}
+        onPrepareBackground={vi.fn()}
+      />,
+    );
 
     expect(html).toContain('Ready');
     expect(html).toContain('value="preserve_background" checked=""');

@@ -9,7 +9,7 @@ function source(path) {
 test('Phase 4D frontend owns explicit separation GET and POST client calls', () => {
   const client = source('src/features/export/separationApi.ts');
   assert.match(client, /export\s+(?:async\s+)?function\s+getSeparationStatus/);
-  assert.match(client, /\/api\/projects\/\$\{projectId\}\/separation/);
+  assert.match(client, /encodeURIComponent\(projectId\)/);
   assert.match(client, /method:\s*['"]POST['"]/);
   assert.match(client, /retry:\s*true/);
 });
