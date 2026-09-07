@@ -2,19 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CURRENT_SCHEMA_REVISION, probeDeployment } from '../scripts/verify-deployment.mjs';
 
-test('deployment probe requires HTTP 200 and the exact zero-container schema revision 12', async () => {
-  assert.equal(CURRENT_SCHEMA_REVISION, 12);
+test('deployment probe requires HTTP 200 and the exact zero-container schema revision 13', async () => {
+  assert.equal(CURRENT_SCHEMA_REVISION, 13);
   const fetchOk = async () => ({
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 13 };
     },
   });
   assert.deepEqual(await probeDeployment(fetchOk), {
     ok: true,
     status: 200,
-    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 },
+    body: { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 13 },
   });
 });
 
@@ -36,7 +36,7 @@ test('deployment probe rejects a prior schema revision even when the payload say
     ok: true,
     status: 200,
     async json() {
-      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 11 };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 12 };
     },
   });
   const result = await probeDeployment(fetchPrior);
