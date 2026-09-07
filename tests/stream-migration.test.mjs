@@ -15,7 +15,7 @@ function columns(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((row) => row.name);
 }
 
-test('migration chain adds nullable Stream provenance without rewriting existing projects', () => {
+test('migration chain adds nullable Stream source and per-export render provenance without rewriting existing rows', () => {
   const db = new DatabaseSync(':memory:');
   try {
     const files = migrationFiles();
@@ -25,6 +25,10 @@ test('migration chain adds nullable Stream provenance without rewriting existing
     assert.ok(projectColumns.includes('stream_video_uid'));
     assert.ok(projectColumns.includes('stream_source_object_key'));
     assert.ok(projectColumns.includes('stream_ready_at'));
+
+    const exportColumns = columns(db, 'project_exports');
+    assert.ok(exportColumns.includes('stream_video_uid'));
+    assert.ok(exportColumns.includes('stream_source_object_key'));
   } finally {
     db.close();
   }
