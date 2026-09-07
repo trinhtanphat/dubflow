@@ -173,11 +173,12 @@ For retry of a failed Vietnamese `dubbed_only` export, run the same preload gate
 
 For `vi` + `dubbed_only`:
 
-- a supported browser client-Piper runtime is sufficient to enable the export action even when server voice provider `configured === false`;
-- if the browser runtime is unsupported, the existing server provider may still qualify the action;
-- when neither path is available, disable the action and show a clear reason.
+- a supported browser client-Piper runtime is the only admitted synthesis path for this carrier;
+- the export action may be enabled even when the server voice provider is unconfigured because successful preload makes server TTS unnecessary;
+- if the browser client-Piper runtime is unsupported, disable the action even if a server voice provider is configured;
+- do not fall back to Grok, ElevenLabs, or any other server TTS provider for this Vietnamese zero-cost lane.
 
-For non-`vi` languages or non-`dubbed_only` audio modes, preserve current `VoiceCapabilities` admission exactly.
+For non-`vi` languages or non-`dubbed_only` audio modes, preserve current `VoiceCapabilities` admission exactly. This carrier does not invoke those paths during its zero-cost production qualification.
 
 Browser support check is local and side-effect free. It must at minimum require the APIs used by this implementation (Worker, WebAssembly, Web Audio decoding, and OPFS access). Model presence is not a prerequisite; a missing model is downloaded on demand.
 
@@ -199,7 +200,7 @@ Critical fail-closed rule:
 
 **A client-Piper failure never falls through to Grok, ElevenLabs, or any other paid/server TTS call.**
 
-The user must explicitly retry after the local error is resolved. Existing paid Grok behavior remains independently guarded by `PAID_GROK_TTS_ENABLED=true`.
+The user must explicitly retry after the local error is resolved. Existing paid Grok behavior remains independently guarded by `PAID_GROK_TTS_ENABLED=true` for legacy/non-client-Piper paths, but this carrier never invokes it for Vietnamese `dubbed_only`.
 
 ## Component boundaries
 
@@ -283,7 +284,7 @@ Cover:
 Cover:
 
 - Vietnamese `dubbed_only` allowed with server provider unconfigured when client Piper is supported;
-- unsupported client runtime falls back only to existing server capability admission;
+- unsupported client runtime blocks Vietnamese `dubbed_only` even when a server provider is configured;
 - non-Vietnamese behavior unchanged;
 - non-`dubbed_only` behavior unchanged;
 - current Vietnamese export waits for preload;
@@ -330,6 +331,7 @@ The design is complete when all of the following are true:
 - The first run downloads/caches the pinned Piper model; later runs reuse it.
 - Piper WAV is converted deterministically to 24 kHz mono s16le PCM.
 - Translation conflicts and all local/runtime errors fail closed before export.
+- Unsupported browser runtime blocks the Vietnamese zero-cost lane rather than falling back to server TTS.
 - No automatic paid/server TTS fallback exists in the client-Piper path.
 - Non-Vietnamese and non-`dubbed_only` behavior is unchanged.
 - Full exact-head CI is green before merge.
