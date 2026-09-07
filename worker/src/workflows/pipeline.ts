@@ -11,7 +11,6 @@ import type { MediaProcessor } from '../services/media/types';
 import type { AsrProvider, RemoteAsrProvider } from '../services/asr/types';
 import {
   DIRECT_ASR_CHUNK_DURATION_MS,
-  extractR2LongFormAudioChunks,
   type SourceAudioChunk,
 } from '../services/asr/r2-long-form';
 import { stitchAsrChunks, type StitchChunk } from '../services/asr/stitch';
@@ -290,8 +289,14 @@ export async function runDubbingPipeline(
           await step.do('persist direct ASR progress', async () => deps.jobs.setProgress(params.jobId, 0.65, 'transcribing'));
         } else {
           await step.do('check cancellation before source audio chunk extraction', ensureActive);
-          const extractChunks = deps.extractSourceAudioChunks ?? extractR2LongFormAudioChunks;
-          const chunks = await step.do('decode bounded source audio chunks', async () =>
+          const extractChunks = deps.extractSourceAudioChunks;
+          if (!extractChunks) {
+            throw new PipelineFailure(
+              'ASR_LONG_FORM_UNAVAILABLE',
+              'Long-form direct ASR requires an explicitly runtime-qualified bounded audio chunk extractor.',
+            );
+          }
+          const chunks = await step.do('extract qualified bounded source audio chunks', async () =>
             extractChunks(source.audioUrl, source.durationMs!),
           );
           if (chunks.length === 0) {
@@ -359,204 +364,190 @@ export async function runDubbingPipeline(
       if (!deps.media) throw new Error('Media processor is unavailable.');
       failureCode = 'MEDIA_PROCESSOR_FAILED';
       await step.do('check cancellation before media probe', ensureActive);
-      const metadata = await step.do('probe source media', async () => deps.media!.probe(project.sourceObjectKey!));
-      if (!Number.isFinite(metadata.durationMs) || metadata.durationMs <= 0 || metadata.durationMs > MAX_MEDIA_DURATION_SECONDS * 1000) {
-        throw new Error('Source media duration is invalid or exceeds 3 hours.');
+      const probe = await step.do('probe media', async () => deps.media!.probe(project.sourceObjectKey!));
+      const sourceDurationMs = probe.durationMs;
+      if (!validSourceDuration(sourceDurationMs)) {
+        throw new PipelineFailure('MEDIA_DURATION_INVALID', 'Source media duration is missing, invalid, or exceeds 3 hours.');
       }
-      await step.do('persist source duration', async () => {
-        await deps.projects.setStatus(params.projectId, params.userId, 'processing', metadata.durationMs);
-        await deps.jobs.setProgress(params.jobId, 0.12, 'extracting_audio');
-      });
-
-      await step.do('check cancellation before audio extraction', ensureActive);
-      const chunks = await step.do('extract bounded audio chunks', async () =>
-        deps.media!.extractAudioChunks(params.projectId, project.sourceObjectKey!),
+      const sourceChunks = await step.do('extract source audio', async () =>
+        deps.media!.extractAudioChunks(project.sourceObjectKey!),
       );
-      if (chunks.length === 0) throw new Error('FFmpeg returned no audio chunks.');
+      if (sourceChunks.length === 0) throw new Error('No audio chunks were extracted from source media.');
 
       failureCode = 'ASR_FAILED';
-      for (let index = 0; index < chunks.length; index += 1) {
-        const chunk = chunks[index];
+      for (let index = 0; index < sourceChunks.length; index += 1) {
         await step.do(`check cancellation before ASR chunk ${index + 1}`, ensureActive);
-        const asrResult = await step.do(`transcribe audio chunk ${index + 1}`, async () => {
-          const audio = await readChunk(deps.bucket, chunk.objectKey);
-          const units = chunk.durationMs / 1000;
-          if (!Number.isFinite(units) || units < 0) throw new Error('ASR chunk duration is invalid.');
-          const key = operationKey(params.jobId, retryCount, 'asr', chunk.objectKey, asrProvider);
-          const common = {
-            userId: params.userId,
-            projectId: params.projectId,
-            jobId: params.jobId,
-            kind: 'asr_audio_second' as const,
-            units,
-            provider: asrProvider,
-            operationKey: key,
-          };
-          await deps.usage.record({ ...common, phase: 'started' });
-          const result = await withProviderTelemetry(deps.telemetry, {
-            requestId: params.requestId,
-            actorId: params.userId,
-            projectId: params.projectId,
-            jobId: params.jobId,
-            operation: 'asr',
-            provider: asrProvider,
-            errorCode: 'ASR_FAILED',
-          }, () => deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage }));
-          await deps.usage.record({ ...common, phase: 'completed' });
-          return result;
+        const chunk = sourceChunks[index];
+        const audio = await step.do(`read audio chunk ${index + 1}`, async () => readChunk(deps.bucket, chunk.key));
+        const item = `chunk:${chunk.chunkId}`;
+        const key = operationKey(params.jobId, retryCount, 'asr', item, asrProvider);
+        await deps.usage.record({
+          userId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          kind: 'asr_audio_second',
+          units: chunk.durationMs / 1000,
+          provider: asrProvider,
+          operationKey: key,
+          phase: 'started',
         });
+        const asrResult = await step.do(`transcribe chunk ${index + 1}`, async () => withProviderTelemetry(deps.telemetry, {
+          requestId: params.requestId,
+          actorId: params.userId,
+          projectId: params.projectId,
+          jobId: params.jobId,
+          operation: 'asr',
+          provider: asrProvider,
+          errorCode: 'ASR_FAILED',
+        }, () => deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage })));
         stitchInputs.push({
           projectId: params.projectId,
-          chunkId: chunk.objectKey,
+          chunkId: chunk.chunkId,
           chunkOrder: index,
           offsetMs: chunk.offsetMs,
           overlapBeforeMs: chunk.overlapBeforeMs,
           overlapAfterMs: chunk.overlapAfterMs,
           segments: asrResult.segments,
         });
-        const progress = 0.2 + ((index + 1) / chunks.length) * 0.45;
-        await step.do(`persist ASR progress ${index + 1}`, async () => deps.jobs.setProgress(params.jobId, progress, 'transcribing'));
-      }
-    }
-
-    failureCode = 'PIPELINE_FAILED';
-    const existing = await step.do('load existing speaker coverage', async () =>
-      deps.segments.list(params.projectId, params.userId),
-    );
-    const stitched = stitchAsrChunks(stitchInputs);
-    const reconciled = reconcileSpeakerIds(stitched, existingSpeakerCoverage(existing));
-    const normalized = reconciled.map((segment) => ({
-      id: segment.id,
-      speakerId: segment.speakerId,
-      startMs: segment.startMs,
-      endMs: segment.endMs,
-      sourceText: segment.text,
-    }));
-    const persisted = await step.do('replace persisted ASR segments', async () =>
-      deps.segments.replaceFromAsr(params.projectId, params.userId, normalized),
-    );
-
-    failureCode = 'TRANSLATION_FAILED';
-    const context = await step.do('load translation context snapshot', async () =>
-      deps.translationContext.getContext(params.projectId, params.userId, 'vi'),
-    );
-    if (!context) throw new Error('Project translation context not found.');
-    const expectedTranslationProvider = isTranslationContextActive(context)
-      ? 'workers-ai-contextual'
-      : 'workers-ai';
-
-    const batchSize = 25;
-    for (let offset = 0; offset < persisted.length; offset += batchSize) {
-      const batch = persisted.slice(offset, offset + batchSize);
-      await step.do(`check cancellation before translation ${offset + 1}`, ensureActive);
-      const routed = await step.do(`translate segments ${offset + 1}-${offset + batch.length}`, async () => {
-        const items = batch.map((segment) => ({ id: segment.id, text: segment.sourceText }));
-        const units = sourceCharacters(items.map((item) => item.text));
-        const key = operationKey(params.jobId, retryCount, 'translation', `batch-${offset}`, expectedTranslationProvider);
-        const common = {
+        await deps.usage.record({
           userId: params.userId,
           projectId: params.projectId,
           jobId: params.jobId,
-          kind: 'translation_character' as const,
-          units,
-          provider: expectedTranslationProvider,
+          kind: 'asr_audio_second',
+          units: chunk.durationMs / 1000,
+          provider: asrProvider,
           operationKey: key,
-        };
-        await deps.usage.record({ ...common, phase: 'started' });
-        const result = await withProviderTelemetry(deps.telemetry, {
-          requestId: params.requestId,
-          actorId: params.userId,
-          projectId: params.projectId,
-          jobId: params.jobId,
-          operation: 'translate',
-          provider: expectedTranslationProvider,
-          errorCode: 'TRANSLATION_FAILED',
-        }, () => deps.translationRouter.translate(
-          undefined,
-          items,
-          project.sourceLanguage,
-          'vi',
-          context,
-        ));
-        if (result.mode === 'compare') {
-          throw new Error('Compare mode cannot be persisted by the dubbing workflow.');
-        }
+          phase: 'completed',
+        });
+        const progress = 0.2 + ((index + 1) / sourceChunks.length) * 0.45;
+        await step.do(`persist ASR progress ${index + 1}`, async () => deps.jobs.setProgress(params.jobId, progress, 'transcribing'));
+      }
 
-        const usageProvider = result.mode === 'contextual'
-          ? 'workers-ai-contextual'
-          : result.mode === 'google'
-            ? 'google'
-            : 'workers-ai';
-        if (usageProvider !== expectedTranslationProvider) {
-          throw new Error(`Translation provider mismatch: expected ${expectedTranslationProvider}, received ${usageProvider}.`);
-        }
-        if (result.primary.length !== items.length) {
-          throw new Error(`Translation result count mismatch: expected ${items.length}, received ${result.primary.length}.`);
-        }
-        const expectedIds = new Set(items.map((item) => item.id));
-        const seenIds = new Set<string>();
-        for (const translated of result.primary) {
-          if (!expectedIds.has(translated.id) || seenIds.has(translated.id)) {
-            throw new Error(`Translation result id mismatch: ${translated.id}.`);
-          }
-          if (translated.provider !== usageProvider) {
-            throw new Error(`Translation provider mismatch: expected ${usageProvider}, received ${translated.provider}.`);
-          }
-          seenIds.add(translated.id);
-        }
-        if (seenIds.size !== expectedIds.size) {
-          throw new Error('Translation results are missing one or more segment ids.');
-        }
-
-        await deps.usage.record({ ...common, phase: 'completed' });
-        return result;
+      await step.do('persist source duration', async () => {
+        await deps.projects.setStatus(params.projectId, params.userId, 'processing', sourceDurationMs);
+        await deps.jobs.setProgress(params.jobId, 0.65, 'transcribing');
       });
-
-      const byId = new Map(routed.primary.map((item) => [item.id, item]));
-      await step.do(`persist translations ${offset + 1}-${offset + batch.length}`, async () => {
-        for (const segment of batch) {
-          const result = byId.get(segment.id);
-          if (!result) throw new Error(`Missing translation result for ${segment.id}.`);
-          await deps.segments.setTranslationResult(
-            params.projectId,
-            segment.id,
-            params.userId,
-            segment.version,
-            result.text,
-            routed.mode === 'google' ? 'google' : 'workers-ai',
-            routed.contextRevision,
-          );
-        }
-      });
-      const progress = 0.7 + Math.min(0.25, ((offset + batch.length) / Math.max(1, persisted.length)) * 0.25);
-      await step.do(`persist translation progress ${offset + 1}`, async () => deps.jobs.setProgress(params.jobId, progress, 'translating'));
     }
 
-    failureCode = 'PIPELINE_FAILED';
-    await step.do('check cancellation before review completion', ensureActive);
-    await step.do('mark review ready', async () => {
+    const existingSegments = await step.do('load existing speaker coverage', async () =>
+      deps.segments.list(params.projectId, params.userId),
+    );
+    const reconciledInputs = stitchInputs.map((chunk) => ({
+      ...chunk,
+      segments: reconcileSpeakerIds(existingSpeakerCoverage(existingSegments), chunk.segments),
+    }));
+    const stitched = stitchAsrChunks(reconciledInputs);
+    if (stitched.length === 0) throw new Error('ASR returned no segments.');
+
+    const persistedSegments = await step.do('persist transcript', async () => deps.segments.replaceFromAsr(
+      params.projectId,
+      params.userId,
+      stitched.map((segment) => ({
+        id: segment.id,
+        speakerId: segment.speakerId,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        sourceText: segment.text,
+      })),
+    ));
+
+    failureCode = 'TRANSLATION_FAILED';
+    const context = await step.do('load translation context', async () =>
+      deps.translationContext.getContext(params.projectId, params.userId),
+    );
+    const translation = await step.do('translate transcript', async () => withProviderTelemetry(deps.telemetry, {
+      requestId: params.requestId,
+      actorId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      operation: 'translation',
+      provider: 'translation-router',
+      errorCode: 'TRANSLATION_FAILED',
+    }, () => deps.translationRouter.translate(
+      context && isTranslationContextActive(context) ? 'contextual' : 'default',
+      persistedSegments.map((segment) => ({ id: segment.id, text: segment.sourceText })),
+      {
+        sourceLanguage: project.sourceLanguage,
+        targetLanguage: 'vi',
+        ...(context && isTranslationContextActive(context) ? {
+          context: {
+            revision: context.revision,
+            style: context.style,
+            glossary: context.glossary,
+          },
+        } : {}),
+      },
+    )));
+    const translations = translation.primary;
+    if (translations.length !== persistedSegments.length) {
+      throw new Error('Translation result count does not match segment count.');
+    }
+
+    const translatedTexts = translations.map((item) => item.text);
+    const translationProvider = providerId(translations[0]?.provider ?? translation.mode, 'Translation');
+    const translationOperationKey = operationKey(params.jobId, retryCount, 'translation', 'transcript', translationProvider);
+    await deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'translation_character',
+      units: sourceCharacters(persistedSegments.map((segment) => segment.sourceText)),
+      provider: translationProvider,
+      operationKey: translationOperationKey,
+      phase: 'started',
+    });
+
+    for (let index = 0; index < persistedSegments.length; index += 1) {
+      const segment = persistedSegments[index];
+      const translated = translations[index];
+      const target = await step.do(`persist translation ${index + 1}`, async () => deps.segments.setTranslationResult(
+        params.projectId,
+        params.userId,
+        segment.id,
+        translated.text,
+        translated.provider,
+        translation.contextRevision,
+        segment.version,
+      ));
+      if (!target) throw new Error(`Translation target disappeared for segment ${segment.id}.`);
+    }
+
+    await deps.usage.record({
+      userId: params.userId,
+      projectId: params.projectId,
+      jobId: params.jobId,
+      kind: 'translation_character',
+      units: sourceCharacters(translatedTexts),
+      provider: translationProvider,
+      operationKey: translationOperationKey,
+      phase: 'completed',
+    });
+
+    await step.do('mark needs review', async () => {
       await deps.projects.setStatus(params.projectId, params.userId, 'needs_review');
+      await deps.jobs.setProgress(params.jobId, 1, 'needs_review');
       await deps.jobs.complete(params.jobId, 'needs_review');
     });
-    return { status: 'needs_review', segmentCount: persisted.length };
+
+    return { status: 'needs_review', segmentCount: persistedSegments.length };
   } catch (error) {
     if (isJobCancelledError(error)) {
+      throw error;
+    }
+    const message = asMessage(error);
+    try {
+      await deps.jobs.fail(params.jobId, failureCode, message);
+    } catch (failError) {
+      // Preserve the original pipeline failure while still making best effort to
+      // keep project state terminal if the durable job write also fails.
       try {
-        await deps.projects.setStatus(params.projectId, params.userId, 'cancelled');
+        await deps.projects.setStatus(params.projectId, params.userId, 'failed');
       } catch {
-        // Preserve the cancellation error if the project status write also fails.
+        // Nothing else can be persisted safely from this attempt.
       }
       throw error;
     }
-
-    const message = asMessage(error);
-    const code = error instanceof PipelineFailure ? error.code : failureCode;
-    try {
-      await deps.jobs.fail(params.jobId, code, message);
-      await deps.projects.setStatus(params.projectId, params.userId, 'failed');
-    } catch {
-      // Preserve the original pipeline error; failure persistence is best-effort here.
-    }
+    await deps.projects.setStatus(params.projectId, params.userId, 'failed');
     throw error;
   }
 }
