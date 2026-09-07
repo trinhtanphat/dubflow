@@ -36,9 +36,13 @@ function projectLegacyDb(): D1DatabaseLike {
           if (/FROM\s+projects/i.test(sql)) {
             const select = sql.split(/FROM\s+projects/i, 1)[0]
               .replace(/\b1\s+AS\s+target_languages_revision\b/ig, '')
-              .replace(/\bNULL\s+AS\s+export_object_key\b/ig, '');
+              .replace(/\bNULL\s+AS\s+export_object_key\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_video_uid\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_source_object_key\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_ready_at\b/ig, '');
             if (/\btarget_languages_revision\b/i.test(select)) throw new Error('no such column: target_languages_revision');
             if (/\bexport_object_key\b/i.test(select)) throw new Error('no such column: export_object_key');
+            if (/\bstream_(?:video_uid|source_object_key|ready_at)\b/i.test(select)) throw new Error('no such stream column');
             return { results: values[0] === 'dev-user' ? [row as T] : [] };
           }
           return { results: [] as T[] };
@@ -50,9 +54,13 @@ function projectLegacyDb(): D1DatabaseLike {
           if (/FROM\s+projects/i.test(sql)) {
             const select = sql.split(/FROM\s+projects/i, 1)[0]
               .replace(/\b1\s+AS\s+target_languages_revision\b/ig, '')
-              .replace(/\bNULL\s+AS\s+export_object_key\b/ig, '');
+              .replace(/\bNULL\s+AS\s+export_object_key\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_video_uid\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_source_object_key\b/ig, '')
+              .replace(/\bNULL\s+AS\s+stream_ready_at\b/ig, '');
             if (/\btarget_languages_revision\b/i.test(select)) throw new Error('no such column: target_languages_revision');
             if (/\bexport_object_key\b/i.test(select)) throw new Error('no such column: export_object_key');
+            if (/\bstream_(?:video_uid|source_object_key|ready_at)\b/i.test(select)) throw new Error('no such stream column');
             return (values[0] === 'p1' && values[1] === 'dev-user' ? row : null) as T | null;
           }
           return null;
@@ -99,7 +107,7 @@ function usageLegacyDb(): D1DatabaseLike {
 }
 
 describe('legacy production schema read compatibility', () => {
-  it('lists and reads projects before export and multi-language columns exist', async () => {
+  it('lists and reads projects before export, multi-language, and Stream columns exist', async () => {
     const repo = new ProjectRepository(projectLegacyDb());
 
     await expect(repo.listByUser('dev-user')).resolves.toEqual([
@@ -116,6 +124,9 @@ describe('legacy production schema read compatibility', () => {
         exportObjectKey: null,
         durationMs: 120000,
         sizeBytes: 1024,
+        streamVideoUid: null,
+        streamSourceObjectKey: null,
+        streamReadyAt: null,
         createdAt: '2026-09-01T00:00:00Z',
         updatedAt: '2026-09-01T00:00:00Z',
       },
@@ -125,6 +136,9 @@ describe('legacy production schema read compatibility', () => {
       targetLanguagesRevision: 1,
       sourceGeneration: 1,
       exportObjectKey: null,
+      streamVideoUid: null,
+      streamSourceObjectKey: null,
+      streamReadyAt: null,
     });
   });
 
