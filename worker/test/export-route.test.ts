@@ -72,6 +72,7 @@ describe('export route', () => {
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
+      PAID_ELEVENLABS_ENABLED: 'true',
       EXPORT_WORKFLOW: {
         async create(input: unknown) { calls.push('workflow:create'); workflowCalls.push(input); return { id: 'workflow-export-1' }; },
       },
@@ -112,6 +113,7 @@ describe('export route', () => {
       ANALYTICS: analytics,
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'key', ELEVENLABS_DEFAULT_VOICE_ID: 'voice',
+      PAID_ELEVENLABS_ENABLED: 'true',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); throw new Error('workflow unavailable'); } },
     } as unknown as Env;
 
