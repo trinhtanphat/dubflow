@@ -16,6 +16,7 @@ import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
+import { syncLabsLipSyncCapability } from '../services/lipsync/qualification';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
 import type { DialogueSeparationCapabilities, DialogueSeparationProvider } from '../services/separation/types';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
@@ -46,14 +47,6 @@ type ValidatedTarget = {
   project: Awaited<ReturnType<ProjectStore['getByIdForUser']>> & {};
   targetLanguage: TargetLanguage;
   output: ExportOutput;
-};
-
-type VisualLipSyncQualification = 'qualified' | 'unqualified' | 'unavailable';
-
-type VisualLipSyncCapability = {
-  available: boolean;
-  provider: 'sync-labs' | null;
-  qualification: VisualLipSyncQualification;
 };
 
 function voiceCapabilities(env: Env): VoiceCapabilities {
@@ -109,21 +102,8 @@ function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode 
   return visualMode;
 }
 
-function visualLipSyncCapability(env: Env): VisualLipSyncCapability {
-  const configured = Boolean(env.SYNC_API_KEY?.trim());
-  if (!configured) {
-    return { available: false, provider: null, qualification: 'unavailable' };
-  }
-  const qualified = env.SYNC_LIPSYNC_QUALIFIED?.trim().toLowerCase() === 'true';
-  return {
-    available: qualified,
-    provider: 'sync-labs',
-    qualification: qualified ? 'qualified' : 'unqualified',
-  };
-}
-
 function visualLipSyncAvailable(env: Env): boolean {
-  return visualLipSyncCapability(env).available;
+  return syncLabsLipSyncCapability(env.SYNC_API_KEY, env.SYNC_LIPSYNC_QUALIFIED).available;
 }
 
 function separationCapabilityError(capabilities: DialogueSeparationCapabilities): ExportValidationError | null {
@@ -459,7 +439,10 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     } catch {
       separation = await new UnavailableDialogueSeparationProvider().capabilities();
     }
-    const visualLipSync = visualLipSyncCapability(c.env);
+    const visualLipSync = syncLabsLipSyncCapability(
+      c.env.SYNC_API_KEY,
+      c.env.SYNC_LIPSYNC_QUALIFIED,
+    );
     return c.json({
       duckOriginal: true,
       separation,
