@@ -1,11 +1,62 @@
 import { Hono } from 'hono';
 import { ProjectInputError, normalizeProjectInput } from '../domain/project';
+import {
+  LOCAL_INFERENCE_MAX_COMMIT_BYTES,
+  LocalInferenceInputError,
+  normalizeClientInferenceInput,
+} from '../domain/client-inference';
+import { ClientInferenceCommitError, ClientInferenceRepository } from '../db/client-inference';
 import { ProjectRepository, type ProjectStore } from '../db/projects';
 import { getCurrentUserId } from '../security/current-user';
 import { errorBody } from '../http/json';
 import type { Env } from '../env';
 
 export type ProjectStoreFactory = (env: Env) => ProjectStore;
+
+async function readBoundedJson(request: Request): Promise<unknown> {
+  const announced = request.headers.get('content-length');
+  if (announced !== null) {
+    const bytes = Number(announced);
+    if (!Number.isFinite(bytes) || bytes < 0 || bytes > LOCAL_INFERENCE_MAX_COMMIT_BYTES) {
+      throw new LocalInferenceInputError('Browser-local inference payload exceeds the 2 MiB boundary.');
+    }
+  }
+
+  const body = request.body;
+  if (!body) throw new LocalInferenceInputError();
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > LOCAL_INFERENCE_MAX_COMMIT_BYTES) {
+        await reader.cancel();
+        throw new LocalInferenceInputError('Browser-local inference payload exceeds the 2 MiB boundary.');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new LocalInferenceInputError();
+  }
+}
 
 export function createProjectsRoutes(
   makeStore: ProjectStoreFactory = (env) => new ProjectRepository(env.DB),
@@ -26,10 +77,30 @@ export function createProjectsRoutes(
   });
 
   routes.put('/:id/client-inference/vi', async (c) => {
-    return c.json(
-      errorBody('LOCAL_INFERENCE_COMMIT_UNAVAILABLE', 'Browser-local inference commit is not available yet.'),
-      503,
-    );
+    const projectId = c.req.param('id');
+    try {
+      const payload = await readBoundedJson(c.req.raw);
+      const input = normalizeClientInferenceInput(projectId, payload);
+      const result = await new ClientInferenceRepository(c.env.DB).commit(projectId, getCurrentUserId(), input);
+      return c.json(result);
+    } catch (error) {
+      if (error instanceof LocalInferenceInputError) {
+        return c.json(errorBody(error.code, error.message), 400);
+      }
+      if (error instanceof ClientInferenceCommitError) {
+        if (error.code === 'PROJECT_NOT_FOUND') {
+          return c.json(errorBody(error.code, 'Project not found.'), 404);
+        }
+        if (error.code === 'LOCAL_INFERENCE_SOURCE_CONFLICT') {
+          return c.json({ ...errorBody(error.code, error.message), source: error.source }, 409);
+        }
+        if (error.code === 'LOCAL_INFERENCE_UNAVAILABLE') {
+          return c.json(errorBody(error.code, error.message), 409);
+        }
+        return c.json(errorBody('LOCAL_INFERENCE_COMMIT_FAILED', 'Unable to commit browser-local inference.'), 500);
+      }
+      return c.json(errorBody('LOCAL_INFERENCE_COMMIT_FAILED', 'Unable to commit browser-local inference.'), 500);
+    }
   });
 
   routes.get('/', async (c) => {
