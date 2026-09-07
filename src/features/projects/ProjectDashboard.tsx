@@ -18,8 +18,8 @@ export type ProjectDashboardProps = {
 };
 
 const activeStatuses = new Set<CloudJob['status']>(['queued', 'running', 'retrying']);
-const retiredContainerRuntimeError = /(?:Cannot read properties of undefined.*getByName|getByName)/i;
-const retiredContainerRuntimeMessage = 'Job cũ đã lỗi ở media runtime trước đây. Hãy thử lại để chạy bằng pipeline media hiện tại.';
+const retiredMediaRuntimeError = /(?:Cannot read properties of undefined.*getByName|getByName|Cloudflare\s+Stream|STREAM_(?:BINDING|ACCOUNT|SOURCE_SIGNING|WRITE)_UNAVAILABLE)/i;
+const retiredMediaRuntimeMessage = 'Job cũ đã lỗi ở media runtime trước đây. Hãy thử lại để chạy bằng pipeline media hiện tại.';
 
 function progressLabel(progress: number): string {
   if (!Number.isFinite(progress)) return '0%';
@@ -42,7 +42,7 @@ function updatedLabel(value?: string): string {
 function displayedJobError(job: CloudJob): string | null {
   const message = job.errorMessage?.trim();
   if (!message) return null;
-  if (retiredContainerRuntimeError.test(message)) return retiredContainerRuntimeMessage;
+  if (retiredMediaRuntimeError.test(message)) return retiredMediaRuntimeMessage;
   return message;
 }
 
