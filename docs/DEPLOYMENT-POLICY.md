@@ -29,6 +29,8 @@ It targets account `trinhtanphat2403` and deploys `dubflow-gateway`, which owns 
 
 `BACKEND_ORIGIN` is runtime configuration and must not be hard-coded into source. Because normal Wrangler/Workers Builds deployments can otherwise replace runtime variables that are not present in the checked-in config, `wrangler.gateway.jsonc` must keep `keep_vars = true` so an operator-configured `BACKEND_ORIGIN` survives automatic gateway deployments.
 
+The gateway Workers Builds deploy command is `node scripts/cloudflare-gateway-workers-build-deploy.mjs`. That repository-owned runner deploys the checked-in `wrangler.gateway.jsonc` directly. The Cloudflare build trigger must not use inline JavaScript that deletes `routes`, changes `workers_dev`, or synthesizes a second gateway Wrangler config; doing so can report a successful build while silently detaching `yupvox.qs3d.site` from `dubflow-gateway`.
+
 ## GitHub Actions responsibility
 
 GitHub Actions is CI only. It may install dependencies, run tests, run the production build, perform Wrangler dry-runs, typecheck the gateway, and capture test artifacts/screenshots.
@@ -56,6 +58,7 @@ CI must fail if any of these regressions return:
 - backend `wrangler.jsonc` claims `yupvox.qs3d.site` or targets the gateway account;
 - `wrangler.gateway.jsonc` stops targeting account 2403 or stops owning the public custom domain;
 - gateway runtime-variable preservation is disabled while `BACKEND_ORIGIN` remains operator-configured outside source;
+- the gateway Workers Builds lane stops using the repository-owned runner or mutates away the checked-in custom-domain contract;
 - paid Container runtime bindings, dormant Durable Object lifecycle exports, or custom-domain routes survive into the generated backend production config;
 - the zero-container Stream binding disappears from the backend;
 - CI stops validating the exact generated `.wrangler-production.json`;
