@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '../src/env';
 
-function harness(syncApiKey?: string) {
+function harness(syncApiKey?: string, qualified = false) {
   const calls = {
     rateLimits: 0,
     exports: [] as Array<{ lipSyncRequested: boolean }>,
@@ -69,6 +69,7 @@ function harness(syncApiKey?: string) {
   };
   const env = {
     SYNC_API_KEY: syncApiKey,
+    SYNC_LIPSYNC_QUALIFIED: qualified ? 'true' : undefined,
     RATE_LIMIT_EXPORT: limiter,
     RATE_LIMIT_BATCH_EXPORT: limiter,
     ANALYTICS: { writeDataPoint() {} },
@@ -120,8 +121,8 @@ describe('Phase 4E visual lip-sync export admission', () => {
     await expect(response.json()).resolves.toMatchObject({ visualMode: 'standard' });
   });
 
-  it('admits explicit lip_sync only with Sync configured and persists/passes the request', async () => {
-    const h = harness('sync-key');
+  it('admits explicit lip_sync only when Sync is both configured and runtime-qualified', async () => {
+    const h = harness('sync-key', true);
     const response = await post(h, { output: 'dubbed', visualMode: 'lip_sync' });
     expect(response.status).toBe(202);
     expect(h.calls.exports).toEqual([{ lipSyncRequested: true }]);
@@ -130,7 +131,7 @@ describe('Phase 4E visual lip-sync export admission', () => {
   });
 
   it('rejects invalid visual mode before rate limiting or durable side effects', async () => {
-    const h = harness('sync-key');
+    const h = harness('sync-key', true);
     const response = await post(h, { output: 'dubbed', visualMode: 'cinematic' });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ code: 'VISUAL_MODE_INVALID' });
@@ -141,7 +142,7 @@ describe('Phase 4E visual lip-sync export admission', () => {
   });
 
   it('rejects subtitle lip_sync before rate limiting or durable side effects', async () => {
-    const h = harness('sync-key');
+    const h = harness('sync-key', true);
     const response = await post(h, { output: 'subtitles', visualMode: 'lip_sync' });
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ code: 'VISUAL_MODE_INVALID' });
@@ -161,24 +162,47 @@ describe('Phase 4E visual lip-sync export admission', () => {
     expect(h.calls.workflows).toHaveLength(0);
   });
 
-  it('exposes only visual lip-sync availability/provider in owner capabilities', async () => {
+  it('fails closed with a configured but unqualified Sync provider before side effects', async () => {
+    const h = harness('sync-key', false);
+    const response = await post(h, { output: 'dubbed', visualMode: 'lip_sync' });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({ code: 'LIP_SYNC_UNAVAILABLE' });
+    expect(h.calls.rateLimits).toBe(0);
+    expect(h.calls.exports).toHaveLength(0);
+    expect(h.calls.jobs).toBe(0);
+    expect(h.calls.workflows).toHaveLength(0);
+  });
+
+  it('exposes unavailable, unqualified, and qualified capability states without secrets', async () => {
     const { createExportRoutes } = await import('../src/routes/export');
+
     const unavailable = harness();
     const unavailableRoutes = createExportRoutes(unavailable.deps as never);
     const unavailableResponse = await unavailableRoutes.fetch(
       new Request('https://yupvox.test/p1/export-capabilities'), unavailable.env,
     );
     await expect(unavailableResponse.json()).resolves.toMatchObject({
-      visualLipSync: { available: false, provider: null },
+      visualLipSync: { available: false, provider: null, qualification: 'unavailable' },
     });
 
-    const configured = harness('sync-key');
-    const configuredRoutes = createExportRoutes(configured.deps as never);
-    const configuredResponse = await configuredRoutes.fetch(
-      new Request('https://yupvox.test/p1/export-capabilities'), configured.env,
+    const unqualified = harness('sync-key', false);
+    const unqualifiedRoutes = createExportRoutes(unqualified.deps as never);
+    const unqualifiedResponse = await unqualifiedRoutes.fetch(
+      new Request('https://yupvox.test/p1/export-capabilities'), unqualified.env,
     );
-    const body = await configuredResponse.json() as Record<string, unknown>;
-    expect(body).toMatchObject({ visualLipSync: { available: true, provider: 'sync-labs' } });
+    await expect(unqualifiedResponse.json()).resolves.toMatchObject({
+      visualLipSync: { available: false, provider: 'sync-labs', qualification: 'unqualified' },
+    });
+
+    const qualified = harness('sync-key', true);
+    const qualifiedRoutes = createExportRoutes(qualified.deps as never);
+    const qualifiedResponse = await qualifiedRoutes.fetch(
+      new Request('https://yupvox.test/p1/export-capabilities'), qualified.env,
+    );
+    const body = await qualifiedResponse.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
+      visualLipSync: { available: true, provider: 'sync-labs', qualification: 'qualified' },
+    });
     expect(JSON.stringify(body)).not.toContain('sync-key');
   });
 });
