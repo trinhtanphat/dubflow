@@ -79,7 +79,7 @@ test('deployment probe rejects Stream-shaped or unavailable media readiness', as
     ok: true,
     status: 200,
     async json() {
-      return { true: true, service: 'dubflow', database: 'ready', schemaRevision: 14, media: { stream: 'ready' }, voice: { provider: 'elevenlabs', status: 'ready' } };
+      return { ready: true, service: 'dubflow', database: 'ready', schemaRevision: 14, media: { stream: 'ready' }, voice: { provider: 'elevenlabs', status: 'ready' } };
     },
   });
   assert.equal((await probeDeployment(fetchStream)).ok, false);
