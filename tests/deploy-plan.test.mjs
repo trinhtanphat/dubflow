@@ -16,7 +16,7 @@ test('deployment verifies, provisions, migrates, deploys and checks readiness in
   ]);
 });
 
-test('Workers Builds production deploy applies remote D1 migrations before readiness verification', async () => {
+test('Workers Builds production deploy reconciles deployed D1 migration history before applying migrations', async () => {
   const scriptUrl = new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url);
   assert.equal(
     fs.existsSync(scriptUrl),
@@ -27,9 +27,25 @@ test('Workers Builds production deploy applies remote D1 migrations before readi
   const { workersBuildDeploymentPlan } = await import(scriptUrl.href);
   assert.deepEqual(workersBuildDeploymentPlan(), [
     ['npx', ['wrangler', 'deploy', '--config', '.wrangler-production.json']],
+    ['node', ['scripts/reconcile-d1-migration-history.mjs']],
     ['npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote', '--config', '.wrangler-production.json']],
     ['node', ['scripts/verify-deployment.mjs']],
   ]);
+});
+
+test('legacy visual-lipsync migration rename is reconciled only when deployed schema proves it was applied', () => {
+  const reconcileUrl = new URL('../scripts/reconcile-d1-migration-history.mjs', import.meta.url);
+  assert.equal(
+    fs.existsSync(reconcileUrl),
+    true,
+    'deployment must reconcile the previously deployed 0012_visual_lipsync.sql migration name before current migrations run',
+  );
+  const source = fs.readFileSync(reconcileUrl, 'utf8');
+  assert.match(source, /0012_visual_lipsync\.sql/);
+  assert.match(source, /0013_visual_lipsync\.sql/);
+  assert.match(source, /d1_migrations/);
+  assert.match(source, /lip_sync_status/);
+  assert.match(source, /provider_media_grants/);
 });
 
 test('Workers Builds production config keeps Stream and contains no FFmpeg Container runtime', () => {
