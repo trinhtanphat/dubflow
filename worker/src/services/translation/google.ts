@@ -19,6 +19,10 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
 }
 
+function paidGoogleTranslationEnabled(value?: string): boolean {
+  return value?.trim().toLowerCase() === 'true';
+}
+
 export class GoogleCloudTranslationProvider implements TranslationProvider {
   readonly capabilities: TranslationProviderCapabilities;
 
@@ -26,8 +30,13 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
     private readonly apiKey: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
+    private readonly paidEnabled?: string,
   ) {
-    this.capabilities = { contextual: false, available: Boolean(apiKey.trim()), targets: TARGET_LANGUAGES };
+    this.capabilities = {
+      contextual: false,
+      available: Boolean(apiKey.trim()) && paidGoogleTranslationEnabled(paidEnabled),
+      targets: TARGET_LANGUAGES,
+    };
   }
 
   async translateBatch(
@@ -44,6 +53,12 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
     }
     if (!this.apiKey.trim()) {
       throw new TranslationProviderError('GOOGLE_TRANSLATE_SECRET_MISSING', 'Google Cloud Translation API key is not configured.');
+    }
+    if (!paidGoogleTranslationEnabled(this.paidEnabled)) {
+      throw new TranslationProviderError(
+        'GOOGLE_TRANSLATE_PAID_OPT_IN_REQUIRED',
+        'Google Cloud Translation requires explicit paid-provider opt-in.',
+      );
     }
     if (!(TARGET_LANGUAGES as readonly string[]).includes(target)) {
       throw new TranslationProviderError('TRANSLATION_TARGET_UNSUPPORTED', `Unsupported translation target ${String(target)}.`);
