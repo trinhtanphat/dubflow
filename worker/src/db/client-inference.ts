@@ -39,6 +39,21 @@ function statement(db: D1DatabaseLike, sql: string, ...values: unknown[]): D1Sta
   return db.prepare(sql).bind(...values);
 }
 
+function sourceGuardSql(): string {
+  return `EXISTS (
+    SELECT 1
+    FROM projects AS source_guard
+    WHERE source_guard.id = ?
+      AND source_guard.user_id = ?
+      AND source_guard.source_generation = ?
+      AND source_guard.source_object_key = ?
+  )`;
+}
+
+function sourceGuardValues(projectId: string, userId: string, input: ClientInferenceInput): unknown[] {
+  return [projectId, userId, input.expectedSourceGeneration, input.expectedSourceObjectKey];
+}
+
 export class ClientInferenceRepository {
   constructor(private readonly db: D1DatabaseLike) {}
 
@@ -108,10 +123,10 @@ export class ClientInferenceRepository {
     const busyExport = await this.db.prepare(
       `SELECT COUNT(*) AS busy_count
        FROM project_exports
-       WHERE project_id = ? AND target_language = 'vi' AND status IN ('pending','exporting')`,
+       WHERE project_id = ? AND status IN ('pending','exporting')`,
     ).bind(projectId).first<BusyExportRow>();
     if (Number(busyExport?.busy_count ?? 0) > 0) {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'A Vietnamese export is currently active.');
+      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'A project export is currently active.');
     }
 
     if (!this.db.batch) {
@@ -123,6 +138,8 @@ export class ClientInferenceRepository {
       throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project translation context revision is invalid.');
     }
 
+    const guard = sourceGuardSql();
+    const guardValues = sourceGuardValues(projectId, userId, input);
     const speakerId = browserLocalSpeakerId(projectId);
     const translations = new Map(input.translations.map((item) => [item.segmentId, item.translatedText]));
     const writes: D1StatementLike[] = [
@@ -130,19 +147,44 @@ export class ClientInferenceRepository {
         this.db,
         `UPDATE project_exports
          SET status = 'invalidated', updated_at = datetime('now')
-         WHERE project_id = ? AND target_language = 'vi' AND status IN ('completed','failed')`,
+         WHERE project_id = ? AND status IN ('completed','failed') AND ${guard}`,
         projectId,
+        ...guardValues,
       ),
-      statement(this.db, `DELETE FROM segment_translations WHERE project_id = ? AND target_language = 'vi'`, projectId),
-      statement(this.db, `DELETE FROM segment_dubs WHERE project_id = ? AND target_language = 'vi'`, projectId),
-      statement(this.db, `DELETE FROM segments WHERE project_id = ?`, projectId),
-      statement(this.db, `DELETE FROM speakers WHERE project_id = ?`, projectId),
+      statement(
+        this.db,
+        `DELETE FROM segment_translations
+         WHERE project_id = ? AND target_language = 'vi' AND ${guard}`,
+        projectId,
+        ...guardValues,
+      ),
+      statement(
+        this.db,
+        `DELETE FROM segment_dubs
+         WHERE project_id = ? AND target_language = 'vi' AND ${guard}`,
+        projectId,
+        ...guardValues,
+      ),
+      statement(
+        this.db,
+        `DELETE FROM segments WHERE project_id = ? AND ${guard}`,
+        projectId,
+        ...guardValues,
+      ),
+      statement(
+        this.db,
+        `DELETE FROM speakers WHERE project_id = ? AND ${guard}`,
+        projectId,
+        ...guardValues,
+      ),
       statement(
         this.db,
         `INSERT INTO speakers (id, project_id, label, display_name)
-         VALUES (?, ?, 'Browser local', 'Speaker 1')`,
+         SELECT ?, ?, 'Browser local', 'Speaker 1'
+         WHERE ${guard}`,
         speakerId,
         projectId,
+        ...guardValues,
       ),
     ];
 
@@ -157,7 +199,9 @@ export class ClientInferenceRepository {
            id, project_id, speaker_id, start_ms, end_ms, source_text, translated_text,
            translation_engine, translation_context_revision, translation_status,
            voice_status, dubbed_object_key, version, split_parent_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'browser-opus-mt', ?, 'completed', 'pending', NULL, 1, NULL)`,
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?, 'browser-opus-mt', ?, 'completed', 'pending', NULL, 1, NULL
+         WHERE ${guard}`,
         segment.id,
         projectId,
         speakerId,
@@ -166,6 +210,7 @@ export class ClientInferenceRepository {
         segment.sourceText,
         translatedText,
         contextRevision,
+        ...guardValues,
       ));
       writes.push(statement(
         this.db,
@@ -173,12 +218,15 @@ export class ClientInferenceRepository {
            segment_id, project_id, target_language, translated_text, translation_engine,
            translation_status, translation_context_revision, voice_status, dubbed_object_key,
            version, context_revision, source_segment_version
-         ) VALUES (?, ?, 'vi', ?, 'browser-opus-mt', 'completed', ?, 'pending', NULL, 1, ?, 1)`,
+         )
+         SELECT ?, ?, 'vi', ?, 'browser-opus-mt', 'completed', ?, 'pending', NULL, 1, ?, 1
+         WHERE ${guard}`,
         segment.id,
         projectId,
         translatedText,
         contextRevision,
         contextRevision,
+        ...guardValues,
       ));
     }
 
@@ -187,8 +235,9 @@ export class ClientInferenceRepository {
         this.db,
         `UPDATE project_target_languages
          SET status = 'needs_review', updated_at = datetime('now')
-         WHERE project_id = ? AND target_language = 'vi'`,
+         WHERE project_id = ? AND target_language = 'vi' AND ${guard}`,
         projectId,
+        ...guardValues,
       ),
       statement(
         this.db,
@@ -215,10 +264,21 @@ export class ClientInferenceRepository {
       );
     }
 
+    const committedProject = await this.requireProject(projectId, userId);
+    const committedGeneration = Number(committedProject.source_generation ?? 1);
+    const committedObjectKey = committedProject.source_object_key ?? null;
+    if (committedGeneration !== input.expectedSourceGeneration || committedObjectKey !== input.expectedSourceObjectKey) {
+      throw new ClientInferenceCommitError(
+        'LOCAL_INFERENCE_SOURCE_CONFLICT',
+        'Project source changed before browser-local inference could be committed.',
+        { sourceGeneration: committedGeneration, sourceObjectKey: committedObjectKey },
+      );
+    }
+
     return {
       projectId,
-      sourceGeneration: currentGeneration,
-      sourceObjectKey: currentObjectKey,
+      sourceGeneration: committedGeneration,
+      sourceObjectKey: committedObjectKey,
       durationMs: currentDuration ?? input.durationMs,
       speaker: { id: speakerId, label: 'Browser local', displayName: 'Speaker 1' },
       segments: input.segments.map((segment) => ({
