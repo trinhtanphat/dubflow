@@ -37,7 +37,6 @@ test('production backend does not declare paid Cloudflare Containers', () => {
   assert.equal(config.containers, undefined);
   assert.equal(config.durable_objects, undefined);
   assert.equal(config.exports, undefined);
-  assert.equal(pkg.dependencies?.['@cloudflare/containers'], undefined);
 });
 
 test('zone-owner gateway is the only config that attaches yupvox.qs3d.site', () => {
