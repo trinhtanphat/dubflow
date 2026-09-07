@@ -102,7 +102,8 @@ function harness(options: { providerFails?: boolean; completedLipSync?: boolean 
       storeSoundtrack: vi.fn(async () => audioKey),
     },
     publisher: {
-      publishDubbedExport: vi.fn(async () => ({ exportObjectKey: standardKey, audioTrackUid: 'stream-audio-1' })),
+      inspect: vi.fn(async () => ({ codec: 'avc', durationSeconds: 10 })),
+      publishDubbedExport: vi.fn(async () => ({ exportObjectKey: standardKey })),
     },
     media: {
       probe: vi.fn(async () => ({ durationMs: 10_000 })),
@@ -156,6 +157,7 @@ describe('Phase 4E durable visual lip-sync export orchestration', () => {
   it('never invokes lip-sync work for a standard dubbed export', async () => {
     const h = harness();
     await runExportPipeline(standardParams as never, h.deps, workflowStep() as never);
+    expect(h.deps.publisher.inspect).toHaveBeenCalledWith('projects/p1/source/video.mp4');
     expect(h.deps.lipSync.render).not.toHaveBeenCalled();
     expect(h.deps.providerMediaGrants.create).not.toHaveBeenCalled();
     expect(h.deps.media.extractExportAudio).not.toHaveBeenCalled();
