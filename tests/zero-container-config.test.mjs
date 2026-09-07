@@ -39,6 +39,13 @@ test('active production worker wiring contains no Stream or FFmpeg Container fal
   }
 });
 
+test('active production dubbing supplies private R2 to fresh-source duration probing', () => {
+  assert.match(
+    dubbingWorkflow,
+    /new R2SourceMediaService\(\{[\s\S]*?bucket:\s*this\.env\.MEDIA[\s\S]*?\}\)/,
+  );
+});
+
 test('legacy Cloudflare Stream runtime implementation files are deleted', () => {
   for (const path of [
     'worker/src/services/media/stream.ts',
