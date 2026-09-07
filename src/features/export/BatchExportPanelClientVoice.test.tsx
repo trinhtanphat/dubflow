@@ -12,7 +12,7 @@ const unconfigured = {
 
 const configured = {
   configured: true,
-  languages: ['vi', 'en'] as const,
+  languages: ['vi', 'en'] as string[],
   cloning: false,
   preview: false,
   cloneEnrollment: { provider: 'elevenlabs' as const, mode: 'ivc' as const, available: false },
