@@ -98,7 +98,7 @@ describe('Sync Labs visual lip-sync provider', () => {
 
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'job-3', status: 'PENDING', outputUrl: '' }, 201))
-      .mockResolvedValue(jsonResponse({ id: 'job-3', status: 'PROCESSING', outputUrl: '' }));
+      .mockImplementation(() => Promise.resolve(jsonResponse({ id: 'job-3', status: 'PROCESSING', outputUrl: '' })));
     const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', fetchImpl, maxPollAttempts: 2 });
 
     await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
