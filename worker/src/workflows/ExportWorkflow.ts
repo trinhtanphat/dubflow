@@ -24,9 +24,11 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
     }
 
     const projects = new ProjectRepository(this.env.DB);
+    const exports = new ProjectExportRepository(this.env.DB);
     const soundtrack = new PcmSoundtrackService(this.env.MEDIA);
     const publisher = subtitleOnly ? undefined : new StreamMediaService({
       projects,
+      exportAssets: exports,
       stream: this.env.STREAM!,
       bucket: this.env.MEDIA,
       publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
@@ -42,7 +44,7 @@ export class ExportWorkflow extends WorkflowEntrypoint<Env, ExportWorkflowParams
         jobs: new JobRepository(this.env.DB),
         segments: new SegmentRepository(this.env.DB),
         translations: new SegmentTranslationRepository(this.env.DB),
-        exports: new ProjectExportRepository(this.env.DB),
+        exports,
         speakers: new SpeakerRepository(this.env.DB),
         stems: new AudioStemRepository(this.env.DB),
         separation: new UnavailableDialogueSeparationProvider(),
