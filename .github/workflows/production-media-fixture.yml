@@ -7,6 +7,10 @@ on:
       - main
     paths:
       - 'scripts/verify-production-media-fixture.mjs'
+      - 'worker/src/services/asr/workers-ai.ts'
+      - 'worker/src/services/asr/types.ts'
+      - 'worker/src/workflows/pipeline.ts'
+      - 'worker/src/workflows/DubbingWorkflow.ts'
       - '.github/workflows/production-media-fixture.yml'
 
 permissions:
