@@ -36,6 +36,7 @@ export function App() {
   const [usageSummary, setUsageSummary] = useState<UsageSummaryResponse | null>(null);
   const [usageLoading, setUsageLoading] = useState(true);
   const [usageError, setUsageError] = useState('');
+  const hasUnresolvedDrafts = Object.keys(studio.state.drafts).length > 0;
 
   function navigateTo(nextRoute: AppRoute, mode: 'push' | 'replace' = 'push') {
     setRoute(nextRoute);
@@ -57,13 +58,39 @@ export function App() {
     if (window.location.pathname !== canonicalPath) {
       window.history.replaceState(null, '', canonicalPath);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
 
     const handlePopState = () => {
-      setRoute(parseAppRoute(window.location.pathname));
+      const nextRoute = parseAppRoute(window.location.pathname);
+      if (
+        hasUnresolvedDrafts
+        && route.view === 'studio'
+        && appRoutePath(nextRoute) !== appRoutePath(route)
+      ) {
+        window.history.pushState(null, '', appRoutePath(route));
+        return;
+      }
+      setRoute(nextRoute);
     };
+
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [hasUnresolvedDrafts, route]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !hasUnresolvedDrafts || route.view !== 'studio') return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnresolvedDrafts, route.view]);
 
   useEffect(() => {
     if (route.view !== 'studio' || studio.state.project.id === route.projectId) return;
@@ -174,8 +201,6 @@ export function App() {
       setDashboardError(errorMessage(error, 'Không thể hủy job.'));
     }
   }
-
-  const hasUnresolvedDrafts = Object.keys(studio.state.drafts).length > 0;
 
   if (route.view === 'studio') {
     if (studio.state.project.id !== route.projectId) {
