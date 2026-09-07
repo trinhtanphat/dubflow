@@ -46,6 +46,11 @@ type SourceMedia = {
 };
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+type DirectAsrAudio = {
+  audio: ArrayBuffer;
+  mediaType: string;
+};
+
 export type DubbingPipelineDeps = {
   projects: PipelineProjects;
   jobs: PipelineJobs;
@@ -130,7 +135,7 @@ async function directAsrAudio(
   audioUrl: string,
   durationMs: number,
   fetcher: FetchLike,
-): Promise<ArrayBuffer> {
+): Promise<DirectAsrAudio> {
   if (durationMs > MAX_DIRECT_ASR_DURATION_MS) {
     throw new PipelineFailure(
       'ASR_LONG_FORM_UNAVAILABLE',
@@ -153,7 +158,8 @@ async function directAsrAudio(
       'Source audio exceeds the direct Workers AI payload budget; configure Deepgram for remote ASR.',
     );
   }
-  return audio;
+  const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim() || 'application/octet-stream';
+  return { audio, mediaType };
 }
 
 export async function runDubbingPipeline(
@@ -225,8 +231,11 @@ export async function runDubbingPipeline(
             'Direct ASR requires a known bounded source duration; configure Deepgram for remote ASR.',
           );
         }
-        const audio = await directAsrAudio(source.audioUrl, source.durationMs, deps.fetcher ?? fetch);
-        return deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage });
+        const directInput = await directAsrAudio(source.audioUrl, source.durationMs, deps.fetcher ?? fetch);
+        return deps.asr.transcribe(directInput.audio, {
+          sourceLanguage: project.sourceLanguage,
+          mediaType: directInput.mediaType,
+        });
       }));
 
       const sourceDurationMs = validSourceDuration(source.durationMs)
@@ -310,7 +319,10 @@ export async function runDubbingPipeline(
             operation: 'asr',
             provider: asrProvider,
             errorCode: 'ASR_FAILED',
-          }, () => deps.asr.transcribe(audio, { sourceLanguage: project.sourceLanguage }));
+          }, () => deps.asr.transcribe(audio, {
+            sourceLanguage: project.sourceLanguage,
+            mediaType: 'audio/wav',
+          }));
           await deps.usage.record({ ...common, phase: 'completed' });
           return result;
         });
