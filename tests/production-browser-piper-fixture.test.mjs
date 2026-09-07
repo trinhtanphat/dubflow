@@ -28,13 +28,14 @@ test('manual production fixture drives the deployed browser Piper lane without p
   assert.match(packageSource, /production-browser-piper-fixture\.test\.mjs/);
 });
 
-test('browser fixture uses native CDP on the real production Studio path and proves reload durability', () => {
+test('browser fixture uses native CDP on the real production Studio path and waits for enabled export', () => {
   assert.match(runner, /--remote-debugging-port=0/);
   assert.match(runner, /new WebSocket\s*\(/);
   assert.match(runner, /Runtime\.enable/);
   assert.match(runner, /Network\.enable/);
   assert.match(runner, /\/projects\/\$\{encodeURIComponent\(projectId\)\}/);
   assert.match(runner, /data-testid=["']export-current-language["']/);
+  assert.match(runner, /if \(!button \|\| button\.disabled\) return null;/);
   assert.match(runner, /exports\/vi/);
   assert.match(runner, /Page\.reload/);
   assert.match(runner, /PRODUCTION_MEDIA_OUTPUT_PATH/);
