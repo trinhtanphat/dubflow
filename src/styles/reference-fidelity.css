@@ -282,6 +282,7 @@
 
   .studio-pro-shell.reference-fidelity .center-stage {
     grid-template-rows: minmax(0, 58%) minmax(0, 42%);
+    overflow: hidden;
   }
 
   .studio-pro-shell.reference-fidelity .studio-capability-strip,
@@ -297,7 +298,19 @@
   .studio-pro-shell.reference-fidelity .reference-feature-strip > span { font-size: 9px; }
   .studio-pro-shell.reference-fidelity .reference-feature-strip small { font-size: 8px; }
 
-  .studio-pro-shell.reference-fidelity .video-stage { padding-top: 8px; }
+  .studio-pro-shell.reference-fidelity .video-stage {
+    min-height: 0;
+    overflow: hidden;
+    padding-top: 8px;
+    grid-template-rows: minmax(0, 1fr) 4px 42px;
+  }
+
+  .studio-pro-shell.reference-fidelity .reference-video-frame {
+    min-height: 0;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+
   .studio-pro-shell.reference-fidelity .reference-transport-row { min-height: 42px; }
   .studio-pro-shell.reference-fidelity .reference-timeline { margin-bottom: 6px; }
   .studio-pro-shell.reference-fidelity .timeline-label-spacer { min-height: 22px; }
