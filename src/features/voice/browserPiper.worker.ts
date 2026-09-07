@@ -1,4 +1,4 @@
-import * as tts from '@mintplex-labs/piper-tts-web';
+import { TtsSession } from '@mintplex-labs/piper-tts-web';
 import { wavToClientPcm } from './clientPcm';
 import {
   VIETNAMESE_PIPER_VOICE,
@@ -13,6 +13,7 @@ const workerScope = self as unknown as {
   onmessage: ((event: MessageEvent<PiperWorkerRequest>) => void) | null;
 };
 
+let session: TtsSession | null = null;
 let readyPromise: Promise<void> | null = null;
 
 function postProgress(progress: { loaded: number; total: number }, requestId?: string) {
@@ -26,7 +27,12 @@ function postProgress(progress: { loaded: number; total: number }, requestId?: s
 
 function ensureReady(): Promise<void> {
   if (!readyPromise) {
-    readyPromise = tts.download(QUALIFIED_VIETNAMESE_VOICE, (progress) => postProgress(progress));
+    readyPromise = TtsSession.create({
+      voiceId: QUALIFIED_VIETNAMESE_VOICE,
+      progress: (progress) => postProgress(progress),
+    }).then((createdSession) => {
+      session = createdSession;
+    });
   }
   return readyPromise;
 }
@@ -41,6 +47,7 @@ workerScope.onmessage = (event) => {
     void ensureReady()
       .then(() => workerScope.postMessage({ type: 'ready' }))
       .catch((error) => {
+        session = null;
         readyPromise = null;
         workerScope.postMessage({ type: 'error', code: 'PIPER_INIT_FAILED', message: errorMessage(error) });
       });
@@ -55,10 +62,10 @@ workerScope.onmessage = (event) => {
   }
 
   void ensureReady()
-    .then(() => tts.predict(
-      { text, voiceId: QUALIFIED_VIETNAMESE_VOICE },
-      (progress) => postProgress(progress, requestId),
-    ))
+    .then(() => {
+      if (!session) throw new Error('Piper session is unavailable after initialization.');
+      return session.predict(text);
+    })
     .then((wav) => wav.arrayBuffer())
     .then((wavBuffer) => wavToClientPcm(wavBuffer))
     .then((pcm) => {
