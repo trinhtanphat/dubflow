@@ -11,8 +11,12 @@ export class WorkersAIAsrProvider implements AsrProvider {
   constructor(private readonly ai: AiBinding) {}
 
   async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
+    const mediaType = context.mediaType?.trim() || 'audio/wav';
     const input: Record<string, unknown> = {
-      audio,
+      audio: {
+        body: audio,
+        contentType: mediaType,
+      },
       task: 'transcribe',
       vad_filter: true,
     };
