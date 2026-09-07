@@ -12,6 +12,7 @@ export function prepareWorkersBuildConfig() {
   source.account_id = PRODUCTION_ACCOUNT_ID;
   delete source.containers;
   delete source.durable_objects;
+  delete source.exports;
   delete source.routes;
   fs.writeFileSync(
     new URL(`../${PRODUCTION_CONFIG_PATH}`, import.meta.url),
