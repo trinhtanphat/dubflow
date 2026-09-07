@@ -10,7 +10,7 @@ const deploymentStatus = fs.readFileSync(new URL('../docs/deployment-status.md',
 const productionAccountId = '6c5207813df3d5b83b9508125e0e9e12';
 
 function documentedProductionAccount(text, label) {
-  const match = text.match(/(?:Cloudflare production account|production account|Cloudflare account)\s+`([a-f0-9]{32})`/i);
+  const match = text.match(/(?:Cloudflare production account|production account|Cloudflare account)\s*:?\s*`([a-f0-9]{32})`/i);
   assert.ok(match, `${label} must declare the canonical Cloudflare production account`);
   return match[1];
 }
