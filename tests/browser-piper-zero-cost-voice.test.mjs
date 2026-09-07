@@ -73,9 +73,23 @@ test('Studio admits an exact Vietnamese voice cache before requiring Piper primi
   const prepareEnd = studioSource.indexOf('const exportCurrent', prepareStart);
   assert.ok(prepareStart >= 0 && prepareEnd > prepareStart);
   const prepareSource = studioSource.slice(prepareStart, prepareEnd);
-  const fetchIndex = prepareSource.indexOf("getTranslationVariants(projectId, 'vi')");
-  const piperIndex = prepareSource.indexOf('browserPiperAvailable()');
-  assert.ok(fetchIndex >= 0 && piperIndex >= 0 && fetchIndex < piperIndex);
+  const fetchVariantsIndex = prepareSource.indexOf('fetchVariants:');
+  const synthesizeIndex = prepareSource.indexOf('synthesize:', fetchVariantsIndex);
+  const piperIndex = prepareSource.indexOf('browserPiperAvailable()', synthesizeIndex);
+  assert.ok(
+    fetchVariantsIndex >= 0
+      && synthesizeIndex > fetchVariantsIndex
+      && piperIndex > synthesizeIndex,
+  );
+
+  const preloadFetchIndex = preloadSource.indexOf('await deps.fetchVariants(projectId)');
+  const preloadMissingIndex = preloadSource.indexOf('initial.filter', preloadFetchIndex);
+  const preloadSynthesizeIndex = preloadSource.indexOf('deps.synthesize', preloadMissingIndex);
+  assert.ok(
+    preloadFetchIndex >= 0
+      && preloadMissingIndex > preloadFetchIndex
+      && preloadSynthesizeIndex > preloadMissingIndex,
+  );
 });
 
 test('Piper initialization failure makes the mounted Studio client lane unavailable', () => {
