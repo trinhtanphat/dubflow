@@ -20,9 +20,22 @@ describe('Workers AI ASR', () => {
     const result = await provider.transcribe(audio, { sourceLanguage: 'zh' });
     expect(ai.calls[0]).toMatchObject({
       model: '@cf/openai/whisper-large-v3-turbo',
-      input: { audio, task: 'transcribe', language: 'zh', vad_filter: true },
+      input: { task: 'transcribe', language: 'zh', vad_filter: true },
     });
     expect(result.segments).toEqual([{ startMs: 500, endMs: 1250, text: 'hello' }]);
+  });
+
+  it('wraps direct source media in the Workers AI binding media envelope', async () => {
+    const ai = new FakeAI();
+    const provider = new WorkersAIAsrProvider(ai);
+    const audio = new Uint8Array([1, 2, 3]).buffer;
+
+    await provider.transcribe(audio, { sourceLanguage: 'auto', mediaType: 'video/mp4' } as any);
+
+    expect(ai.calls[0].input.audio).toEqual({
+      body: 'AQID',
+      contentType: 'video/mp4',
+    });
   });
 
   it('omits language when auto detection is requested', async () => {
