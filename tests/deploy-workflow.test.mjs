@@ -34,8 +34,9 @@ test('Workers Builds production lane is explicitly container-free on account 240
   const policy = fs.readFileSync(policyUrl, 'utf8');
   assert.match(policy, /container-free/i);
   assert.match(policy, /50afb4fd3c4c7a1f3e1bdb7f22d4af7f/i);
-  assert.match(policy, /removes `containers`.*`durable_objects`/is);
+  assert.match(policy, /removes `containers`.*`durable_objects`.*`exports`/is);
   assert.match(policy, /without enabling paid Cloudflare Containers/i);
   assert.match(policy, /hard-pins account/i);
+  assert.match(policy, /exact generated `\.wrangler-production\.json`/i);
   assert.doesNotMatch(policy, /Containers Edit/i);
 });
