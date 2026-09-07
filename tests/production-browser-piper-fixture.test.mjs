@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { runProductionBrowserPiperFixture } from '../scripts/verify-production-browser-piper-fixture.mjs';
 
-async function source(path) {
+async function source(filePath) {
   try {
-    return await readFile(new URL(path, import.meta.url), 'utf8');
+    return await readFile(new URL(filePath, import.meta.url), 'utf8');
   } catch {
     return '';
   }
@@ -18,6 +21,8 @@ const [workflow, runner, packageSource] = await Promise.all([
 
 test('manual production fixture drives the deployed browser Piper lane without paid or deploy coupling', () => {
   assert.match(workflow, /workflow_dispatch/);
+  assert.match(workflow, /zero_charge_verified/);
+  assert.match(workflow, /PRODUCTION_ZERO_CHARGE_VERIFIED/);
   assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
   assert.doesNotMatch(workflow, /playwright|puppeteer|selenium|wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
   assert.match(packageSource, /production-browser-piper-fixture\.test\.mjs/);
@@ -34,4 +39,31 @@ test('browser fixture uses native CDP on the real production Studio path and pro
   assert.match(runner, /Page\.reload/);
   assert.match(runner, /PRODUCTION_MEDIA_OUTPUT_PATH/);
   assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|PAID_/i);
+});
+
+test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dubflow-zero-charge-test-'));
+  const fixturePath = path.join(dir, 'fixture.mp4');
+  const outputPath = path.join(dir, 'output.mp4');
+  await writeFile(fixturePath, Buffer.from('fixture'));
+  let requests = 0;
+  const fetchImpl = async () => {
+    requests += 1;
+    throw new Error('production request should not be reached');
+  };
+
+  try {
+    await assert.rejects(
+      runProductionBrowserPiperFixture({
+        fetchImpl,
+        fixturePath,
+        outputPath,
+        zeroChargeVerified: 'false',
+      }),
+      /ZERO_CHARGE_RUNTIME_UNVERIFIED/,
+    );
+    assert.equal(requests, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
