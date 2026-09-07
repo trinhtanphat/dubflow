@@ -44,4 +44,5 @@ export interface Env {
   ELEVENLABS_API_KEY?: string;
   ELEVENLABS_DEFAULT_VOICE_ID?: string;
   SYNC_API_KEY?: string;
+  SYNC_LIPSYNC_QUALIFIED?: string;
 }
