@@ -12,6 +12,7 @@ const panel = source('src/features/export/BatchExportPanel.tsx');
 const route = source('worker/src/routes/separation.ts');
 const app = source('worker/src/app.ts');
 const index = source('worker/src/index.ts');
+const separatorContainerSource = source('worker/src/containers/SeparatorContainer.ts');
 const env = source('worker/src/env.ts');
 const limiter = source('worker/src/security/rate-limit.ts');
 const providerConfig = source('worker/src/services/separation/config.ts');
@@ -56,18 +57,19 @@ test('Phase 4D separated-background export reuses prepared durable stems and nev
   assert.match(exportPipeline, /DIALOGUE_SEPARATION_(?:UNAVAILABLE|ARTIFACT_INVALID)/);
 });
 
-test('Phase 4D keeps the optional Demucs source adapter but does not bind or deploy paid Containers', () => {
+test('Phase 4D keeps the optional Demucs source adapter but does not bind, export, or deploy paid Containers', () => {
   assert.match(providerConfig, /demucs/i);
   assert.match(providerConfig, /htdemucs/);
   assert.match(providerConfig, /8726e21a/);
   assert.match(providerConfig, /SEPARATION_RUNTIME_QUALIFIED/);
   assert.match(provider, /class\s+ContainerDialogueSeparationProvider/);
+  assert.match(separatorContainerSource, /class\s+SeparatorContainer\s+extends\s+Container/);
   assert.match(workflow, /class\s+SeparationWorkflow/);
   assert.match(pipeline, /runSeparationPipeline/);
-  assert.match(index, /SeparatorContainer/);
+  assert.doesNotMatch(index, /export\s+\{\s*SeparatorContainer\s*\}/);
   assert.match(index, /SeparationWorkflow/);
   assert.match(env, /RATE_LIMIT_SEPARATION/);
-  assert.match(env, /SEPARATOR_CONTAINER/);
+  assert.match(env, /SEPARATOR_CONTAINER\?/);
   assert.match(env, /SEPARATION_WORKFLOW/);
   assert.match(limiter, /'separation'/);
   assert.match(wranglerText, /RATE_LIMIT_SEPARATION/);
