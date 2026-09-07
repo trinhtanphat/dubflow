@@ -30,51 +30,80 @@ function schemaDb() {
   };
 }
 
+const mediaReady = {
+  r2: {},
+  publicOrigin: 'https://yupvox.qs3d.site',
+  sourceSigningSecret: 'source-secret',
+  remuxReady: true,
+};
+
+const voiceReady = {
+  apiKey: 'eleven-secret',
+  defaultVoiceId: 'voice-id',
+};
+
 describe('R2-only media readiness', () => {
-  it('reports schema 14 ready with R2, public origin, signing secret, and remux capability only', async () => {
-    const result = await checkReadiness(schemaDb(), 'dg-secret', {
-      r2: {},
-      publicOrigin: 'https://yupvox.qs3d.site',
-      sourceSigningSecret: 'source-secret',
-      remuxReady: true,
-    });
+  it('reports schema 14 ready only when R2/remux and the standard ElevenLabs voice are configured', async () => {
+    const result = await checkReadiness(schemaDb(), undefined, mediaReady, voiceReady);
 
     expect(result).toMatchObject({
       ready: true,
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'ready', remux: 'ready' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
     });
   });
 
+  it('fails readiness when the standard dubbed-export voice is not configured', async () => {
+    const missingKey = await checkReadiness(schemaDb(), undefined, mediaReady, {
+      defaultVoiceId: 'voice-id',
+    });
+    const missingVoice = await checkReadiness(schemaDb(), undefined, mediaReady, {
+      apiKey: 'eleven-secret',
+    });
+
+    for (const result of [missingKey, missingVoice]) {
+      expect(result).toMatchObject({
+        ready: false,
+        database: 'ready',
+        schemaRevision: 14,
+        media: { r2: 'ready', remux: 'ready' },
+        voice: { provider: 'elevenlabs', status: 'unavailable' },
+      });
+    }
+  });
+
   it('reports R2 media unavailable when the signed source origin is incomplete', async () => {
-    const result = await checkReadiness(schemaDb(), 'dg-secret', {
+    const result = await checkReadiness(schemaDb(), undefined, {
       r2: {},
       sourceSigningSecret: 'source-secret',
       remuxReady: true,
-    });
+    }, voiceReady);
 
     expect(result).toMatchObject({
       ready: false,
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'unavailable', remux: 'ready' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
     });
   });
 
   it('fails readiness when the remux runtime self-check is unavailable without requiring Stream credentials', async () => {
-    const result = await checkReadiness(schemaDb(), 'dg-secret', {
+    const result = await checkReadiness(schemaDb(), undefined, {
       r2: {},
       publicOrigin: 'https://yupvox.qs3d.site',
       sourceSigningSecret: 'source-secret',
       remuxReady: false,
-    });
+    }, voiceReady);
 
     expect(result).toMatchObject({
       ready: false,
       database: 'ready',
       schemaRevision: 14,
       media: { r2: 'ready', remux: 'unavailable' },
+      voice: { provider: 'elevenlabs', status: 'ready' },
     });
   });
 });
