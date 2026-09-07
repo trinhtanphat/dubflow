@@ -38,6 +38,14 @@ jobs:
       - name: Wrangler dry-run
         run: npx wrangler deploy --dry-run
 
+      - name: Wrangler generated production dry-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e "import('./scripts/cloudflare-workers-build-deploy.mjs').then(({ prepareWorkersBuildConfig }) => prepareWorkersBuildConfig())"
+          trap 'rm -f .wrangler-production.json' EXIT
+          npx wrangler deploy --dry-run --config .wrangler-production.json
+
       - name: Install CJK screenshot font
         shell: bash
         run: |
