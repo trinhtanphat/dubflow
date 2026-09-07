@@ -92,14 +92,29 @@ export class ProjectExportRepository {
     output: ExportOutput,
     batchId: string | null = null,
     audioMode: DubbedAudioMode = 'dubbed_only',
+    lipSyncRequested = false,
   ): Promise<ProjectExport> {
     await this.assertProject(projectId, userId);
     const id = this.makeId();
     const effectiveAudioMode: DubbedAudioMode = output === 'subtitles' ? 'dubbed_only' : audioMode;
+    const effectiveLipSyncRequested = output === 'dubbed' && lipSyncRequested;
+    const lipSyncStatus: LipSyncStatus = effectiveLipSyncRequested ? 'queued' : 'not_requested';
     await this.db.prepare(
-      `INSERT INTO project_exports (id, project_id, target_language, output, batch_id, audio_mode, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-    ).bind(id, projectId, targetLanguage, output, batchId, effectiveAudioMode).run();
+      `INSERT INTO project_exports (
+         id, project_id, target_language, output, batch_id, audio_mode,
+         lip_sync_requested, lip_sync_status, status
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+    ).bind(
+      id,
+      projectId,
+      targetLanguage,
+      output,
+      batchId,
+      effectiveAudioMode,
+      effectiveLipSyncRequested ? 1 : 0,
+      lipSyncStatus,
+    ).run();
     return {
       id,
       projectId,
@@ -110,9 +125,9 @@ export class ProjectExportRepository {
       status: 'pending',
       exportObjectKey: null,
       subtitleObjectKey: null,
-      lipSyncRequested: false,
+      lipSyncRequested: effectiveLipSyncRequested,
       lipSyncProvider: null,
-      lipSyncStatus: 'not_requested',
+      lipSyncStatus,
       lipSyncObjectKey: null,
       errorCode: null,
       errorMessage: null,
