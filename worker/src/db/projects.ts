@@ -154,10 +154,20 @@ export class ProjectRepository implements ProjectStore {
   async create(userId: string, input: CreateProjectInput): Promise<Project> {
     await this.ensureDevelopmentUser(userId);
     const id = crypto.randomUUID();
-    await this.db.prepare(
+    const projectInsert = this.db.prepare(
       `INSERT INTO projects (id, user_id, title, source_language, target_language, status)
        VALUES (?, ?, ?, ?, ?, 'draft')`,
-    ).bind(id, userId, input.title, input.sourceLanguage, input.targetLanguage).run();
+    ).bind(id, userId, input.title, input.sourceLanguage, input.targetLanguage);
+    const languageInsert = this.db.prepare(
+      `INSERT INTO project_target_languages (project_id, target_language, status)
+       VALUES (?, ?, 'pending')`,
+    ).bind(id, input.targetLanguage);
+
+    if (this.db.batch) await this.db.batch([projectInsert, languageInsert]);
+    else {
+      await projectInsert.run();
+      await languageInsert.run();
+    }
 
     return {
       id,
