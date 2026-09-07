@@ -1,12 +1,19 @@
+import type { R2PutOptionsLike, R2UploadValue } from '../cloudflare/r2';
+import type { ProjectExportRepository } from '../db/project-exports';
+import type { ProviderMediaGrantRepository } from '../db/provider-media-grants';
 import type { ProjectStatus } from '../db/projects';
 import type { UsageStore } from '../db/usage';
 import { parseDubbedAudioMode, type DubbedAudioMode } from '../domain/audio-mode';
 import type { ExportOutput, TargetLanguage } from '../domain/language';
 import { isTargetLanguage } from '../domain/language';
+import { parseVisualMode, type VisualMode } from '../domain/visual-mode';
 import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
+import { createProviderMediaToken } from '../security/provider-media-token';
+import { LipSyncProviderError, type LipSyncProvider } from '../services/lipsync/types';
 import type { VoiceGenerateInput } from '../services/voice/types';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
+import { runVisualLipSync } from './visualLipSync';
 
 export type ZeroContainerExportParams = {
   projectId: string;
@@ -16,6 +23,7 @@ export type ZeroContainerExportParams = {
   targetLanguage?: TargetLanguage;
   output?: ExportOutput;
   audioMode?: DubbedAudioMode;
+  visualMode?: VisualMode;
   requestId?: string;
 };
 
@@ -29,6 +37,7 @@ type NormalizedZeroParams = {
   targetLanguage: TargetLanguage;
   output: 'dubbed';
   audioMode: 'dubbed_only';
+  visualMode: VisualMode;
 };
 
 type ZeroContainerProject = {
@@ -101,20 +110,17 @@ export type ZeroContainerExportDeps = {
       objectKey: string,
     ): Promise<void>;
   };
-  exports?: {
-    complete(
-      projectId: string,
-      exportId: string,
-      userId: string,
-      keys: { exportObjectKey?: string | null; subtitleObjectKey?: string | null },
-    ): Promise<void>;
-    fail(projectId: string, exportId: string, userId: string, code: string, message: string): Promise<void>;
-  };
+  exports?: Pick<ProjectExportRepository, 'get' | 'complete' | 'setLipSyncState' | 'fail'>;
   speakers?: {
     list(projectId: string, userId: string): Promise<ZeroContainerSpeaker[]>;
   };
+  providerMediaGrants?: Pick<ProviderMediaGrantRepository, 'create' | 'expire'>;
+  lipSync?: LipSyncProvider;
+  makeProviderMediaToken?: typeof createProviderMediaToken;
+  providerMediaOrigin?: string;
+  fetchImpl?: typeof fetch;
   bucket: {
-    put?(key: string, value: ArrayBuffer): Promise<unknown>;
+    put?(key: string, value: R2UploadValue, options?: R2PutOptionsLike): Promise<unknown>;
   };
   voice: {
     generate(input: VoiceGenerateInput): Promise<unknown>;
@@ -156,7 +162,8 @@ function normalizeParams(params: ZeroContainerExportParams): NormalizedZeroParam
   const modernFieldPresent = params.exportId !== undefined
     || params.targetLanguage !== undefined
     || params.output !== undefined
-    || params.audioMode !== undefined;
+    || params.audioMode !== undefined
+    || params.visualMode !== undefined;
   if (!modernFieldPresent) {
     return {
       projectId: params.projectId,
@@ -168,17 +175,20 @@ function normalizeParams(params: ZeroContainerExportParams): NormalizedZeroParam
       targetLanguage: 'vi',
       output: 'dubbed',
       audioMode: 'dubbed_only',
+      visualMode: 'standard',
     };
   }
 
   const audioMode = parseDubbedAudioMode(params.audioMode);
+  const visualMode = parseVisualMode(params.visualMode);
   if (
     typeof params.exportId !== 'string' || !params.exportId.trim()
     || !isTargetLanguage(params.targetLanguage)
     || params.output !== 'dubbed'
     || audioMode !== 'dubbed_only'
+    || !visualMode
   ) {
-    throw new Error('Zero-container export supports dubbed_only dubbed exports only.');
+    throw new Error('Zero-container export supports dubbed_only dubbed exports with a valid visual mode only.');
   }
   return {
     projectId: params.projectId,
@@ -190,6 +200,7 @@ function normalizeParams(params: ZeroContainerExportParams): NormalizedZeroParam
     targetLanguage: params.targetLanguage,
     output: 'dubbed',
     audioMode: 'dubbed_only',
+    visualMode,
   };
 }
 
@@ -286,6 +297,7 @@ export async function runZeroContainerExportPipeline(
   step: ZeroContainerExportStepLike,
 ): Promise<{ status: 'completed'; exportObjectKey: string }> {
   let params: NormalizedZeroParams | null = null;
+  let standardPublished = false;
   try {
     params = normalizeParams(inputParams);
     const ensureActive = () => assertJobActive(deps.jobs as never, params!.projectId, params!.jobId, params!.userId);
@@ -448,6 +460,10 @@ export async function runZeroContainerExportPipeline(
       durationMs,
       clips,
     }));
+    const expectedSoundtrackObjectKey = `projects/${params.projectId}/soundtracks/${params.targetLanguage}/${exportId}.wav`;
+    if (soundtrackObjectKey !== expectedSoundtrackObjectKey) {
+      throw new Error('Soundtrack service returned an invalid object key.');
+    }
 
     const renderProvider = 'cloudflare-stream';
     const renderItem = params.modern ? `${params.targetLanguage}:final` : 'final';
@@ -491,7 +507,7 @@ export async function runZeroContainerExportPipeline(
     });
 
     await step.do('check cancellation before zero-container export completion', ensureActive);
-    await step.do('complete zero-container export', async () => {
+    await step.do('publish standard zero-container export', async () => {
       if (params!.modern) {
         await deps.exports!.complete(
           params!.projectId,
@@ -499,6 +515,7 @@ export async function runZeroContainerExportPipeline(
           params!.userId,
           { exportObjectKey: rendered.exportObjectKey },
         );
+        standardPublished = true;
         if (params!.targetLanguage === 'vi') {
           await deps.projects.setExportObject(params!.projectId, params!.userId, rendered.exportObjectKey);
         }
@@ -506,8 +523,39 @@ export async function runZeroContainerExportPipeline(
         await deps.projects.setExportObject(params!.projectId, params!.userId, rendered.exportObjectKey);
         await deps.projects.setStatus(params!.projectId, params!.userId, 'completed');
       }
-      await deps.jobs.complete(params!.jobId);
     });
+
+    if (params.modern && params.visualMode === 'lip_sync') {
+      if (!params.exportId || !deps.exports || !deps.providerMediaGrants || !deps.lipSync) {
+        throw new LipSyncProviderError('LIP_SYNC_UNAVAILABLE', 'Visual lip-sync orchestration is unavailable.');
+      }
+      await step.do('mark visual lip-sync stage', () => deps.jobs.setProgress(params!.jobId, 0.82, 'processing_visual_lip_sync'));
+      await runVisualLipSync({
+        projectId: params.projectId,
+        userId: params.userId,
+        jobId: params.jobId,
+        retryCount,
+        requestId: params.requestId,
+        targetLanguage: params.targetLanguage,
+        exportId: params.exportId,
+        standardObjectKey: rendered.exportObjectKey,
+        soundtrackObjectKey,
+        durationMs,
+      }, {
+        exports: deps.exports,
+        providerMediaGrants: deps.providerMediaGrants,
+        lipSync: deps.lipSync,
+        bucket: deps.bucket,
+        usage: deps.usage,
+        telemetry: deps.telemetry,
+        makeProviderMediaToken: deps.makeProviderMediaToken,
+        providerMediaOrigin: deps.providerMediaOrigin,
+        fetchImpl: deps.fetchImpl,
+      }, step, ensureActive);
+      await step.do('mark visual lip-sync complete', () => deps.jobs.setProgress(params!.jobId, 0.98, 'publishing_visual_lip_sync'));
+    }
+
+    await step.do('complete zero-container export job', () => deps.jobs.complete(params!.jobId));
     return { status: 'completed', exportObjectKey: rendered.exportObjectKey };
   } catch (error) {
     const effective = params ?? {
@@ -520,6 +568,7 @@ export async function runZeroContainerExportPipeline(
       targetLanguage: 'vi' as const,
       output: 'dubbed' as const,
       audioMode: 'dubbed_only' as const,
+      visualMode: 'standard' as const,
     };
     if (isJobCancelledError(error)) {
       if (!effective.modern) {
@@ -533,10 +582,13 @@ export async function runZeroContainerExportPipeline(
     }
 
     const message = errorMessage(error);
+    const code = error instanceof LipSyncProviderError ? error.code : 'EXPORT_FAILED';
     try {
-      await deps.jobs.fail(effective.jobId, 'EXPORT_FAILED', message);
+      await deps.jobs.fail(effective.jobId, code, message);
       if (effective.modern && effective.exportId && deps.exports) {
-        await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, 'EXPORT_FAILED', message);
+        if (!(standardPublished && effective.visualMode === 'lip_sync')) {
+          await deps.exports.fail(effective.projectId, effective.exportId, effective.userId, code, message);
+        }
       } else {
         await deps.projects.setStatus(effective.projectId, effective.userId, 'needs_review');
       }
