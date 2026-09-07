@@ -16,6 +16,7 @@ import { createTelemetry, emitTelemetry } from '../observability/telemetry';
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
+import { syncLabsLipSyncCapability } from '../services/lipsync/qualification';
 import { UnavailableDialogueSeparationProvider } from '../services/separation/unavailable';
 import type { DialogueSeparationCapabilities, DialogueSeparationProvider } from '../services/separation/types';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
@@ -102,7 +103,7 @@ function parseVisualTreatment(output: ExportOutput, value: unknown): VisualMode 
 }
 
 function visualLipSyncAvailable(env: Env): boolean {
-  return Boolean(env.SYNC_API_KEY?.trim());
+  return syncLabsLipSyncCapability(env.SYNC_API_KEY, env.SYNC_LIPSYNC_QUALIFIED).available;
 }
 
 function streamExportAdmissionError(env: Env): ErrorBody | null {
@@ -458,14 +459,14 @@ export function createExportRoutes(deps: ExportRouteDeps = {}) {
     } catch {
       separation = await new UnavailableDialogueSeparationProvider().capabilities();
     }
-    const lipSyncAvailable = visualLipSyncAvailable(c.env);
+    const visualLipSync = syncLabsLipSyncCapability(
+      c.env.SYNC_API_KEY,
+      c.env.SYNC_LIPSYNC_QUALIFIED,
+    );
     return c.json({
       duckOriginal: true,
       separation,
-      visualLipSync: {
-        available: lipSyncAvailable,
-        provider: lipSyncAvailable ? 'sync-labs' : null,
-      },
+      visualLipSync,
     });
   });
 
