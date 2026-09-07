@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
 import {
@@ -18,11 +18,11 @@ class SqliteStatement implements D1StatementLike {
   constructor(
     private readonly db: DatabaseSync,
     readonly sql: string,
-    readonly values: unknown[] = [],
+    readonly values: SQLInputValue[] = [],
   ) {}
 
   bind(...values: unknown[]): D1StatementLike {
-    return new SqliteStatement(this.db, this.sql, values);
+    return new SqliteStatement(this.db, this.sql, values as SQLInputValue[]);
   }
 
   private prepared(): StatementSync {
