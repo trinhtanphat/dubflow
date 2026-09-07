@@ -28,9 +28,9 @@ export class GoogleCloudTranslationProvider implements TranslationProvider {
 
   constructor(
     private readonly apiKey: string,
-    private readonly paidEnabled?: string,
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 15_000,
+    private readonly paidEnabled?: string,
   ) {
     this.capabilities = {
       contextual: false,
