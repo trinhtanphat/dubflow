@@ -103,7 +103,10 @@ describe('StreamMediaService export render isolation', () => {
         return Response.json({ success: true, result: { uid: `audio-${asset}`, default: true, status: 'ready' } });
       }
       if (method === 'GET' && /^https:\/\/videodelivery\.net\/render-e[12]\.mp4$/.test(url)) {
-        return new Response(`mp4-${url.includes('e1') ? 'e1' : 'e2'}`, { status: 200 });
+        return new Response(`mp4-${url.includes('e1') ? 'e1' : 'e2'}`, {
+          status: 200,
+          headers: { 'content-type': 'video/mp4' },
+        });
       }
       throw new Error(`unexpected request ${method} ${url}`);
     };
