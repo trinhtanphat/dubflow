@@ -44,7 +44,8 @@ test('Phase 4E provider boundary and admission stay explicit and fail closed', (
   assert.match(exportRoute, /SYNC_LIPSYNC_QUALIFIED/);
   assert.match(exportRoute, /LIP_SYNC_UNAVAILABLE/);
   assert.match(exportRoute, /visualLipSync/);
-  assert.match(exportRoute, /qualification:\s*qualified\s*\?\s*['"]qualified['"]\s*:\s*['"]unqualified['"]/);
+  assert.match(exportRoute, /syncLabsLipSyncCapability/);
+  assert.doesNotMatch(exportRoute, /function\s+visualLipSyncCapability/);
   assert.match(exportRoute, /visualMode\s*===\s*['"]lip_sync['"]\s*&&\s*!visualLipSyncAvailable/);
   assert.match(exportWorkflow, /qualifiedSyncLabsApiKey/);
   assert.match(exportWorkflow, /SYNC_LIPSYNC_QUALIFIED/);
