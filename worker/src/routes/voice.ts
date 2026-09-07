@@ -4,6 +4,7 @@ import { createTelemetry, withProviderTelemetry } from '../observability/telemet
 import type { WorkerHonoEnv } from '../observability/requestTelemetry';
 import { getCurrentUserId } from '../security/current-user';
 import { enforceRateLimit } from '../security/rate-limit';
+import { paidElevenLabsEnabled } from '../services/paid-provider-policy';
 import { ElevenLabsVoiceProvider } from '../services/voice/elevenlabs';
 import { createVoiceProvider } from '../services/voice/provider';
 import { VoiceProviderError } from '../services/voice/types';
@@ -11,7 +12,11 @@ import { VoiceProviderError } from '../services/voice/types';
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 function hasElevenLabsPreview(env: Env) {
-  return Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_DEFAULT_VOICE_ID?.trim());
+  return Boolean(
+    paidElevenLabsEnabled(env)
+    && env.ELEVENLABS_API_KEY?.trim()
+    && env.ELEVENLABS_DEFAULT_VOICE_ID?.trim(),
+  );
 }
 
 export function createVoiceRoutes(fetcher: FetchLike = fetch) {
@@ -46,7 +51,7 @@ export function createVoiceRoutes(fetcher: FetchLike = fetch) {
       return c.json({ code: 'VOICE_LANGUAGE_UNVERIFIED', message: 'Vietnamese is the currently qualified preview language.' }, 400);
     }
     if (!hasElevenLabsPreview(c.env)) {
-      return c.json({ code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'ElevenLabs voice preview is not configured.' }, 503);
+      return c.json({ code: 'VOICE_PROVIDER_UNCONFIGURED', message: 'ElevenLabs voice preview is not configured.', }, 503);
     }
 
     const userId = getCurrentUserId();
