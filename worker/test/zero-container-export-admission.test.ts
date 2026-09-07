@@ -9,7 +9,7 @@ const analytics = { writeDataPoint() {} };
 const directStep = { async do<T>(_name: string, callback: () => Promise<T>) { return callback(); } };
 
 describe('zero-container export admission', () => {
-  it('rejects dubbed export before durable mutation when Stream write configuration is unavailable', async () => {
+  it('rejects dubbed export before durable mutation when MEDIA R2 configuration is unavailable', async () => {
     const calls: string[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.route('/api/projects', createExportRoutes({
@@ -42,17 +42,17 @@ describe('zero-container export admission', () => {
       RATE_LIMIT_EXPORT: allowExport,
       ELEVENLABS_API_KEY: 'voice-key',
       ELEVENLABS_DEFAULT_VOICE_ID: 'voice-id',
-      STREAM_SOURCE_SIGNING_SECRET: 'source-secret',
-      CLOUDFLARE_ACCOUNT_ID: 'account-id',
+      MEDIA_SOURCE_SIGNING_SECRET: 'source-secret',
+      PUBLIC_ORIGIN: 'https://yupvox.qs3d.site',
       EXPORT_WORKFLOW: { async create() { calls.push('workflow:create'); return { id: 'wf1' }; } },
     } as unknown as Env);
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({ error: true, code: 'STREAM_BINDING_UNAVAILABLE' });
+    expect(await response.json()).toMatchObject({ error: true, code: 'MEDIA_SOURCE_UNAVAILABLE' });
     expect(calls).toEqual([]);
   });
 
-  it('does not require Stream write configuration for subtitle-only export', async () => {
+  it('does not require R2 remux configuration for subtitle-only export', async () => {
     const calls: string[] = [];
     const app = new Hono<{ Bindings: Env }>();
     app.route('/api/projects', createExportRoutes({
