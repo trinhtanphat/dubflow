@@ -1,8 +1,12 @@
+import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import type { D1DatabaseLike, D1RunResultLike, D1StatementLike } from '../src/db/projects';
+import type { Env } from '../src/env';
+import type { D1DatabaseLike, D1RunResultLike, D1StatementLike, ProjectStore } from '../src/db/projects';
 import { ClientInferenceRepository } from '../src/db/client-inference';
+import { createProjectsRoutes } from '../src/routes/projects';
 import {
   LOCAL_INFERENCE_ASR,
+  LOCAL_INFERENCE_MAX_COMMIT_BYTES,
   LOCAL_INFERENCE_TRANSLATION,
   LocalInferenceInputError,
   normalizeClientInferenceInput,
@@ -47,6 +51,7 @@ class FakeStatement implements D1StatementLike {
 
   async first<T>(): Promise<T | null> {
     if (this.sql.includes('FROM projects')) {
+      if (this.owner.projectMissing) return null;
       return {
         id: 'p1',
         source_language: 'en',
@@ -60,10 +65,10 @@ class FakeStatement implements D1StatementLike {
       } as T;
     }
     if (this.sql.includes('FROM project_target_languages')) {
-      return { status: 'ready' } as T;
+      return { status: this.owner.targetStatus } as T;
     }
     if (this.sql.includes('COUNT(*) AS busy_count')) {
-      return { busy_count: 0 } as T;
+      return { busy_count: this.owner.busyExportCount } as T;
     }
     return null;
   }
@@ -72,6 +77,10 @@ class FakeStatement implements D1StatementLike {
 class FakeD1 implements D1DatabaseLike {
   batchCalls = 0;
   statements: FakeStatement[] = [];
+  projectMissing = false;
+  targetStatus = 'ready';
+  busyExportCount = 0;
+  failBatch = false;
 
   prepare(sql: string): D1StatementLike {
     return new FakeStatement(this, sql);
@@ -79,9 +88,19 @@ class FakeD1 implements D1DatabaseLike {
 
   async batch(statements: D1StatementLike[]): Promise<unknown[]> {
     this.batchCalls += 1;
+    if (this.failBatch) throw new Error('internal batch detail');
     this.statements = statements as FakeStatement[];
     return statements.map(() => ({ changes: 1 }));
   }
+}
+
+function routeApp(db: FakeD1) {
+  const app = new Hono<{ Bindings: Env }>();
+  app.route('/api/projects', createProjectsRoutes(() => ({} as ProjectStore)));
+  return {
+    app,
+    env: { DB: db } as unknown as Env,
+  };
 }
 
 describe('browser-local client inference request validation', () => {
@@ -181,5 +200,79 @@ describe('browser-local client inference request validation', () => {
     expect(result.durationMs).toBe(4_000);
     const projectWrite = db.statements.find((statement) => statement.sql.includes('UPDATE projects'));
     expect(projectWrite?.values[0]).toBe(4_000);
+  });
+});
+
+describe('PUT /api/projects/:id/client-inference/vi', () => {
+  it('commits a valid browser-local payload and returns canonical state', async () => {
+    const db = new FakeD1();
+    const { app, env } = routeApp(db);
+    const response = await app.request('/api/projects/p1/client-inference/vi', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validPayload()),
+    }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      projectId: 'p1',
+      sourceGeneration: 3,
+      sourceObjectKey: 'projects/p1/source/current.mp4',
+      durationMs: 4_000,
+      speaker: { id: 'browser-local:p1:speaker-1' },
+    });
+    expect(db.batchCalls).toBe(1);
+  });
+
+  it('rejects malformed input as LOCAL_INFERENCE_INVALID without mutation', async () => {
+    const db = new FakeD1();
+    const { app, env } = routeApp(db);
+    const response = await app.request('/api/projects/p1/client-inference/vi', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validPayload(), segments: [], translations: [] }),
+    }, env);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: true, code: 'LOCAL_INFERENCE_INVALID' });
+    expect(db.batchCalls).toBe(0);
+  });
+
+  it('rejects an announced body over 2 MiB before any mutation', async () => {
+    const db = new FakeD1();
+    const { app, env } = routeApp(db);
+    const response = await app.request('/api/projects/p1/client-inference/vi', {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(LOCAL_INFERENCE_MAX_COMMIT_BYTES + 1),
+      },
+      body: JSON.stringify(validPayload()),
+    }, env);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: true, code: 'LOCAL_INFERENCE_INVALID' });
+    expect(db.batchCalls).toBe(0);
+  });
+
+  it('returns safe source metadata for a stale-source conflict', async () => {
+    const db = new FakeD1();
+    const { app, env } = routeApp(db);
+    const response = await app.request('/api/projects/p1/client-inference/vi', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...validPayload(), expectedSourceGeneration: 2 }),
+    }, env);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: true,
+      code: 'LOCAL_INFERENCE_SOURCE_CONFLICT',
+      source: {
+        sourceGeneration: 3,
+        sourceObjectKey: 'projects/p1/source/current.mp4',
+      },
+    });
+    expect(db.batchCalls).toBe(0);
   });
 });
