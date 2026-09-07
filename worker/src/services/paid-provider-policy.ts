@@ -5,3 +5,7 @@ export type PaidElevenLabsEnv = {
 export function paidElevenLabsEnabled(env: PaidElevenLabsEnv): boolean {
   return env.PAID_ELEVENLABS_ENABLED === 'true';
 }
+
+export function paidWorkersAiEnabled(value?: string): boolean {
+  return value === 'true';
+}
