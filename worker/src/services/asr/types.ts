@@ -13,6 +13,10 @@ export interface AsrProvider {
   transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult>;
 }
 
+export interface RemoteAsrProvider {
+  transcribeUrl(mediaUrl: string, context: AsrContext): Promise<AsrChunkResult>;
+}
+
 export class AsrError extends Error {
   constructor(public readonly code: string, message: string) {
     super(message);
