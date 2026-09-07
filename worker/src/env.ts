@@ -2,7 +2,6 @@ import type { D1DatabaseLike } from './db/projects';
 import type { AiBinding } from './cloudflare/ai';
 import type { R2BucketLike } from './cloudflare/r2';
 import type { StreamBindingLike } from './cloudflare/stream';
-import type { ContainerNamespaceLike } from './services/media/container';
 
 export interface AssetFetcher {
   fetch(request: Request): Promise<Response>;
@@ -36,7 +35,6 @@ export interface Env {
   RATE_LIMIT_UPLOAD: RateLimitBindingLike;
   RATE_LIMIT_VOICE_CLONE: RateLimitBindingLike;
   RATE_LIMIT_BATCH_EXPORT: RateLimitBindingLike;
-  FFMPEG_CONTAINER: ContainerNamespaceLike;
   DUBBING_WORKFLOW: WorkflowBindingLike;
   EXPORT_WORKFLOW: WorkflowBindingLike;
   LANGUAGE_TRANSLATION_WORKFLOW: WorkflowBindingLike;
