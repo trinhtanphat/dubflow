@@ -21,7 +21,7 @@ The FFmpeg Container runtime has been removed from the active dubbing and `dubbe
 
 The current zero-container source path is: R2 multipart upload -> Cloudflare Stream source preparation -> remote ASR (Deepgram when configured, bounded Workers AI fallback where admitted) -> speaker reconciliation -> translation -> per-speaker ElevenLabs TTS -> Worker-native PCM/WAV soundtrack assembly -> Cloudflare Stream dubbed MP4 publishing.
 
-Migration `0012_stream_media.sql` persists Stream source and per-export render provenance. Migration `0013_visual_lipsync.sql` then adds optional visual lip-sync state and bounded provider-media grants. The combined readiness contract is schema revision **13**. The deployment verifier rejects stale HTTP-200 payloads that do not report exact revision 13.
+Migration `0012_visual_lipsync.sql` keeps its historical filename because production D1 already recorded that exact migration name before the zero-container Stream rollout. Migration `0012_stream_media.sql` is a separate forward migration that persists Stream source and per-export render provenance. Wrangler tracks the full migration filename, so both `0012_*` files remain distinct; renaming the already-applied visual migration would cause D1 to replay its schema changes. The combined readiness contract is schema revision **13**, determined by structural schema checks rather than the numeric filename prefix. The deployment verifier rejects stale HTTP-200 payloads that do not report exact revision 13.
 
 Canonical target artifacts include:
 
@@ -77,7 +77,7 @@ Migration `0011_phase4d_audio_separation.sql` introduced source generation, audi
 
 ## Phase 4E optional visual lip-sync qualification
 
-Phase 4E is **source/CI qualification only** for optional Sync Labs visual lip-sync. In the reconciled zero-container architecture, migration `0013_visual_lipsync.sql` follows Stream migration `0012_stream_media.sql`, producing readiness schema revision **13** without migration-number collision.
+Phase 4E is **source/CI qualification only** for optional Sync Labs visual lip-sync. The already-applied migration `0012_visual_lipsync.sql` deliberately retains its original filename for production D1 ledger compatibility. The new Stream migration is `0012_stream_media.sql`; together their resulting structural schema satisfies readiness revision **13** without replaying the historical visual migration.
 
 The visual provider receives a bounded HTTPS grant for the standard MP4 and a second bounded grant for `projects/{projectId}/soundtracks/{targetLanguage}/{exportId}.wav`. A successful result is stored separately as `.lipsync.mp4`. Provider failures do not destroy or relabel the already-completed standard MP4.
 
