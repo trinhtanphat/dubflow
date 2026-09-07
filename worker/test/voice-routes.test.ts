@@ -16,6 +16,7 @@ function voiceEnv(overrides: Partial<Env> = {}): Env {
     RATE_LIMIT_VOICE: { async limit() { return { success: true }; } },
     ELEVENLABS_API_KEY: 'secret-key',
     ELEVENLABS_DEFAULT_VOICE_ID: 'voice-123',
+    PAID_ELEVENLABS_ENABLED: 'true',
     ...overrides,
   } as Env;
 }
