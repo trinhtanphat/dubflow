@@ -12,6 +12,7 @@ Qualify issue #91 with one real production H.264 fixture that exercises the zero
 - No Cloudflare Stream, no Containers, no AI Gateway top-up, and no paid provider request.
 - Vietnamese voice generation must come from the production browser Piper code path merged in #122.
 - Do not add a public test-only route, debug endpoint, production test hook, or application dependency just for qualification.
+- `package.json` dependencies and devDependencies must remain unchanged; the carrier may only add the source-contract test to the existing `verify:deploy-config` script.
 - Keep #128 blocked after this fixture until canonical `MEDIA_SOURCE_SIGNING_SECRET` usage is independently verified live; an E2E media PASS alone does not prove which compatibility secret supplied signing authority.
 
 ## Selected Architecture
@@ -76,8 +77,11 @@ The workflow remains `workflow_dispatch` only. Normal PR/main CI never runs the 
 
 A real production dispatch is additionally blocked by a **zero-charge runtime gate**. Before dispatching, current account/provider state for every request the fixture will make (including production ASR/translation) must be verified to remain inside a free allocation or other hard no-charge boundary. If the account can create billable overage, remaining free allowance cannot be verified, or the cost boundary is ambiguous, do not dispatch. Keep #91 OPEN/UNQUALIFIED and record `ZERO_CHARGE_RUNTIME_UNVERIFIED` instead. Source/CI qualification may proceed without that dispatch.
 
+As defense in depth, the manual workflow exposes a required `zero_charge_verified` boolean input (default `false`) and passes it to the runner as `PRODUCTION_ZERO_CHARGE_VERIFIED`. The runner must reject anything other than the exact string `true` before `/api/ready` or any project creation request. This input is an execution guard, not a substitute for the external account/provider verification above.
+
 ## Failure Semantics
 
+- Zero-charge acknowledgement missing: fail before readiness or project creation.
 - Readiness mismatch: fail before project creation.
 - Process/ASR/translation failure: report durable job code/message and stop.
 - Missing completed Vietnamese translation: fail before opening the browser.
@@ -97,9 +101,11 @@ A real production dispatch is additionally blocked by a **zero-charge runtime ga
 Add a source contract test that initially fails until the manual workflow and browser runner prove all of the following:
 
 - the workflow stays `workflow_dispatch` only;
+- the workflow requires `zero_charge_verified` and forwards it as `PRODUCTION_ZERO_CHARGE_VERIFIED`;
 - no Playwright/Puppeteer/Selenium dependency or install command is introduced;
-- `package.json` is unchanged by this carrier;
+- `package.json` dependency sections remain unchanged and only the verification script wiring is modified;
 - the runner launches an existing Chrome/Chromium binary with CDP enabled;
+- the runner rejects missing zero-charge acknowledgement before production requests;
 - the runner uses the production project route and real export control;
 - the runner observes the exact per-language export network response;
 - the runner performs a reload durability check;
