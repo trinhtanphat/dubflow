@@ -1,0 +1,210 @@
+name: Production R2 qualification
+
+on:
+  push:
+    branches:
+      - chore/prod-r2-qualification-91
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng jq
+
+      - name: Generate authorized H.264/AAC speech fixture
+        run: |
+          set -euo pipefail
+          espeak-ng -s 135 -w qualification-voice.wav \
+            "Hello. This is an authorized production qualification test for DubFlow. The quick brown fox jumps over the lazy dog. We are testing transcription, translation, dubbing, and final media export."
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i "testsrc2=size=320x240:rate=24" \
+            -i qualification-voice.wav \
+            -c:v libx264 -pix_fmt yuv420p -profile:v high \
+            -c:a aac -b:a 96k -shortest -movflags +faststart \
+            qualification.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+            -of default=noprint_wrappers=1 qualification.mp4 | grep -Fx 'codec_name=h264'
+          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name \
+            -of default=noprint_wrappers=1 qualification.mp4 | grep -Fx 'codec_name=aac'
+          stat -c 'fixture_bytes=%s' qualification.mp4
+
+      - name: Run production upload to dubbing to R2 export qualification
+        env:
+          BASE_URL: https://yupvox.qs3d.site
+        run: |
+          set -euo pipefail
+
+          api() {
+            curl --retry 3 --retry-all-errors --connect-timeout 15 --max-time 90 \
+              --fail-with-body -sS "$@"
+          }
+
+          echo '--- readiness ---'
+          READY="$(api "$BASE_URL/api/ready")"
+          echo "$READY" | jq .
+          echo "$READY" | jq -e '
+            .ready == true and
+            .service == "dubflow" and
+            .database == "ready" and
+            .schemaRevision == 14 and
+            .media.r2 == "ready" and
+            .media.remux == "ready"
+          ' >/dev/null
+
+          echo '--- create project ---'
+          PROJECT_PAYLOAD="$(jq -nc --arg title "PROD QUALIFICATION ${GITHUB_RUN_ID}" \
+            '{title:$title,sourceLanguage:"en",targetLanguage:"vi"}')"
+          PROJECT="$(api -X POST "$BASE_URL/api/projects" \
+            -H 'content-type: application/json' --data "$PROJECT_PAYLOAD")"
+          echo "$PROJECT" | jq .
+          PROJECT_ID="$(echo "$PROJECT" | jq -er '.id')"
+
+          echo '--- multipart upload ---'
+          SIZE_BYTES="$(stat -c %s qualification.mp4)"
+          BEGIN_PAYLOAD="$(jq -nc --argjson size "$SIZE_BYTES" \
+            '{filename:"qualification.mp4",sizeBytes:$size,contentType:"video/mp4"}')"
+          BEGIN="$(api -X POST "$BASE_URL/api/projects/$PROJECT_ID/uploads" \
+            -H 'content-type: application/json' --data "$BEGIN_PAYLOAD")"
+          echo "$BEGIN" | jq .
+          UPLOAD_ID="$(echo "$BEGIN" | jq -er '.uploadId')"
+          OBJECT_KEY="$(echo "$BEGIN" | jq -er '.objectKey')"
+          export OBJECT_KEY
+          OBJECT_KEY_Q="$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["OBJECT_KEY"], safe=""))')"
+
+          PART="$(api -X PUT \
+            -H 'content-type: video/mp4' \
+            --data-binary @qualification.mp4 \
+            "$BASE_URL/api/projects/$PROJECT_ID/uploads/$UPLOAD_ID/parts/1?objectKey=$OBJECT_KEY_Q")"
+          echo "$PART" | jq .
+          PART_NUMBER="$(echo "$PART" | jq -er '.partNumber')"
+          ETAG="$(echo "$PART" | jq -er '.etag')"
+          COMPLETE_PAYLOAD="$(jq -nc --arg key "$OBJECT_KEY" --arg etag "$ETAG" --argjson part "$PART_NUMBER" \
+            '{objectKey:$key,parts:[{partNumber:$part,etag:$etag}]}')"
+          COMPLETE="$(api -X POST "$BASE_URL/api/projects/$PROJECT_ID/uploads/$UPLOAD_ID/complete" \
+            -H 'content-type: application/json' --data "$COMPLETE_PAYLOAD")"
+          echo "$COMPLETE" | jq .
+          echo "$COMPLETE" | jq -e --arg key "$OBJECT_KEY" '.objectKey == $key and .size > 0' >/dev/null
+
+          echo '--- start dubbing ---'
+          PROCESS="$(api -X POST "$BASE_URL/api/projects/$PROJECT_ID/process")"
+          echo "$PROCESS" | jq .
+          DUB_JOB_ID="$(echo "$PROCESS" | jq -er '.jobId')"
+
+          DUB_STATUS=''
+          DUB_JOB='{}'
+          for attempt in $(seq 1 90); do
+            DUB_JOB="$(api "$BASE_URL/api/projects/$PROJECT_ID/jobs/$DUB_JOB_ID")"
+            DUB_STATUS="$(echo "$DUB_JOB" | jq -r '.status')"
+            echo "dubbing attempt=$attempt status=$DUB_STATUS progress=$(echo "$DUB_JOB" | jq -r '.progress') step=$(echo "$DUB_JOB" | jq -r '.currentStep // ""')"
+            if [[ "$DUB_STATUS" == 'needs_review' || "$DUB_STATUS" == 'completed' ]]; then
+              break
+            fi
+            if [[ "$DUB_STATUS" == 'failed' || "$DUB_STATUS" == 'cancelled' ]]; then
+              echo "$DUB_JOB" | jq .
+              exit 31
+            fi
+            sleep 5
+          done
+          if [[ "$DUB_STATUS" != 'needs_review' && "$DUB_STATUS" != 'completed' ]]; then
+            echo "$DUB_JOB" | jq .
+            echo 'Dubbing did not reach a terminal success state before timeout.' >&2
+            exit 32
+          fi
+
+          echo '--- durable ASR state ---'
+          SEGMENTS="$(api "$BASE_URL/api/projects/$PROJECT_ID/segments")"
+          SPEAKERS="$(api "$BASE_URL/api/projects/$PROJECT_ID/speakers")"
+          echo "$SEGMENTS" | jq '{segmentCount:length}'
+          echo "$SPEAKERS" | jq '{speakerCount:length}'
+          echo "$SEGMENTS" | jq -e 'type == "array" and length > 0' >/dev/null
+          echo "$SPEAKERS" | jq -e 'type == "array" and length > 0' >/dev/null
+
+          echo '--- start standard dubbed-only export ---'
+          EXPORT_PAYLOAD='{"output":"dubbed","audioMode":"dubbed_only","visualMode":"standard"}'
+          EXPORT_START="$(api -X POST "$BASE_URL/api/projects/$PROJECT_ID/exports/vi" \
+            -H 'content-type: application/json' --data "$EXPORT_PAYLOAD")"
+          echo "$EXPORT_START" | jq .
+          EXPORT_JOB_ID="$(echo "$EXPORT_START" | jq -er '.jobId')"
+          EXPORT_ID="$(echo "$EXPORT_START" | jq -er '.exportId')"
+
+          EXPORT_STATUS=''
+          EXPORT_JOB='{}'
+          for attempt in $(seq 1 120); do
+            EXPORT_JOB="$(api "$BASE_URL/api/projects/$PROJECT_ID/jobs/$EXPORT_JOB_ID")"
+            EXPORT_STATUS="$(echo "$EXPORT_JOB" | jq -r '.status')"
+            echo "export attempt=$attempt status=$EXPORT_STATUS progress=$(echo "$EXPORT_JOB" | jq -r '.progress') step=$(echo "$EXPORT_JOB" | jq -r '.currentStep // ""')"
+            if [[ "$EXPORT_STATUS" == 'completed' ]]; then
+              break
+            fi
+            if [[ "$EXPORT_STATUS" == 'failed' || "$EXPORT_STATUS" == 'cancelled' ]]; then
+              echo "$EXPORT_JOB" | jq .
+              exit 41
+            fi
+            sleep 5
+          done
+          if [[ "$EXPORT_STATUS" != 'completed' ]]; then
+            echo "$EXPORT_JOB" | jq .
+            echo 'Export did not complete before timeout.' >&2
+            exit 42
+          fi
+
+          echo '--- verify durable export metadata and public media ---'
+          EXPORT_STATE="$(api "$BASE_URL/api/projects/$PROJECT_ID/exports/vi?output=dubbed")"
+          echo "$EXPORT_STATE" | jq .
+          echo "$EXPORT_STATE" | jq -e --arg id "$EXPORT_ID" '
+            .id == $id and .status == "completed" and (.exportObjectKey | type == "string" and length > 0)
+          ' >/dev/null
+
+          curl --retry 3 --retry-all-errors --connect-timeout 15 --max-time 120 \
+            --fail-with-body -sS \
+            -o qualification-output.mp4 \
+            "$BASE_URL/api/projects/$PROJECT_ID/exports/vi/media?output=dubbed"
+          test -s qualification-output.mp4
+
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+            -of default=noprint_wrappers=1 qualification-output.mp4 | grep -Fx 'codec_name=h264'
+          ffprobe -v error -select_streams a:0 -show_entries stream=codec_name \
+            -of default=noprint_wrappers=1 qualification-output.mp4 | grep -Fx 'codec_name=aac'
+
+          SOURCE_VIDEO_HASH="$(ffmpeg -hide_banner -loglevel error -i qualification.mp4 \
+            -map 0:v:0 -c copy -f hash -hash sha256 - | sed -n 's/^SHA256=//p')"
+          OUTPUT_VIDEO_HASH="$(ffmpeg -hide_banner -loglevel error -i qualification-output.mp4 \
+            -map 0:v:0 -c copy -f hash -hash sha256 - | sed -n 's/^SHA256=//p')"
+          echo "source_video_sha256=$SOURCE_VIDEO_HASH"
+          echo "output_video_sha256=$OUTPUT_VIDEO_HASH"
+          test -n "$SOURCE_VIDEO_HASH"
+          test "$SOURCE_VIDEO_HASH" = "$OUTPUT_VIDEO_HASH"
+
+          RANGE_HEADERS="$(mktemp)"
+          curl --retry 3 --retry-all-errors --connect-timeout 15 --max-time 60 \
+            --fail-with-body -sS -D "$RANGE_HEADERS" -o /tmp/range.bin \
+            -H 'Range: bytes=0-1023' \
+            "$BASE_URL/api/projects/$PROJECT_ID/exports/vi/media?output=dubbed"
+          grep -Eq '^HTTP/[^ ]+ 206' "$RANGE_HEADERS"
+          test -s /tmp/range.bin
+
+          echo '--- reload durable state ---'
+          PROJECT_RELOAD="$(api "$BASE_URL/api/projects/$PROJECT_ID")"
+          JOB_RELOAD="$(api "$BASE_URL/api/projects/$PROJECT_ID/jobs/$DUB_JOB_ID")"
+          echo "$PROJECT_RELOAD" | jq '{id,status,durationMs,sizeBytes}'
+          echo "$JOB_RELOAD" | jq '{id,status,progress,currentStep,errorCode,errorMessage,retryCount}'
+          echo "$JOB_RELOAD" | jq -e '
+            (.status == "needs_review" or .status == "completed") and
+            ((.errorMessage // "") | contains("getByName") | not)
+          ' >/dev/null
+
+          echo "QUALIFICATION_PROJECT_ID=$PROJECT_ID"
+          echo "QUALIFICATION_DUB_JOB_ID=$DUB_JOB_ID"
+          echo "QUALIFICATION_EXPORT_JOB_ID=$EXPORT_JOB_ID"
+          echo "QUALIFICATION_EXPORT_ID=$EXPORT_ID"
+          echo 'PRODUCTION_R2_QUALIFICATION=PASS'
