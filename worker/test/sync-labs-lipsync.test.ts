@@ -18,7 +18,7 @@ describe('Sync Labs visual lip-sync provider', () => {
     if (!loaded) return;
 
     const fetchImpl = vi.fn();
-    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: undefined, fetchImpl });
+    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: undefined, paidEnabled: 'true', fetchImpl });
     expect(provider.id).toBe('sync-labs');
     expect(provider.available).toBe(false);
     await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
@@ -27,7 +27,27 @@ describe('Sync Labs visual lip-sync provider', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('submits exact video/audio URL inputs with sync-3 and polls wait=true through PROCESSING to COMPLETED', async () => {
+  it('keeps a qualified API key unavailable without explicit paid opt-in and fails before network work', async () => {
+    const modulePath = '../src/services/lipsync/sync-labs';
+    const loaded = await import(/* @vite-ignore */ modulePath).catch(() => null);
+    expect(loaded).not.toBeNull();
+    if (!loaded) return;
+
+    const fetchImpl = vi.fn();
+    // Qualification may hand the key to this provider; billing consent must remain a separate gate.
+    const provider = new loaded.SyncLabsLipSyncProvider({
+      apiKey: 'secret-key',
+      fetchImpl,
+      paidEnabled: undefined,
+    });
+    expect(provider.available).toBe(false);
+    await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
+      code: 'LIP_SYNC_UNAVAILABLE',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('submits exact video/audio URL inputs with sync-3 only after explicit paid opt-in', async () => {
     const modulePath = '../src/services/lipsync/sync-labs';
     const loaded = await import(/* @vite-ignore */ modulePath).catch(() => null);
     expect(loaded).not.toBeNull();
@@ -38,7 +58,12 @@ describe('Sync Labs visual lip-sync provider', () => {
       .mockResolvedValueOnce(jsonResponse({ id: 'job-1', status: 'PROCESSING', outputUrl: '' }))
       .mockResolvedValueOnce(jsonResponse({ id: 'job-1', status: 'COMPLETED', outputUrl: 'https://cdn.sync.so/output.mp4', outputDuration: 12.5 }));
 
-    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', fetchImpl, maxPollAttempts: 4 });
+    const provider = new loaded.SyncLabsLipSyncProvider({
+      apiKey: 'secret-key',
+      paidEnabled: ' TRUE ',
+      fetchImpl,
+      maxPollAttempts: 4,
+    });
     expect(provider.available).toBe(true);
     const result = await provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL });
 
@@ -71,7 +96,7 @@ describe('Sync Labs visual lip-sync provider', () => {
     if (!loaded) return;
 
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: 'job-2', status, error: 'provider rejected media' }, 201));
-    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', fetchImpl });
+    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', paidEnabled: 'true', fetchImpl });
     await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
       code: 'LIP_SYNC_FAILED',
     });
@@ -84,7 +109,7 @@ describe('Sync Labs visual lip-sync provider', () => {
     if (!loaded) return;
 
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ status: 'PENDING' }, 201));
-    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', fetchImpl });
+    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', paidEnabled: 'true', fetchImpl });
     await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
       code: 'LIP_SYNC_RESPONSE_INVALID',
     });
@@ -99,7 +124,12 @@ describe('Sync Labs visual lip-sync provider', () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ id: 'job-3', status: 'PENDING', outputUrl: '' }, 201))
       .mockImplementation(() => Promise.resolve(jsonResponse({ id: 'job-3', status: 'PROCESSING', outputUrl: '' })));
-    const provider = new loaded.SyncLabsLipSyncProvider({ apiKey: 'secret-key', fetchImpl, maxPollAttempts: 2 });
+    const provider = new loaded.SyncLabsLipSyncProvider({
+      apiKey: 'secret-key',
+      paidEnabled: 'true',
+      fetchImpl,
+      maxPollAttempts: 2,
+    });
 
     await expect(provider.render({ videoUrl: VIDEO_URL, audioUrl: AUDIO_URL })).rejects.toMatchObject({
       code: 'LIP_SYNC_TIMEOUT',

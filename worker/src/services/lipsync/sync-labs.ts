@@ -12,6 +12,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 type SyncLabsOptions = {
   apiKey?: string;
+  paidEnabled?: string;
   fetchImpl?: typeof fetch;
   maxPollAttempts?: number;
   requestTimeoutMs?: number;
@@ -30,6 +31,10 @@ function positiveInteger(value: number | undefined, fallback: number, label: str
   if (value === undefined) return fallback;
   if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${label} must be a positive integer.`);
   return value;
+}
+
+function paidSyncLabsEnabled(value?: string): boolean {
+  return value?.trim().toLowerCase() === 'true';
 }
 
 function httpsUrl(value: string, label: string): string {
@@ -94,7 +99,7 @@ export class SyncLabsLipSyncProvider implements LipSyncProvider {
 
   constructor(options: SyncLabsOptions) {
     this.apiKey = options.apiKey?.trim() ?? '';
-    this.available = Boolean(this.apiKey);
+    this.available = Boolean(this.apiKey) && paidSyncLabsEnabled(options.paidEnabled);
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.maxPollAttempts = positiveInteger(options.maxPollAttempts, DEFAULT_MAX_POLL_ATTEMPTS, 'Sync Labs poll attempts');
     this.requestTimeoutMs = positiveInteger(options.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS, 'Sync Labs request timeout');
