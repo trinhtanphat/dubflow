@@ -11,7 +11,7 @@ import type { TelemetrySink } from '../observability/telemetry';
 import { withProviderTelemetry } from '../observability/telemetry';
 import { createProviderMediaToken } from '../security/provider-media-token';
 import { LipSyncProviderError, type LipSyncProvider } from '../services/lipsync/types';
-import type { VoiceGenerateInput } from '../services/voice/types';
+import type { VoiceCapabilities, VoiceGenerateInput } from '../services/voice/types';
 import { JobCancelledError, assertJobActive, isJobCancelledError } from './jobCancellation';
 import { runVisualLipSync } from './visualLipSync';
 
@@ -123,6 +123,7 @@ export type ZeroContainerExportDeps = {
     put?(key: string, value: R2UploadValue, options?: R2PutOptionsLike): Promise<unknown>;
   };
   voice: {
+    capabilities?(): VoiceCapabilities;
     generate(input: VoiceGenerateInput): Promise<unknown>;
   };
   soundtrack: {
@@ -275,13 +276,21 @@ function targetWorkItems(
   });
 }
 
-function speakerVoiceId(segment: ZeroContainerWorkItem, speakers: Map<string, ZeroContainerSpeaker>): string | undefined {
+function speakerVoiceId(
+  segment: ZeroContainerWorkItem,
+  speakers: Map<string, ZeroContainerSpeaker>,
+  selectedProvider: string,
+): string | undefined {
   const speakerId = segment.speakerId?.trim();
   if (!speakerId) return undefined;
   const speaker = speakers.get(speakerId);
   if (!speaker?.voiceId?.trim()) return undefined;
-  if (speaker.voiceProvider && speaker.voiceProvider !== 'elevenlabs') {
-    throw new Error(`Speaker ${speakerId} uses unsupported voice provider ${speaker.voiceProvider}.`);
+  const storedProvider = speaker.voiceProvider?.trim() || 'elevenlabs';
+  if (storedProvider !== selectedProvider) {
+    if (storedProvider === 'elevenlabs') {
+      throw new Error(`Speaker ${speakerId} has an ElevenLabs voice that cannot be used with ${selectedProvider}.`);
+    }
+    throw new Error(`Speaker ${speakerId} uses voice provider ${storedProvider}, not ${selectedProvider}.`);
   }
   return speaker.voiceId.trim();
 }
@@ -343,6 +352,7 @@ export async function runZeroContainerExportPipeline(
       ? await step.do('load zero-container export speaker voices', () => deps.speakers!.list(params!.projectId, params!.userId))
       : [];
     const speakers = new Map(speakerRows.map((speaker) => [speaker.id, speaker]));
+    const ttsProvider = deps.voice.capabilities?.().provider?.trim() || 'elevenlabs';
 
     if (!params.modern) {
       await step.do('mark zero-container export processing', async () => {
@@ -365,7 +375,6 @@ export async function runZeroContainerExportPipeline(
       let objectKey = segment.voiceStatus === 'completed' && segment.dubbedObjectKey === expectedObjectKey
         ? expectedObjectKey
         : null;
-      const ttsProvider = 'elevenlabs';
       const ttsItem = params.modern ? `${params.targetLanguage}:${segment.id}` : segment.id;
       const ttsKey = operationKey(params.jobId, retryCount, 'tts', ttsItem, ttsProvider);
       const started = await step.do(`load PCM TTS started usage ${segment.id}`, () => deps.usage.getByOperation(ttsKey, 'started'));
@@ -403,7 +412,7 @@ export async function runZeroContainerExportPipeline(
             operationKey: ttsKey,
           });
           const text = segment.translatedText.trim();
-          const voice = speakerVoiceId(segment, speakers);
+          const voice = speakerVoiceId(segment, speakers, ttsProvider);
           const voiceInput: VoiceGenerateInput = voice
             ? { text, language: params!.targetLanguage, voice, outputFormat: 'pcm_24000' }
             : { text, language: params!.targetLanguage, outputFormat: 'pcm_24000' };

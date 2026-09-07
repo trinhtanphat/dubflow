@@ -8,6 +8,10 @@ on:
     paths:
       - 'scripts/verify-production-media-fixture.mjs'
       - 'worker/src/services/asr/workers-ai.ts'
+      - 'worker/src/services/voice/**'
+      - 'worker/src/routes/export.ts'
+      - 'worker/src/workflows/ExportWorkflow.ts'
+      - 'worker/src/workflows/zeroContainerExportPipeline.ts'
       - '.github/workflows/production-media-fixture.yml'
 
 permissions:
