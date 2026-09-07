@@ -20,9 +20,7 @@ function sourceRequest(c: { req: { param(name: string): string; query(name: stri
 }
 
 function signingSecret(env: Env): string {
-  return env.MEDIA_SOURCE_SIGNING_SECRET?.trim()
-    || env.STREAM_SOURCE_SIGNING_SECRET?.trim()
-    || '';
+  return env.MEDIA_SOURCE_SIGNING_SECRET?.trim() || '';
 }
 
 function readableBucket(c: { env: Env }): R2ReadableBucketLike {
