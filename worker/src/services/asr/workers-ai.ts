@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import type { AiBinding } from '../../cloudflare/ai';
 import type { AsrChunkResult, AsrContext, AsrProvider } from './types';
 import { AsrError } from './types';
@@ -12,7 +13,7 @@ export class WorkersAIAsrProvider implements AsrProvider {
 
   async transcribe(audio: ArrayBuffer, context: AsrContext): Promise<AsrChunkResult> {
     const input: Record<string, unknown> = {
-      audio,
+      audio: Buffer.from(new Uint8Array(audio)).toString('base64'),
       task: 'transcribe',
       vad_filter: true,
     };
