@@ -8,6 +8,7 @@ import { createVoiceRoutes } from './routes/voice';
 import { createVoiceCloneRoutes } from './routes/voice-clones';
 import { createProcessRoutes } from './routes/process';
 import { createExportRoutes } from './routes/export';
+import { createVisualExportMediaRoutes } from './routes/visual-export-media';
 import { createSegmentRoutes } from './routes/segments';
 import { createSpeakerRoutes } from './routes/speakers';
 import { createTranslationRoutes } from './routes/translation';
@@ -34,6 +35,7 @@ app.get('/api/ready', async (c) => {
 app.route('/api/projects', createProjectsRoutes());
 app.route('/api/projects', createUploadRoutes());
 app.route('/api/projects', createProcessRoutes());
+app.route('/api/projects', createVisualExportMediaRoutes());
 app.route('/api/projects', exportRoutes);
 app.route('/api/projects', createProjectShareRoutes());
 app.route('/api/projects', createSegmentRoutes());
