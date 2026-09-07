@@ -21,7 +21,8 @@ export async function uploadVietnameseVoicePcm(
   if (pcm.byteLength % 2 !== 0) throw new Error('Client PCM body must have an even byte length.');
   if (pcm.byteLength > CLIENT_PCM_MAX_BYTES) throw new Error('Client PCM exceeds the 8 MiB limit.');
 
-  const body = pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength);
+  const body = new ArrayBuffer(pcm.byteLength);
+  new Uint8Array(body).set(pcm);
   const path = `/api/projects/${encodeURIComponent(projectId)}/translations/vi/${encodeURIComponent(segmentId)}/voice-pcm`;
   return apiFetch<ClientVoiceUploadDto>(path, {
     method: 'PUT',
