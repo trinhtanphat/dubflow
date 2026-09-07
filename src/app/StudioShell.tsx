@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { BatchExportPanelView } from '../features/export/BatchExportPanel';
 import {
   fetchExportCapabilities,
@@ -30,6 +30,12 @@ import {
   recoverProjectLanguagesConflict,
   type StudioLanguage,
 } from '../features/translation/TargetLanguagesPanel';
+import { createBrowserPiperRuntime, type BrowserPiperRuntime } from '../features/voice/browserPiper';
+import {
+  ensureVietnameseClientVoiceCache,
+  type ClientVoicePreloadState,
+} from '../features/voice/clientVoicePreload';
+import { decodeWavBlob } from '../features/voice/pcm';
 import { fetchVoiceCapabilities, type VoiceCapabilities } from '../features/voice/voiceApi';
 import {
   Phase4CStudioProvider,
@@ -84,6 +90,27 @@ function withRequestedTreatment(
   return output === 'dubbed' ? { ...result, audioMode, visualMode } : result;
 }
 
+export async function ensureClientVoiceForExport(input: {
+  projectId: string;
+  language: TargetLanguage;
+  output: ExportOutput;
+  runtime: BrowserPiperRuntime;
+  decodeWav: (wav: Blob) => Promise<Uint8Array>;
+  signal?: AbortSignal;
+  onState?: (state: ClientVoicePreloadState) => void;
+  ensure?: typeof ensureVietnameseClientVoiceCache;
+}) {
+  if (input.output !== 'dubbed' || input.language !== 'vi') return;
+  if (!input.runtime.isSupported()) throw new Error('Trình duyệt này chưa hỗ trợ giọng Việt cục bộ.');
+  await (input.ensure ?? ensureVietnameseClientVoiceCache)({
+    projectId: input.projectId,
+    runtime: input.runtime,
+    decodeWav: input.decodeWav,
+    signal: input.signal,
+    onState: input.onState,
+  });
+}
+
 export function acceptPolledExportAttempt(
   result: ExportLaunchDto,
   attempt: ExportAttemptDto,
@@ -101,6 +128,13 @@ export function isTerminalExportAttempt(result: ExportLaunchDto, attempt?: Expor
   const visualRequested = result.visualMode === 'lip_sync' || attempt.lipSyncRequested;
   if (visualRequested) return attempt.lipSyncStatus === 'completed' || attempt.lipSyncStatus === 'failed';
   return attempt.status === 'completed';
+}
+
+function preloadActive(state: ClientVoicePreloadState) {
+  return state.phase === 'loading_model'
+    || state.phase === 'synthesizing'
+    || state.phase === 'uploading'
+    || state.phase === 'verifying';
 }
 
 export function StudioShell(props: Props) {
@@ -125,6 +159,19 @@ export function StudioShell(props: Props) {
   const [exportResults, setExportResults] = useState<ExportLaunchDto[]>([]);
   const [exportAttempts, setExportAttempts] = useState<Partial<Record<TargetLanguage, ExportAttemptDto>>>({});
   const [exportError, setExportError] = useState('');
+  const [clientVoicePreloadState, setClientVoicePreloadState] = useState<ClientVoicePreloadState>({ phase: 'idle' });
+  const piperRuntime = useMemo(() => createBrowserPiperRuntime(), []);
+  const preloadAbortRef = useRef<AbortController | null>(null);
+  const localVietnameseSupported = piperRuntime.isSupported()
+    && typeof window !== 'undefined'
+    && typeof window.AudioContext === 'function';
+
+  useEffect(() => {
+    return () => {
+      preloadAbortRef.current?.abort();
+      preloadAbortRef.current = null;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     if (!isCloudProject) return;
@@ -372,12 +419,45 @@ export function StudioShell(props: Props) {
 
   const exportTarget = targetLanguage ?? config.languages[0]?.targetLanguage ?? 'vi';
 
+  const decodePiperWav = async (wav: Blob) => {
+    if (typeof window === 'undefined' || typeof window.AudioContext !== 'function') {
+      throw new Error('Trình duyệt này chưa hỗ trợ giải mã giọng Việt cục bộ.');
+    }
+    const context = new window.AudioContext();
+    try {
+      return await decodeWavBlob(wav, (data) => context.decodeAudioData(data.slice(0)));
+    } finally {
+      await context.close();
+    }
+  };
+
+  const preloadFor = async (language: TargetLanguage, output: ExportOutput) => {
+    preloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    preloadAbortRef.current = controller;
+    if (output === 'dubbed' && language === 'vi') setClientVoicePreloadState({ phase: 'idle' });
+    try {
+      await ensureClientVoiceForExport({
+        projectId,
+        language,
+        output,
+        runtime: piperRuntime,
+        decodeWav: decodePiperWav,
+        signal: controller.signal,
+        onState: setClientVoicePreloadState,
+      });
+    } finally {
+      if (preloadAbortRef.current === controller) preloadAbortRef.current = null;
+    }
+  };
+
   const exportCurrent = async () => {
     setExportBusy(true);
     setExportError('');
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      await preloadFor(exportTarget, exportOutput);
       const result = await startLanguageExport(projectId, exportTarget, exportOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, exportOutput, requestedMode, requestedVisualMode);
       clearAttempt(tagged.targetLanguage);
@@ -395,6 +475,7 @@ export function StudioShell(props: Props) {
     const requestedMode = exportOutput === 'dubbed' ? audioMode : 'dubbed_only';
     const requestedVisualMode = exportOutput === 'dubbed' ? visualMode : 'standard';
     try {
+      if (exportOutput === 'dubbed' && selectedLanguages.includes('vi')) await preloadFor('vi', exportOutput);
       const result = await startBatchExport(projectId, selectedLanguages, exportOutput, requestedMode, requestedVisualMode);
       const tagged = result.exports.map((item) => withRequestedTreatment(item, exportOutput, requestedMode, requestedVisualMode));
       setExportAttempts((current) => {
@@ -418,6 +499,7 @@ export function StudioShell(props: Props) {
     const requestedMode = requestedOutput === 'dubbed' ? (prior?.audioMode ?? audioMode) : 'dubbed_only';
     const requestedVisualMode = requestedOutput === 'dubbed' ? (prior?.visualMode ?? visualMode) : 'standard';
     try {
+      await preloadFor(language, requestedOutput);
       const result = await startLanguageExport(projectId, language, requestedOutput, requestedMode, requestedVisualMode);
       const tagged = withRequestedTreatment(result, requestedOutput, requestedMode, requestedVisualMode);
       clearAttempt(language);
@@ -430,6 +512,7 @@ export function StudioShell(props: Props) {
   };
 
   const displayConfig = mergeEnabledDraft(config, enabledDraft);
+  const studioExportBusy = exportBusy || preloadActive(clientVoicePreloadState);
 
   return (
     <Phase4CStudioProvider value={contextValue}>
@@ -462,7 +545,9 @@ export function StudioShell(props: Props) {
                 visualMode={visualMode}
                 exportCapabilities={exportCapabilities}
                 voiceCapabilities={voiceCapabilities}
-                busy={exportBusy}
+                clientVoicePreloadState={clientVoicePreloadState}
+                localVietnameseSupported={localVietnameseSupported}
+                busy={studioExportBusy}
                 results={exportResults}
                 attempts={exportAttempts}
                 error={exportError}
