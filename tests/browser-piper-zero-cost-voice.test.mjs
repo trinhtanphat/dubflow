@@ -66,6 +66,18 @@ test('Studio preloads exact-version Vietnamese voices before export', () => {
   assert.match(studioSource, /clientVoiceStatus/);
 });
 
+test('Studio admits an exact Vietnamese voice cache before requiring Piper primitives', () => {
+  assert.match(studioSource, /isExactVietnameseVoiceCached/);
+  assert.match(studioSource, /clientVoiceCached/);
+  const prepareStart = studioSource.indexOf('const prepareVietnameseClientVoice');
+  const prepareEnd = studioSource.indexOf('const exportCurrent', prepareStart);
+  assert.ok(prepareStart >= 0 && prepareEnd > prepareStart);
+  const prepareSource = studioSource.slice(prepareStart, prepareEnd);
+  const fetchIndex = prepareSource.indexOf("getTranslationVariants(projectId, 'vi')");
+  const piperIndex = prepareSource.indexOf('browserPiperAvailable()');
+  assert.ok(fetchIndex >= 0 && piperIndex >= 0 && fetchIndex < piperIndex);
+});
+
 test('Piper initialization failure makes the mounted Studio client lane unavailable', () => {
   assert.match(workerClientSource, /class\s+BrowserPiperError\s+extends\s+Error/);
   assert.match(studioSource, /BrowserPiperError/);
