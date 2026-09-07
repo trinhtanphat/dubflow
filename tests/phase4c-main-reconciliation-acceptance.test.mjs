@@ -8,7 +8,6 @@ const policy = read('docs/DEPLOYMENT-POLICY.md');
 const deploymentStatus = read('docs/deployment-status.md');
 const ci = read('.github/workflows/ci.yml');
 const wrangler = JSON.parse(read('wrangler.jsonc'));
-const gateway = JSON.parse(read('wrangler.gateway.jsonc'));
 const app = read('worker/src/app.ts');
 const shares = read('worker/src/db/shares.ts');
 const shareRoutes = read('worker/src/routes/shares.ts');
@@ -30,17 +29,15 @@ test('main reconciliation keeps migration history collision-free and adds a forw
   }
 });
 
-test('main reconciliation keeps Workers Builds as the backend production lane and GitHub CI-only', () => {
-  assert.match(policy, /Cloudflare Workers Builds remains the backend production deployment lane/i);
+test('main reconciliation preserves the single Workers Builds production lane', () => {
+  assert.match(policy, /Cloudflare Workers Builds is the only production deployment lane/i);
   assert.match(policy, /GitHub Actions is CI only/i);
   assert.equal(existsSync(new URL('../.github/workflows/deploy-cloudflare.yml', import.meta.url)), false);
   assert.doesNotMatch(ci, /wrangler\s+deploy(?!\s+--dry-run)/i);
 });
 
-test('main reconciliation keeps backend state on 6666 and public domain on the 2403 gateway', () => {
-  assert.equal(wrangler.account_id, '6c5207813df3d5b83b9508125e0e9e12');
-  assert.equal(gateway.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
-  assert.deepEqual(gateway.routes, [{ pattern: 'yupvox.qs3d.site', custom_domain: true }]);
+test('main reconciliation keeps the public-domain production account while retaining the language workflow', () => {
+  assert.equal(wrangler.account_id, '50afb4fd3c4c7a1f3e1bdb7f22d4af7f');
   assert.ok(wrangler.workflows?.some((entry) => entry.binding === 'LANGUAGE_TRANSLATION_WORKFLOW' && entry.class_name === 'LanguageTranslationWorkflow'));
 });
 

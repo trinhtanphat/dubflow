@@ -15,7 +15,7 @@ test('deployment verifies, provisions, migrates, deploys and checks readiness in
   ]);
 });
 
-test('Workers Builds backend deploy applies remote D1 migrations before readiness verification', async () => {
+test('Workers Builds production deploy applies remote D1 migrations before readiness verification', async () => {
   const scriptUrl = new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url);
   assert.equal(
     fs.existsSync(scriptUrl),
@@ -31,13 +31,21 @@ test('Workers Builds backend deploy applies remote D1 migrations before readines
   ]);
 });
 
-test('checked-in backend production config is Workers-only and needs no container stripping', () => {
+test('Workers Builds production config strips FFmpeg container deployment while source keeps the optional binding', () => {
   const wrangler = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(wrangler.containers, undefined);
-  assert.equal(wrangler.durable_objects, undefined);
-  assert.equal(wrangler.exports, undefined);
-  assert.ok(!wrangler.routes || wrangler.routes.length === 0);
-  assert.equal(wrangler.workers_dev, true);
+  const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
+  assert.ok(wrangler.containers?.some((entry) => entry.class_name === 'FfmpegContainer'));
+  assert.ok(wrangler.durable_objects?.bindings?.some((entry) => entry.name === 'FFMPEG_CONTAINER' && entry.class_name === 'FfmpegContainer'));
+  assert.match(deployScript, /delete\s+source\.containers\b/);
+  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
+});
+
+test('Workers Builds hard-pins account 2403 before generating its zero-container production config', () => {
+  const deployScript = fs.readFileSync(new URL('../scripts/cloudflare-workers-build-deploy.mjs', import.meta.url), 'utf8');
+  assert.match(deployScript, /PRODUCTION_ACCOUNT_ID\s*=\s*['"]50afb4fd3c4c7a1f3e1bdb7f22d4af7f['"]/);
+  assert.match(deployScript, /source\.account_id\s*=\s*PRODUCTION_ACCOUNT_ID/);
+  assert.match(deployScript, /delete\s+source\.containers\b/);
+  assert.match(deployScript, /delete\s+source\.durable_objects\b/);
 });
 
 test('Workers Builds build phase is remote-mutation free and leaves migrations to the deployment phase', () => {

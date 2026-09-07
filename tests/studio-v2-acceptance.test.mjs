@@ -18,7 +18,7 @@ const conflictNotice = read('src/features/transcript/SegmentConflictNotice.tsx')
 const history = read('src/app/editorHistory.ts');
 const appCss = read('src/app/app.css');
 const workflow = read('.github/workflows/ci.yml');
-const gatewayWrangler = read('wrangler.gateway.jsonc');
+const wrangler = read('wrangler.jsonc');
 
 test('V2 acceptance: production player uses real project media', () => {
   assert.match(player, /mediaUrlForProject\(project\)/);
@@ -101,7 +101,6 @@ test('V2 acceptance: CI qualifies verify, Wrangler and both reference viewports'
 });
 
 test('V2 acceptance: canonical production hostname remains yupvox.qs3d.site', () => {
-  assert.match(gatewayWrangler, /"pattern": "yupvox\.qs3d\.site"/);
-  assert.match(gatewayWrangler, /"custom_domain": true/);
-  assert.match(gatewayWrangler, /"account_id": "50afb4fd3c4c7a1f3e1bdb7f22d4af7f"/);
+  assert.match(wrangler, /"pattern": "yupvox\.qs3d\.site"/);
+  assert.match(wrangler, /"custom_domain": true/);
 });
