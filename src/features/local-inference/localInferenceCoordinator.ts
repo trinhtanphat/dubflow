@@ -8,7 +8,6 @@ import {
   BROWSER_LOCAL_TRANSLATION,
   commitClientInference,
   fetchProjectSourceMedia,
-  getClientInferenceState,
   getProject,
   type ClientInferenceCommitPayload,
   type ClientInferenceState,
@@ -65,7 +64,6 @@ type WorkerMessageClient = {
 export type LocalInferenceCoordinatorDependencies = {
   getProject(projectId: string): Promise<CloudProject>;
   getTranslationVariants(projectId: string, targetLanguage: 'vi'): Promise<TranslationVariantDto[]>;
-  getClientInferenceState(projectId: string): Promise<ClientInferenceState | null>;
   fetchSourceMedia(projectId: string): Promise<File>;
   decodeSourceAudio(file: File): Promise<DecodedSourceAudio>;
   createAsrClient(): BrowserAsrClient;
@@ -181,7 +179,6 @@ function defaultTranslationClient(): BrowserTranslationClient {
 const DEFAULT_DEPENDENCIES: LocalInferenceCoordinatorDependencies = {
   getProject,
   getTranslationVariants: (projectId, targetLanguage) => getTranslationVariants(projectId, targetLanguage),
-  getClientInferenceState,
   fetchSourceMedia: fetchProjectSourceMedia,
   decodeSourceAudio,
   createAsrClient: defaultAsrClient,
@@ -232,9 +229,9 @@ function admitProject(project: CloudProject): { sourceGeneration: number; source
 
 function resumeStateMatches(
   source: { sourceGeneration: number; sourceObjectKey: string },
-  state: ClientInferenceState | null,
+  state: ClientInferenceState | null | undefined,
 ): boolean {
-  return state !== null
+  return state != null
     && state.sourceGeneration === source.sourceGeneration
     && state.sourceObjectKey === source.sourceObjectKey
     && state.asr?.provider === BROWSER_LOCAL_ASR.provider
@@ -298,11 +295,8 @@ export async function runBrowserLocalInference(
   phase('preparing-source');
   const project = await dependencies.getProject(projectId);
   const source = admitProject(project);
-  const [existingVariants, inferenceState] = await Promise.all([
-    dependencies.getTranslationVariants(projectId, 'vi'),
-    dependencies.getClientInferenceState(projectId),
-  ]);
-  if (resumeStateMatches(source, inferenceState)
+  const existingVariants = await dependencies.getTranslationVariants(projectId, 'vi');
+  if (resumeStateMatches(source, project.clientInferenceState)
     && browserLocalArtifactsComplete(projectId, project, existingVariants)) {
     phase('complete');
     return { variants: existingVariants, resumed: true };
