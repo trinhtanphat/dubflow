@@ -106,4 +106,60 @@ describe('browser-local translation provenance migration', () => {
       db.close();
     }
   });
+
+  it('stores resumability provenance for one exact source generation and invalidates it when the source generation changes', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      applyMigrationsBeforeLocal(db);
+      db.exec(`
+        INSERT INTO users (id, display_name, plan, credit_balance)
+        VALUES ('u1', 'User', 'free', 0);
+        INSERT INTO projects (
+          id, user_id, title, source_language, target_language, status,
+          source_object_key, duration_ms, size_bytes
+        ) VALUES (
+          'p1', 'u1', 'Project', 'en', 'vi', 'ready',
+          'projects/p1/source/original.mp4', 10000, 1024
+        );
+      `);
+
+      db.exec(fs.readFileSync(new URL(migrationName, migrationsDir), 'utf8'));
+      db.exec(`
+        INSERT INTO browser_local_inference_state (
+          project_id, source_generation, source_object_key,
+          asr_model, asr_revision, translation_model, translation_revision
+        ) VALUES (
+          'p1', 1, 'projects/p1/source/original.mp4',
+          'onnx-community/whisper-tiny.en', '2575352d61be1bf7225cf8f8b268a4678025fc58',
+          'Xenova/opus-mt-en-vi', '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e'
+        );
+      `);
+
+      expect(db.prepare(`
+        SELECT source_generation, source_object_key
+        FROM browser_local_inference_state
+        WHERE project_id = 'p1'
+      `).get()).toEqual({
+        source_generation: 1,
+        source_object_key: 'projects/p1/source/original.mp4',
+      });
+
+      db.exec(`
+        UPDATE projects
+        SET source_generation = source_generation + 1,
+            source_object_key = 'projects/p1/source/reupload.mp4',
+            status = 'ready'
+        WHERE id = 'p1';
+      `);
+
+      expect(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM browser_local_inference_state
+        WHERE project_id = 'p1'
+      `).get()).toEqual({ count: 0 });
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
 });
