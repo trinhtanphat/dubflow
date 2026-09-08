@@ -5,8 +5,17 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const PRODUCTION_ORIGIN = 'https://yupvox.qs3d.site';
-const ZERO_COST_ASR_PROVIDER = 'workers-ai-whisper-large-v3-turbo';
-const TERMINAL_JOB_STATUSES = new Set(['needs_review', 'completed', 'failed', 'cancelled']);
+const LOCAL_ACTION_LABEL = 'Process locally (zero-cost)';
+const BROWSER_LOCAL_ASR = {
+  provider: 'browser-whisper',
+  model: 'onnx-community/whisper-tiny.en',
+  revision: '2575352d61be1bf7225cf8f8b268a4678025fc58',
+};
+const BROWSER_LOCAL_TRANSLATION = {
+  provider: 'browser-opus-mt',
+  model: 'Xenova/opus-mt-en-vi',
+  revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
+};
 const TERMINAL_EXPORT_STATUSES = new Set(['completed', 'failed', 'invalidated']);
 
 function sleep(ms) {
@@ -43,9 +52,6 @@ function assertReady(body) {
   ) {
     throw new Error(`Production readiness is not schema-14 R2/remux ready: ${JSON.stringify(body)}`);
   }
-  if (body?.asr?.provider !== ZERO_COST_ASR_PROVIDER) {
-    throw new Error(`Production ASR is not on the qualified Workers AI route: ${JSON.stringify(body?.asr ?? null)}`);
-  }
 }
 
 function assertMp4(bytes, contentType) {
@@ -55,25 +61,6 @@ function assertMp4(bytes, contentType) {
   if (bytes.byteLength < 16) throw new Error(`Final MP4 is unexpectedly small: ${bytes.byteLength} bytes`);
   const marker = Buffer.from(bytes).subarray(4, 8).toString('ascii');
   if (marker !== 'ftyp') throw new Error(`Final export does not start with an MP4 ftyp box: ${marker}`);
-}
-
-async function waitForJob(fetchImpl, origin, projectId, jobId, { attempts = 240, delayMs = 4000 } = {}) {
-  let last = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = await request(
-      fetchImpl,
-      `${origin}/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}`,
-    );
-    last = result.body;
-    if (last && TERMINAL_JOB_STATUSES.has(last.status)) {
-      if (last.status === 'failed' || last.status === 'cancelled') {
-        throw new Error(`Job ${jobId} ended ${last.status}: ${last.errorCode ?? 'UNKNOWN'} ${last.errorMessage ?? ''}`.trim());
-      }
-      return last;
-    }
-    if (attempt < attempts) await sleep(delayMs);
-  }
-  throw new Error(`Job ${jobId} did not reach a terminal state: ${JSON.stringify(last)}`);
 }
 
 async function waitForExport(fetchImpl, origin, projectId, { attempts = 360, delayMs = 3000 } = {}) {
@@ -101,7 +88,11 @@ async function uploadFixture(fetchImpl, origin, projectId, media) {
   const begun = await request(fetchImpl, `${origin}/api/projects/${encodeURIComponent(projectId)}/uploads`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ filename: 'production-browser-piper-fixture.mp4', sizeBytes: media.byteLength, contentType: 'video/mp4' }),
+    body: JSON.stringify({
+      filename: 'production-browser-local-fixture.mp4',
+      sizeBytes: media.byteLength,
+      contentType: 'video/mp4',
+    }),
   }, [201]);
   const { uploadId, objectKey, partSizeBytes } = begun.body ?? {};
   if (!uploadId || !objectKey || !Number.isInteger(partSizeBytes) || partSizeBytes <= 0) {
@@ -139,25 +130,28 @@ async function fetchVietnameseVariants(fetchImpl, origin, projectId) {
   return result.body.segments;
 }
 
-function assertTranslatedRows(rows) {
-  if (rows.length === 0) throw new Error('Production process returned no Vietnamese translation variants.');
+function assertBrowserLocalRows(projectId, rows) {
+  if (rows.length === 0) throw new Error('Browser-local production inference returned no Vietnamese variants.');
+  const speakerId = `browser-local:${projectId}:speaker-1`;
   for (const row of rows) {
     const translation = row?.translation;
     if (
       !row?.segmentId
+      || row.speakerId !== speakerId
+      || translation?.translationEngine !== BROWSER_LOCAL_TRANSLATION.provider
       || translation?.translationStatus !== 'completed'
       || !translation?.translatedText?.trim()
       || !Number.isInteger(translation?.version)
       || translation.version < 1
     ) {
-      throw new Error(`Production Vietnamese translation is not export-ready: ${JSON.stringify(row)}`);
+      throw new Error(`Browser-local Vietnamese variant is not canonical/export-ready: ${JSON.stringify(row)}`);
     }
   }
 }
 
 async function assertExactBrowserPcm(fetchImpl, origin, projectId) {
   const rows = await fetchVietnameseVariants(fetchImpl, origin, projectId);
-  assertTranslatedRows(rows);
+  assertBrowserLocalRows(projectId, rows);
   for (const row of rows) {
     const translation = row.translation;
     const expectedKey = expectedVoiceObjectKey(projectId, row.segmentId, translation.version);
@@ -172,6 +166,27 @@ async function assertExactBrowserPcm(fetchImpl, origin, projectId) {
     }
   }
   return rows;
+}
+
+function assertBrowserLocalCommit(projectId, body) {
+  if (
+    body?.projectId !== projectId
+    || body?.asr?.provider !== BROWSER_LOCAL_ASR.provider
+    || body?.asr?.model !== BROWSER_LOCAL_ASR.model
+    || body?.asr?.revision !== BROWSER_LOCAL_ASR.revision
+    || body?.translation?.provider !== BROWSER_LOCAL_TRANSLATION.provider
+    || body?.translation?.model !== BROWSER_LOCAL_TRANSLATION.model
+    || body?.translation?.revision !== BROWSER_LOCAL_TRANSLATION.revision
+  ) {
+    throw new Error(`Browser-local durable commit provenance is invalid: ${JSON.stringify(body)}`);
+  }
+  if (!Array.isArray(body.segments) || body.segments.length === 0) {
+    throw new Error(`Browser-local durable commit returned no segments: ${JSON.stringify(body)}`);
+  }
+  const speakerId = `browser-local:${projectId}:speaker-1`;
+  if (body.segments.some((segment) => segment?.speakerId !== speakerId || segment?.translationEngine !== BROWSER_LOCAL_TRANSLATION.provider)) {
+    throw new Error(`Browser-local durable commit contains non-local segment provenance: ${JSON.stringify(body.segments)}`);
+  }
 }
 
 function resolveBrowserExecutable(explicit) {
@@ -334,7 +349,7 @@ async function launchBrowser(executable) {
   const record = (kind, text) => {
     if (!text) return;
     diagnostics.push(`${kind}: ${String(text).slice(0, 800)}`);
-    if (diagnostics.length > 20) diagnostics.shift();
+    if (diagnostics.length > 30) diagnostics.shift();
   };
   cdp.on('Runtime.exceptionThrown', ({ exceptionDetails }) => record('pageerror', exceptionDetails?.text));
   cdp.on('Runtime.consoleAPICalled', ({ type, args }) => record(`console.${type}`, (args ?? []).map((arg) => arg.value ?? arg.description ?? '').join(' ')));
@@ -364,7 +379,7 @@ async function waitForBrowserValue(cdp, expression, description, { attempts = 18
   throw new Error(`Timed out waiting for production browser ${description}.`);
 }
 
-function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000) {
+function createJsonResponseObserver(cdp, method, expectedUrl, label, timeoutMs = 20 * 60_000) {
   const requests = new Map();
   let settled = false;
   let resolvePromise;
@@ -375,7 +390,7 @@ function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000)
   });
 
   const offRequest = cdp.on('Network.requestWillBeSent', ({ requestId, request }) => {
-    if (request?.method === 'POST' && request?.url === expectedUrl) requests.set(requestId, { response: null });
+    if (request?.method === method && request?.url === expectedUrl) requests.set(requestId, { response: null });
   });
   const offResponse = cdp.on('Network.responseReceived', ({ requestId, response }) => {
     const tracked = requests.get(requestId);
@@ -385,7 +400,7 @@ function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000)
     if (!requests.has(requestId) || settled) return;
     settled = true;
     cleanup();
-    rejectPromise(new Error(`Production browser export request failed: ${errorText ?? 'unknown network failure'}`));
+    rejectPromise(new Error(`${label} request failed: ${errorText ?? 'unknown network failure'}`));
   });
   const offFinished = cdp.on('Network.loadingFinished', async ({ requestId }) => {
     const tracked = requests.get(requestId);
@@ -396,7 +411,7 @@ function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000)
       const parsed = text ? JSON.parse(text) : null;
       const status = tracked.response?.status ?? 0;
       if (status < 200 || status >= 300) {
-        throw new Error(`Production browser export POST failed (${status}): ${JSON.stringify(parsed)}`);
+        throw new Error(`${label} failed (${status}): ${JSON.stringify(parsed)}`);
       }
       settled = true;
       cleanup();
@@ -412,7 +427,7 @@ function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000)
     if (settled) return;
     settled = true;
     cleanup();
-    rejectPromise(new Error(`Timed out waiting for browser POST ${expectedUrl}.`));
+    rejectPromise(new Error(`Timed out waiting for ${label} ${method} ${expectedUrl}.`));
   }, timeoutMs);
 
   function cleanup() {
@@ -426,11 +441,45 @@ function createExportResponseObserver(cdp, expectedUrl, timeoutMs = 12 * 60_000)
   return { promise, cancel: cleanup };
 }
 
-async function currentUiError(cdp) {
-  return cdp.evaluate(`(() => document.querySelector('.batch-export__error')?.textContent?.trim() || '')()`);
+function createNoMeteredInferenceGuard(cdp, origin, projectId) {
+  const violations = [];
+  const serverInferenceSegment = ['pro', 'cess'].join('');
+  const encodedProjectId = encodeURIComponent(projectId);
+  const offRequest = cdp.on('Network.requestWillBeSent', ({ request }) => {
+    if (!request?.url) return;
+    let url;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return;
+    }
+    const segments = url.pathname.split('/').filter(Boolean);
+    const isProjectServerInference = url.origin === origin
+      && segments.includes(encodedProjectId)
+      && (segments.includes(serverInferenceSegment) || segments.includes('retranslate'));
+    const host = url.hostname.toLowerCase();
+    const isDirectMeteredProvider = host.includes('deepgram')
+      || host.includes('elevenlabs')
+      || host === 'api.x.ai'
+      || (host.includes('googleapis.com') && url.pathname.toLowerCase().includes('translate'));
+    if (isProjectServerInference || isDirectMeteredProvider) {
+      violations.push(`${request.method ?? 'GET'} ${request.url}`);
+    }
+  });
+
+  return {
+    assertClean() {
+      if (violations.length) {
+        throw new Error(`Browser-local fixture observed forbidden server/metered inference traffic: ${JSON.stringify(violations)}`);
+      }
+    },
+    close() {
+      offRequest();
+    },
+  };
 }
 
-async function launchExportThroughStudio(browser, origin, projectId) {
+async function openLanguageDock(browser, origin, projectId) {
   const pageUrl = `${origin}/projects/${encodeURIComponent(projectId)}`;
   await browser.cdp.send('Page.navigate', { url: pageUrl });
   await waitForBrowserValue(browser.cdp, `document.readyState === 'complete'`, 'document readiness');
@@ -444,53 +493,53 @@ async function launchExportThroughStudio(browser, origin, projectId) {
     if (dock) dock.open = true;
     return Boolean(dock);
   })()`);
+}
 
+async function launchBrowserLocalThroughStudio(browser, origin, projectId) {
+  await openLanguageDock(browser, origin, projectId);
   const buttonState = await waitForBrowserValue(
     browser.cdp,
     `(() => {
-      const button = document.querySelector('[data-testid="export-current-language"]');
+      const button = [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === ${JSON.stringify(LOCAL_ACTION_LABEL)});
       if (!button || button.disabled) return null;
       return { text: button.textContent?.trim() ?? '', disabled: false };
     })()`,
-    'enabled Export current language control',
+    'enabled browser-local zero-cost control',
     { attempts: 180, delayMs: 1000 },
   );
-  if (!buttonState.text.includes('Export current language')) {
-    throw new Error(`Unexpected production export control: ${JSON.stringify(buttonState)}`);
+  if (buttonState.text !== LOCAL_ACTION_LABEL) {
+    throw new Error(`Unexpected production browser-local control: ${JSON.stringify(buttonState)}`);
   }
 
-  const expectedExportUrl = `${origin}/api/projects/${encodeURIComponent(projectId)}/exports/vi`;
-  const observer = createExportResponseObserver(browser.cdp, expectedExportUrl);
-  let observerSettled = false;
+  const inferenceUrl = `${origin}/api/projects/${encodeURIComponent(projectId)}/client-inference/vi`;
+  const exportUrl = `${origin}/api/projects/${encodeURIComponent(projectId)}/exports/vi`;
+  const inferenceObserver = createJsonResponseObserver(browser.cdp, 'PUT', inferenceUrl, 'browser-local durable commit');
+  const exportObserver = createJsonResponseObserver(browser.cdp, 'POST', exportUrl, 'browser-local standard export');
+  const networkGuard = createNoMeteredInferenceGuard(browser.cdp, origin, projectId);
+
   try {
     const clicked = await browser.cdp.evaluate(`(() => {
-      const button = document.querySelector('[data-testid="export-current-language"]');
+      const button = [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === ${JSON.stringify(LOCAL_ACTION_LABEL)});
       if (!button || button.disabled) return false;
       button.click();
       return true;
     })()`);
-    if (!clicked) throw new Error('Unable to trigger Export current language through deployed Studio.');
+    if (!clicked) throw new Error('Unable to trigger the deployed browser-local zero-cost action.');
 
-    const observedExport = observer.promise.finally(() => { observerSettled = true; });
-    const launchResult = await Promise.race([
-      observedExport,
-      (async () => {
-        for (let attempt = 1; attempt <= 360; attempt += 1) {
-          if (observerSettled) return null;
-          const uiError = await currentUiError(browser.cdp);
-          if (uiError) throw new Error(`Production browser Piper failed closed: ${uiError}`);
-          await sleep(2000);
-        }
-        throw new Error(`Production browser export request was not observed; diagnostics=${JSON.stringify(browser.diagnostics)}`);
-      })(),
+    const [inferenceResult, exportLaunch] = await Promise.all([
+      inferenceObserver.promise,
+      exportObserver.promise,
     ]);
-    if (!launchResult?.exportId || !launchResult?.jobId) {
-      throw new Error(`Production browser export response returned no exportId/jobId: ${JSON.stringify(launchResult)}`);
+    assertBrowserLocalCommit(projectId, inferenceResult);
+    if (!exportLaunch?.exportId || !exportLaunch?.jobId || exportLaunch?.targetLanguage !== 'vi' || exportLaunch?.output !== 'dubbed') {
+      throw new Error(`Browser-local standard export returned an invalid launch contract: ${JSON.stringify(exportLaunch)}`);
     }
-    return launchResult;
+    networkGuard.assertClean();
+    return { inferenceResult, exportLaunch };
   } finally {
-    observerSettled = true;
-    observer.cancel();
+    inferenceObserver.cancel();
+    exportObserver.cancel();
+    networkGuard.close();
   }
 }
 
@@ -498,12 +547,32 @@ async function proveReloadDurability(browser, projectId, exportId) {
   await browser.cdp.send('Page.reload', { ignoreCache: false });
   await waitForBrowserValue(browser.cdp, `document.readyState === 'complete'`, 'reload readiness');
   const durable = await browser.cdp.evaluate(`(async () => {
-    const response = await fetch('/api/projects/${encodeURIComponent(projectId)}/exports/vi?output=dubbed', { credentials: 'same-origin' });
-    const body = await response.json().catch(() => null);
-    return { status: response.status, body };
+    const [projectResponse, exportResponse] = await Promise.all([
+      fetch('/api/projects/${encodeURIComponent(projectId)}', { credentials: 'same-origin' }),
+      fetch('/api/projects/${encodeURIComponent(projectId)}/exports/vi?output=dubbed', { credentials: 'same-origin' }),
+    ]);
+    const project = await projectResponse.json().catch(() => null);
+    const exportAttempt = await exportResponse.json().catch(() => null);
+    return {
+      projectStatus: projectResponse.status,
+      exportStatus: exportResponse.status,
+      project,
+      exportAttempt,
+    };
   })()`);
-  if (durable?.status !== 200 || durable?.body?.id !== exportId) {
-    throw new Error(`Production Studio reload did not preserve export identity ${exportId}: ${JSON.stringify(durable)}`);
+  if (durable?.projectStatus !== 200 || durable?.exportStatus !== 200 || durable?.exportAttempt?.id !== exportId) {
+    throw new Error(`Production Studio reload did not preserve canonical project/export state ${exportId}: ${JSON.stringify(durable)}`);
+  }
+  const state = durable.project?.clientInferenceState;
+  if (
+    state?.asr?.provider !== BROWSER_LOCAL_ASR.provider
+    || state?.asr?.model !== BROWSER_LOCAL_ASR.model
+    || state?.asr?.revision !== BROWSER_LOCAL_ASR.revision
+    || state?.translation?.provider !== BROWSER_LOCAL_TRANSLATION.provider
+    || state?.translation?.model !== BROWSER_LOCAL_TRANSLATION.model
+    || state?.translation?.revision !== BROWSER_LOCAL_TRANSLATION.revision
+  ) {
+    throw new Error(`Reload lost browser-local source/model-bound resumability state: ${JSON.stringify(state)}`);
   }
 }
 
@@ -521,12 +590,12 @@ export async function runProductionBrowserPiperFixture({
   if (!fixturePath) throw new Error('PRODUCTION_MEDIA_FIXTURE_PATH is required.');
   if (!outputPath) throw new Error('PRODUCTION_MEDIA_OUTPUT_PATH is required.');
   const media = fs.readFileSync(fixturePath);
-  if (media.byteLength === 0) throw new Error('Production browser Piper fixture is empty.');
+  if (media.byteLength === 0) throw new Error('Production browser-local fixture is empty.');
 
   const readiness = await request(fetchImpl, `${origin}/api/ready`);
   assertReady(readiness.body);
 
-  const title = `prod-browser-piper-${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
+  const title = `prod-browser-local-${new Date().toISOString()}-${crypto.randomUUID().slice(0, 8)}`;
   const created = await request(fetchImpl, `${origin}/api/projects`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -536,24 +605,14 @@ export async function runProductionBrowserPiperFixture({
   if (!projectId) throw new Error(`Project creation returned no id: ${JSON.stringify(created.body)}`);
 
   await uploadFixture(fetchImpl, origin, projectId, media);
-  const processing = await request(fetchImpl, `${origin}/api/projects/${encodeURIComponent(projectId)}/process`, { method: 'POST' }, [202]);
-  const processJobId = processing.body?.jobId;
-  if (!processJobId) throw new Error(`Process start returned no jobId: ${JSON.stringify(processing.body)}`);
-  const processJob = await waitForJob(fetchImpl, origin, projectId, processJobId);
-  if (processJob.status !== 'needs_review' && processJob.status !== 'completed') {
-    throw new Error(`Production process did not become exportable: ${JSON.stringify(processJob)}`);
-  }
-
-  const initialVariants = await fetchVietnameseVariants(fetchImpl, origin, projectId);
-  assertTranslatedRows(initialVariants);
 
   const executable = resolveBrowserExecutable(browserExecutable);
   const browser = await launchBrowser(executable);
-  let launchResult;
+  let launch;
   try {
-    launchResult = await launchExportThroughStudio(browser, origin, projectId);
+    launch = await launchBrowserLocalThroughStudio(browser, origin, projectId);
     await assertExactBrowserPcm(fetchImpl, origin, projectId);
-    await proveReloadDurability(browser, projectId, launchResult.exportId);
+    await proveReloadDurability(browser, projectId, launch.exportLaunch.exportId);
   } catch (error) {
     const detail = browser.diagnostics.length ? `; browser diagnostics=${JSON.stringify(browser.diagnostics)}` : '';
     throw new Error(`${error instanceof Error ? error.message : String(error)}${detail}`);
@@ -562,8 +621,8 @@ export async function runProductionBrowserPiperFixture({
   }
 
   const exportAttempt = await waitForExport(fetchImpl, origin, projectId);
-  if (exportAttempt.id !== launchResult.exportId) {
-    throw new Error(`Completed export identity drifted after reload: launched=${launchResult.exportId}, completed=${exportAttempt.id ?? '<missing>'}`);
+  if (exportAttempt.id !== launch.exportLaunch.exportId) {
+    throw new Error(`Completed export identity drifted after reload: launched=${launch.exportLaunch.exportId}, completed=${exportAttempt.id ?? '<missing>'}`);
   }
 
   const mediaResponse = await fetchImpl(`${origin}/api/projects/${encodeURIComponent(projectId)}/exports/vi/media?output=dubbed`, {
@@ -571,7 +630,7 @@ export async function runProductionBrowserPiperFixture({
   });
   if (!mediaResponse.ok) {
     const body = await readJson(mediaResponse);
-    throw new Error(`Final browser Piper media download failed (${mediaResponse.status}): ${JSON.stringify(body)}`);
+    throw new Error(`Final browser-local media download failed (${mediaResponse.status}): ${JSON.stringify(body)}`);
   }
   const contentType = mediaResponse.headers.get('content-type') ?? '';
   const outputBytes = new Uint8Array(await mediaResponse.arrayBuffer());
@@ -582,20 +641,25 @@ export async function runProductionBrowserPiperFixture({
     ok: true,
     origin,
     projectId,
-    processJobId,
-    exportId: launchResult.exportId,
-    exportJobId: launchResult.jobId,
+    exportId: launch.exportLaunch.exportId,
+    exportJobId: launch.exportLaunch.jobId,
     sourceBytes: media.byteLength,
     outputBytes: outputBytes.byteLength,
     contentType,
-    asrProvider: ZERO_COST_ASR_PROVIDER,
+    asrProvider: BROWSER_LOCAL_ASR.provider,
+    asrModel: BROWSER_LOCAL_ASR.model,
+    asrRevision: BROWSER_LOCAL_ASR.revision,
+    translationProvider: BROWSER_LOCAL_TRANSLATION.provider,
+    translationModel: BROWSER_LOCAL_TRANSLATION.model,
+    translationRevision: BROWSER_LOCAL_TRANSLATION.revision,
     voiceLane: 'browser-piper-exact-version-pcm',
+    mediaLane: 'private-r2-standard-dubbed-only',
   };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   runProductionBrowserPiperFixture()
-    .then((result) => console.log(`Production browser Piper fixture PASS ${JSON.stringify(result)}`))
+    .then((result) => console.log(`Production browser-local fixture PASS ${JSON.stringify(result)}`))
     .catch((error) => {
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
