@@ -76,6 +76,19 @@ export function createProjectsRoutes(
     }
   });
 
+  routes.get('/:id/client-inference/vi', async (c) => {
+    const projectId = c.req.param('id');
+    try {
+      const state = await new ClientInferenceRepository(c.env.DB).getState(projectId, getCurrentUserId());
+      return c.json({ state });
+    } catch (error) {
+      if (error instanceof ClientInferenceCommitError && error.code === 'PROJECT_NOT_FOUND') {
+        return c.json(errorBody(error.code, 'Project not found.'), 404);
+      }
+      return c.json(errorBody('LOCAL_INFERENCE_STATE_FAILED', 'Unable to read browser-local inference state.'), 500);
+    }
+  });
+
   routes.put('/:id/client-inference/vi', async (c) => {
     const projectId = c.req.param('id');
     try {
