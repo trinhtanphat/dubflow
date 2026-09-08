@@ -223,6 +223,7 @@ describe('browser Marian EN-to-VI runtime', () => {
 type CoordinatorDependencies = {
   getProject(projectId: string): Promise<any>;
   getTranslationVariants(projectId: string, targetLanguage: 'vi'): Promise<any[]>;
+  getClientInferenceState(projectId: string): Promise<any | null>;
   fetchSourceMedia(projectId: string): Promise<File>;
   decodeSourceAudio(file: File): Promise<{ pcm: Float32Array; durationMs: number; sampleRate: 16000 }>;
   createAsrClient(): { transcribe(pcm: Float32Array, sampleRate: number): Promise<Array<{ text: string; startMs: number; endMs: number }>>; shutdown(): Promise<void> };
@@ -242,6 +243,23 @@ function coordinatorRun(): CoordinatorRun {
   return candidate as CoordinatorRun;
 }
 
+function exactResumeState() {
+  return {
+    sourceGeneration: 3,
+    sourceObjectKey: 'projects/p1/source/current.mp4',
+    asr: {
+      provider: 'browser-whisper',
+      model: 'onnx-community/whisper-tiny.en',
+      revision: '2575352d61be1bf7225cf8f8b268a4678025fc58',
+    },
+    translation: {
+      provider: 'browser-opus-mt',
+      model: 'Xenova/opus-mt-en-vi',
+      revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
+    },
+  };
+}
+
 describe('browser-local inference coordinator', () => {
   it('decodes source, disposes Whisper before Marian, commits exact provenance, and returns canonical vi variants', async () => {
     const runBrowserLocalInference = coordinatorRun();
@@ -258,6 +276,7 @@ describe('browser-local inference coordinator', () => {
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
       }),
       getTranslationVariants: async () => (++variantReads === 1 ? [] : canonical),
+      getClientInferenceState: async () => null,
       fetchSourceMedia: async () => new File([new Uint8Array([1, 2, 3])], 'source.mp4', { type: 'video/mp4' }),
       decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1, -0.1]), durationMs: 1000, sampleRate: 16000 }),
       createAsrClient: () => ({
@@ -309,6 +328,7 @@ describe('browser-local inference coordinator', () => {
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'needs_review',
       }),
       getTranslationVariants: async () => canonical,
+      getClientInferenceState: async () => exactResumeState(),
       fetchSourceMedia: forbidden,
       decodeSourceAudio: forbidden,
       createAsrClient: () => { throw new Error('should not start ASR'); },
@@ -330,6 +350,7 @@ describe('browser-local inference coordinator', () => {
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
       }),
       getTranslationVariants: async () => [],
+      getClientInferenceState: async () => null,
       fetchSourceMedia: async () => new File([new Uint8Array([1])], 'source.mp4'),
       decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1]), durationMs: 1000, sampleRate: 16000 }),
       createAsrClient: () => ({ transcribe: async () => [], shutdown: async () => undefined }),
