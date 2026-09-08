@@ -35,6 +35,38 @@ test('browser-local workers pin the approved Whisper and Marian revisions', asyn
   assert.match(translation, /dtype\s*:\s*['"]q8['"]/);
 });
 
+test('Whisper worker performs real local inference with bounded WebGPU-to-WASM init fallback', async () => {
+  const asr = await source('src/features/local-inference/browserAsr.worker.ts');
+
+  assert.match(asr, /import\s*\(\s*['"]@huggingface\/transformers['"]\s*\)/);
+  assert.match(asr, /pipeline\s*\(/);
+  assert.match(asr, /device\s*:\s*['"]webgpu['"]/);
+  assert.match(asr, /device\s*:\s*['"]wasm['"]/);
+  assert.match(asr, /return_timestamps\s*:\s*true/);
+  assert.match(asr, /Float32Array/);
+  assert.match(asr, /16_?000/);
+  assert.match(asr, /\.dispose\s*\(/);
+  assert.match(asr, /shutdown/);
+  assert.match(asr, /type\s*:\s*['"]result['"]/);
+  assert.match(asr, /startMs/);
+  assert.match(asr, /endMs/);
+  assert.doesNotMatch(asr, /\bfetch\s*\(/);
+});
+
+test('Marian worker performs sequential EN-to-VI local translation and disposes explicitly', async () => {
+  const translation = await source('src/features/local-inference/browserTranslation.worker.ts');
+
+  assert.match(translation, /import\s*\(\s*['"]@huggingface\/transformers['"]\s*\)/);
+  assert.match(translation, /pipeline\s*\(/);
+  assert.match(translation, /device\s*:\s*['"]webgpu['"]/);
+  assert.match(translation, /device\s*:\s*['"]wasm['"]/);
+  assert.match(translation, /translation_text/);
+  assert.match(translation, /\.dispose\s*\(/);
+  assert.match(translation, /shutdown/);
+  assert.match(translation, /type\s*:\s*['"]result['"]/);
+  assert.doesNotMatch(translation, /\bfetch\s*\(/);
+});
+
 test('local coordinator is browser-only and has no metered or server-inference fallback', async () => {
   const coordinator = await source('src/features/local-inference/localInferenceCoordinator.ts');
 
