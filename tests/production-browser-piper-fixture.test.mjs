@@ -60,6 +60,11 @@ test('browser fixture records runtime network evidence and fails closed on forbi
   assert.match(runner, /networkEvidence/);
 });
 
+test('browser fixture explicitly clicks Export current language after local inference completes', () => {
+  assert.match(runner, /data-testid=[\\"']export-current-language[\\"']/);
+  assert.match(runner, /Unable to trigger Export current language through deployed Studio/);
+});
+
 test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dubflow-zero-charge-test-'));
   const fixturePath = path.join(dir, 'fixture.mp4');
