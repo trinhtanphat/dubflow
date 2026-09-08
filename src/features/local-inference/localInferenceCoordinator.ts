@@ -8,8 +8,10 @@ import {
   BROWSER_LOCAL_TRANSLATION,
   commitClientInference,
   fetchProjectSourceMedia,
+  getClientInferenceState,
   getProject,
   type ClientInferenceCommitPayload,
+  type ClientInferenceState,
   type CloudProject,
 } from '../projects/projectApi';
 import {
@@ -63,6 +65,7 @@ type WorkerMessageClient = {
 export type LocalInferenceCoordinatorDependencies = {
   getProject(projectId: string): Promise<CloudProject>;
   getTranslationVariants(projectId: string, targetLanguage: 'vi'): Promise<TranslationVariantDto[]>;
+  getClientInferenceState(projectId: string): Promise<ClientInferenceState | null>;
   fetchSourceMedia(projectId: string): Promise<File>;
   decodeSourceAudio(file: File): Promise<DecodedSourceAudio>;
   createAsrClient(): BrowserAsrClient;
@@ -178,6 +181,7 @@ function defaultTranslationClient(): BrowserTranslationClient {
 const DEFAULT_DEPENDENCIES: LocalInferenceCoordinatorDependencies = {
   getProject,
   getTranslationVariants: (projectId, targetLanguage) => getTranslationVariants(projectId, targetLanguage),
+  getClientInferenceState,
   fetchSourceMedia: fetchProjectSourceMedia,
   decodeSourceAudio,
   createAsrClient: defaultAsrClient,
@@ -226,15 +230,37 @@ function admitProject(project: CloudProject): { sourceGeneration: number; source
   return { sourceGeneration, sourceObjectKey };
 }
 
+function resumeStateMatches(
+  source: { sourceGeneration: number; sourceObjectKey: string },
+  state: ClientInferenceState | null,
+): boolean {
+  return state !== null
+    && state.sourceGeneration === source.sourceGeneration
+    && state.sourceObjectKey === source.sourceObjectKey
+    && state.asr?.provider === BROWSER_LOCAL_ASR.provider
+    && state.asr.model === BROWSER_LOCAL_ASR.model
+    && state.asr.revision === BROWSER_LOCAL_ASR.revision
+    && state.translation?.provider === BROWSER_LOCAL_TRANSLATION.provider
+    && state.translation.model === BROWSER_LOCAL_TRANSLATION.model
+    && state.translation.revision === BROWSER_LOCAL_TRANSLATION.revision;
+}
+
 function normalizeAsrSegments(
   rawSegments: BrowserAsrSegment[],
   durationMs: number,
   createId: () => string,
 ): ClientInferenceCommitPayload['segments'] {
+  if (!Array.isArray(rawSegments) || rawSegments.length === 0) {
+    fail('LOCAL_ASR_EMPTY', 'Browser-local speech recognition produced no usable segments.');
+  }
+  if (rawSegments.length > LOCAL_INFERENCE_MAX_SEGMENTS) {
+    fail('LOCAL_ASR_INVALID', 'Browser-local speech recognition exceeded the 500 segment boundary.');
+  }
+
   const result: ClientInferenceCommitPayload['segments'] = [];
+  const ids = new Set<string>();
   let previousEndMs = 0;
   for (const raw of rawSegments) {
-    if (result.length >= LOCAL_INFERENCE_MAX_SEGMENTS) break;
     const sourceText = typeof raw.text === 'string' ? raw.text.trim() : '';
     const startMs = Math.round(Number(raw.startMs));
     const endMs = Math.round(Number(raw.endMs));
@@ -246,12 +272,16 @@ function normalizeAsrSegments(
       || endMs - startMs < LOCAL_INFERENCE_MIN_SEGMENT_MS
       || startMs < previousEndMs
       || endMs > durationMs) {
-      continue;
+      fail('LOCAL_ASR_INVALID', 'Browser-local speech recognition produced invalid segment timing.');
     }
-    result.push({ id: createId(), startMs, endMs, sourceText });
+    const id = createId().trim();
+    if (!id || ids.has(id)) {
+      fail('LOCAL_ASR_INVALID', 'Browser-local speech recognition produced invalid segment identity.');
+    }
+    ids.add(id);
+    result.push({ id, startMs, endMs, sourceText });
     previousEndMs = endMs;
   }
-  if (result.length === 0) fail('LOCAL_ASR_EMPTY', 'Browser-local speech recognition produced no usable segments.');
   return result;
 }
 
@@ -267,25 +297,31 @@ export async function runBrowserLocalInference(
 
   phase('preparing-source');
   const project = await dependencies.getProject(projectId);
-  const existingVariants = await dependencies.getTranslationVariants(projectId, 'vi');
-  if (browserLocalArtifactsComplete(projectId, project, existingVariants)) {
+  const source = admitProject(project);
+  const [existingVariants, inferenceState] = await Promise.all([
+    dependencies.getTranslationVariants(projectId, 'vi'),
+    dependencies.getClientInferenceState(projectId),
+  ]);
+  if (resumeStateMatches(source, inferenceState)
+    && browserLocalArtifactsComplete(projectId, project, existingVariants)) {
     phase('complete');
     return { variants: existingVariants, resumed: true };
   }
 
-  const source = admitProject(project);
   const file = await dependencies.fetchSourceMedia(projectId);
-  if (file.size > LOCAL_SOURCE_MAX_BYTES) {
+  if (file.size <= 0 || file.size > LOCAL_SOURCE_MAX_BYTES) {
     fail('LOCAL_INFERENCE_UNAVAILABLE', 'Downloaded source exceeds the browser-local size boundary.');
   }
   const decoded = await dependencies.decodeSourceAudio(file);
+  const durationMs = Math.round(Number(decoded.durationMs));
   if (decoded.sampleRate !== LOCAL_SOURCE_SAMPLE_RATE
-    || decoded.durationMs <= 0
-    || decoded.durationMs > LOCAL_SOURCE_MAX_DURATION_MS) {
+    || !Number.isInteger(durationMs)
+    || durationMs <= 0
+    || durationMs > LOCAL_SOURCE_MAX_DURATION_MS) {
     fail('LOCAL_SOURCE_DECODE_FAILED', 'Decoded source does not satisfy the local inference contract.');
   }
   if (project.durationMs !== null && project.durationMs !== undefined
-    && Math.abs(Number(project.durationMs) - decoded.durationMs) > LOCAL_INFERENCE_DURATION_TOLERANCE_MS) {
+    && Math.abs(Number(project.durationMs) - durationMs) > LOCAL_INFERENCE_DURATION_TOLERANCE_MS) {
     fail('LOCAL_INFERENCE_SOURCE_CONFLICT', 'Project source duration changed before local inference.');
   }
 
@@ -298,7 +334,7 @@ export async function runBrowserLocalInference(
   } finally {
     await asr.shutdown();
   }
-  const segments = normalizeAsrSegments(rawSegments, decoded.durationMs, dependencies.createId);
+  const segments = normalizeAsrSegments(rawSegments, durationMs, dependencies.createId);
 
   phase('downloading-translation-model');
   const translator = dependencies.createTranslationClient();
@@ -317,7 +353,7 @@ export async function runBrowserLocalInference(
   const payload: ClientInferenceCommitPayload = {
     expectedSourceGeneration: source.sourceGeneration,
     expectedSourceObjectKey: source.sourceObjectKey,
-    durationMs: decoded.durationMs,
+    durationMs,
     asr: BROWSER_LOCAL_ASR,
     translation: BROWSER_LOCAL_TRANSLATION,
     segments,
