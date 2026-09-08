@@ -94,6 +94,9 @@ export function createProjectsRoutes(
         if (error.code === 'LOCAL_INFERENCE_SOURCE_CONFLICT') {
           return c.json({ ...errorBody(error.code, error.message), source: error.source }, 409);
         }
+        if (error.code === 'LOCAL_INFERENCE_BUSY') {
+          return c.json(errorBody(error.code, error.message), 409);
+        }
         if (error.code === 'LOCAL_INFERENCE_UNAVAILABLE') {
           return c.json(errorBody(error.code, error.message), 409);
         }
