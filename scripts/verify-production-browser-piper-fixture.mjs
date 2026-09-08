@@ -442,6 +442,62 @@ function createJsonResponseObserver(cdp, { method, url, label, timeoutMs = 15 * 
   return { promise, cancel: cleanup };
 }
 
+function createZeroCostNetworkEvidence(cdp, origin, projectId) {
+  const readOnlyMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
+  const observedRequests = [];
+  const forbiddenInferenceRequests = [];
+  const projectPrefix = `/api/projects/${encodeURIComponent(projectId)}/`;
+
+  const offRequest = cdp.on('Network.requestWillBeSent', ({ request }) => {
+    if (!request?.url) return;
+    let url;
+    try {
+      url = new URL(request.url);
+    } catch {
+      return;
+    }
+    const method = String(request.method ?? 'GET').toUpperCase();
+    const entry = { method, origin: url.origin, pathname: url.pathname };
+    observedRequests.push(entry);
+    if (observedRequests.length > 500) observedRequests.shift();
+
+    const segments = url.pathname.split('/').filter(Boolean);
+    const serverInference = url.origin === origin
+      && url.pathname.startsWith(projectPrefix)
+      && (segments.includes('process') || segments.includes('retranslate'));
+    const crossOriginMutation = url.origin !== origin && !readOnlyMethods.has(method);
+    if (serverInference || crossOriginMutation) {
+      forbiddenInferenceRequests.push({
+        ...entry,
+        reason: serverInference ? 'serverInference' : 'crossOriginMutation',
+      });
+    }
+  });
+
+  return {
+    assertClean() {
+      if (forbiddenInferenceRequests.length > 0) {
+        throw new Error(`ZERO_COST_NETWORK_VIOLATION: ${JSON.stringify(forbiddenInferenceRequests)}`);
+      }
+    },
+    snapshot() {
+      const crossOriginReadOrigins = [...new Set(
+        observedRequests
+          .filter((entry) => entry.origin !== origin && readOnlyMethods.has(entry.method))
+          .map((entry) => entry.origin),
+      )].sort();
+      return {
+        observedRequestCount: observedRequests.length,
+        forbiddenInferenceRequests: [...forbiddenInferenceRequests],
+        crossOriginReadOrigins,
+      };
+    },
+    close() {
+      offRequest();
+    },
+  };
+}
+
 async function currentUiError(cdp) {
   return cdp.evaluate(`(() => {
     const node = document.querySelector('.target-languages__error, .batch-export__error, [role="alert"]');
@@ -505,6 +561,7 @@ async function runLocalFlowThroughStudio(browser, origin, projectId) {
     url: exportUrl,
     label: 'browser-local dubbed export launch',
   });
+  const networkEvidence = createZeroCostNetworkEvidence(browser.cdp, origin, projectId);
 
   try {
     const clicked = await browser.cdp.evaluate(`(() => {
@@ -524,10 +581,12 @@ async function runLocalFlowThroughStudio(browser, origin, projectId) {
     if (!launchResult?.exportId || !launchResult?.jobId) {
       throw new Error(`Production browser-local export response returned no exportId/jobId: ${JSON.stringify(launchResult)}`);
     }
-    return { commitResult, launchResult };
+    networkEvidence.assertClean();
+    return { commitResult, launchResult, networkEvidence: networkEvidence.snapshot() };
   } finally {
     commitObserver.cancel();
     exportObserver.cancel();
+    networkEvidence.close();
   }
 }
 
@@ -579,10 +638,12 @@ export async function runProductionBrowserPiperFixture({
   let launchResult;
   let commitResult;
   let inferenceState;
+  let networkEvidence;
   try {
     const flow = await runLocalFlowThroughStudio(browser, origin, projectId);
     launchResult = flow.launchResult;
     commitResult = flow.commitResult;
+    networkEvidence = flow.networkEvidence;
     inferenceState = await assertBrowserLocalState(fetchImpl, origin, projectId);
     await assertExactBrowserPcm(fetchImpl, origin, projectId);
     await proveReloadDurability(browser, projectId, launchResult.exportId);
@@ -623,6 +684,7 @@ export async function runProductionBrowserPiperFixture({
     asrProvider: BROWSER_LOCAL_ASR.provider,
     translationProvider: BROWSER_LOCAL_TRANSLATION.provider,
     voiceLane: 'browser-piper-exact-version-pcm',
+    networkEvidence,
   };
 }
 
