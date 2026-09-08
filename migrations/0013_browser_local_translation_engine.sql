@@ -161,4 +161,34 @@ FROM segment_dubs_browser_local_0013_backup;
 DROP TABLE segment_translations_browser_local_0013_backup;
 DROP TABLE segment_dubs_browser_local_0013_backup;
 
+-- A browser-local transcript is resumable only for the exact source generation
+-- and object key that produced it. This state is intentionally separate from
+-- the canonical segments so a later source replacement cannot make stale local
+-- inference artifacts appear current.
+CREATE TABLE browser_local_inference_state (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  source_generation INTEGER NOT NULL CHECK (source_generation >= 1),
+  source_object_key TEXT NOT NULL,
+  asr_model TEXT NOT NULL,
+  asr_revision TEXT NOT NULL,
+  translation_model TEXT NOT NULL,
+  translation_revision TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TRIGGER invalidate_browser_local_inference_state_on_source_change
+AFTER UPDATE OF source_generation, source_object_key ON projects
+FOR EACH ROW
+WHEN OLD.source_generation IS NOT NEW.source_generation
+  OR OLD.source_object_key IS NOT NEW.source_object_key
+BEGIN
+  DELETE FROM browser_local_inference_state
+  WHERE project_id = NEW.id
+    AND (
+      source_generation IS NOT NEW.source_generation
+      OR source_object_key IS NOT NEW.source_object_key
+    );
+END;
+
 PRAGMA defer_foreign_keys = OFF;
