@@ -35,9 +35,7 @@ export class DubbingWorkflow extends WorkflowEntrypoint<Env, DubbingWorkflowPara
     const sourceMedia = new R2SourceMediaService({
       projects,
       publicOrigin: this.env.PUBLIC_ORIGIN ?? '',
-      signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET
-        ?? this.env.STREAM_SOURCE_SIGNING_SECRET
-        ?? '',
+      signingSecret: this.env.MEDIA_SOURCE_SIGNING_SECRET ?? '',
       durationProbe: async (sourceObjectKey) => {
         if (!this.env.MEDIA.head) {
           throw new Error('R2_SOURCE_HEAD_UNAVAILABLE: R2 head is unavailable for media duration probing.');

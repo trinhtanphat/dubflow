@@ -36,7 +36,7 @@ app.get('/api/ready', async (c) => {
   const readiness = await checkReadiness(c.env.DB, c.env.DEEPGRAM_API_KEY, {
     r2: c.env.MEDIA,
     publicOrigin: c.env.PUBLIC_ORIGIN,
-    sourceSigningSecret: c.env.MEDIA_SOURCE_SIGNING_SECRET ?? c.env.STREAM_SOURCE_SIGNING_SECRET,
+    sourceSigningSecret: c.env.MEDIA_SOURCE_SIGNING_SECRET,
     remuxReady,
   }, c.env.PAID_DEEPGRAM_ASR_ENABLED, c.env.PAID_WORKERS_AI_ENABLED);
   return readiness.ready ? c.json(readiness, 200) : c.json(readiness, 503);
