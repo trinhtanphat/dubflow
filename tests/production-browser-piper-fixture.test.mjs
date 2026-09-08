@@ -60,9 +60,9 @@ test('browser fixture records runtime network evidence and fails closed on forbi
   assert.match(runner, /networkEvidence/);
 });
 
-test('browser fixture explicitly clicks Export current language after local inference completes', () => {
-  assert.match(runner, /data-testid=[\\"']export-current-language[\\"']/);
-  assert.match(runner, /Unable to trigger Export current language through deployed Studio/);
+test('browser fixture observes the automatic standard export started by the local action', () => {
+  assert.match(runner, /browser-local dubbed export launch/);
+  assert.doesNotMatch(runner, /Unable to trigger Export current language through deployed Studio/);
 });
 
 test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
