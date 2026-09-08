@@ -42,6 +42,11 @@ test('browser fixture uses native CDP on the real production Studio path and dri
   assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|workers-ai-whisper-large-v3-turbo|\/process(?:['"`?\/]|\b)|PAID_/i);
 });
 
+test('browser fixture explicitly launches export after local inference instead of waiting for an automatic export', () => {
+  assert.match(runner, /data-testid=[\\"']export-current-language[\\"']/);
+  assert.match(runner, /Unable to trigger Export current language through deployed Studio/);
+});
+
 test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dubflow-zero-charge-test-'));
   const fixturePath = path.join(dir, 'fixture.mp4');
