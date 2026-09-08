@@ -223,7 +223,6 @@ describe('browser Marian EN-to-VI runtime', () => {
 type CoordinatorDependencies = {
   getProject(projectId: string): Promise<any>;
   getTranslationVariants(projectId: string, targetLanguage: 'vi'): Promise<any[]>;
-  getClientInferenceState(projectId: string): Promise<any | null>;
   fetchSourceMedia(projectId: string): Promise<File>;
   decodeSourceAudio(file: File): Promise<{ pcm: Float32Array; durationMs: number; sampleRate: 16000 }>;
   createAsrClient(): { transcribe(pcm: Float32Array, sampleRate: number): Promise<Array<{ text: string; startMs: number; endMs: number }>>; shutdown(): Promise<void> };
@@ -274,9 +273,9 @@ describe('browser-local inference coordinator', () => {
       getProject: async () => ({
         id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
+        clientInferenceState: null,
       }),
       getTranslationVariants: async () => (++variantReads === 1 ? [] : canonical),
-      getClientInferenceState: async () => null,
       fetchSourceMedia: async () => new File([new Uint8Array([1, 2, 3])], 'source.mp4', { type: 'video/mp4' }),
       decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1, -0.1]), durationMs: 1000, sampleRate: 16000 }),
       createAsrClient: () => ({
@@ -326,9 +325,9 @@ describe('browser-local inference coordinator', () => {
       getProject: async () => ({
         id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'needs_review',
+        clientInferenceState: exactResumeState(),
       }),
       getTranslationVariants: async () => canonical,
-      getClientInferenceState: async () => exactResumeState(),
       fetchSourceMedia: forbidden,
       decodeSourceAudio: forbidden,
       createAsrClient: () => { throw new Error('should not start ASR'); },
@@ -348,9 +347,9 @@ describe('browser-local inference coordinator', () => {
       getProject: async () => ({
         id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
         sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
+        clientInferenceState: null,
       }),
       getTranslationVariants: async () => [],
-      getClientInferenceState: async () => null,
       fetchSourceMedia: async () => new File([new Uint8Array([1])], 'source.mp4'),
       decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1]), durationMs: 1000, sampleRate: 16000 }),
       createAsrClient: () => ({ transcribe: async () => [], shutdown: async () => undefined }),
