@@ -179,6 +179,12 @@ export class ClientInferenceRepository {
       ),
       statement(
         this.db,
+        `DELETE FROM browser_local_inference_state WHERE project_id = ? AND ${guard}`,
+        projectId,
+        ...guardValues,
+      ),
+      statement(
+        this.db,
         `INSERT INTO speakers (id, project_id, label, display_name)
          SELECT ?, ?, 'Browser local', 'Speaker 1'
          WHERE ${guard}`,
@@ -231,6 +237,23 @@ export class ClientInferenceRepository {
     }
 
     writes.push(
+      statement(
+        this.db,
+        `INSERT INTO browser_local_inference_state (
+           project_id, source_generation, source_object_key,
+           asr_model, asr_revision, translation_model, translation_revision
+         )
+         SELECT ?, ?, ?, ?, ?, ?, ?
+         WHERE ${guard}`,
+        projectId,
+        input.expectedSourceGeneration,
+        input.expectedSourceObjectKey,
+        LOCAL_INFERENCE_ASR.model,
+        LOCAL_INFERENCE_ASR.revision,
+        LOCAL_INFERENCE_TRANSLATION.model,
+        LOCAL_INFERENCE_TRANSLATION.revision,
+        ...guardValues,
+      ),
       statement(
         this.db,
         `UPDATE project_target_languages
