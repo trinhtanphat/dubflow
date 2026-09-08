@@ -79,6 +79,16 @@ test('local coordinator is browser-only and has no metered or server-inference f
   );
 });
 
+test('Studio exposes an explicit zero-cost local action and hands canonical variants to existing Piper flow', async () => {
+  const studio = await source('src/app/StudioShell.tsx');
+  assert.match(studio, /runBrowserLocalInference/);
+  assert.match(studio, /Process locally \(zero-cost\)/);
+  assert.match(studio, /prepareVietnameseClientVoice/);
+  assert.match(studio, /Preparing source|Preparing source/i);
+  assert.match(studio, /Transcribing locally|Transcribing locally/i);
+  assert.match(studio, /Translating locally|Translating locally/i);
+});
+
 test('server local-inference contract locks exact route, limits, provenance and project-unique speaker', async () => {
   const domain = await source('worker/src/domain/client-inference.ts');
   const routes = await source('worker/src/routes/projects.ts');
