@@ -14,18 +14,19 @@ const exportRouteUrl = new URL('../worker/src/routes/export.ts', import.meta.url
 
 test('production media fixture runner is checked in and remains verification-only', () => {
   assert.equal(fs.existsSync(scriptUrl), true, 'missing legacy production media fixture runner');
-  assert.equal(fs.existsSync(browserScriptUrl), true, 'missing browser Piper production fixture runner');
+  assert.equal(fs.existsSync(browserScriptUrl), true, 'missing browser-local production fixture runner');
   assert.equal(fs.existsSync(workflowUrl), true, 'missing production media fixture workflow');
 
   const browserScript = fs.readFileSync(browserScriptUrl, 'utf8');
   const workflow = fs.readFileSync(workflowUrl, 'utf8');
   assert.match(browserScript, /yupvox\.qs3d\.site/);
   assert.match(browserScript, /\/api\/projects/);
-  assert.match(browserScript, /\/process/);
+  assert.match(browserScript, /Process locally \(zero-cost\)/);
+  assert.match(browserScript, /client-inference\/vi/);
   assert.match(browserScript, /exports\/vi/);
   assert.match(browserScript, /video\/mp4/);
-  assert.match(workflow, /verify-production-browser-piper-fixture\.mjs/);
-  assert.doesNotMatch(`${browserScript}\n${workflow}`, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
+  assert.doesNotMatch(browserScript, /\/api\/projects\/\$\{encodeURIComponent\(projectId\)\}\/process/);
+  assert.doesNotMatch(workflow, /wrangler\s+deploy|cloudflare-workers-build-deploy|cloudflare-gateway-workers-build-deploy/);
 });
 
 test('legacy production media fixture reports sanitized voice capability diagnostics', () => {
