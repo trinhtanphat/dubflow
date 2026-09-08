@@ -47,6 +47,13 @@ export type ClientInferenceCommitResult = {
   durationMs: number;
 };
 
+export type ClientInferenceState = {
+  sourceGeneration: number;
+  sourceObjectKey: string;
+  asr: typeof BROWSER_LOCAL_ASR;
+  translation: typeof BROWSER_LOCAL_TRANSLATION;
+};
+
 function projectPath(projectId: string) {
   return `/api/projects/${encodeURIComponent(projectId)}`;
 }
@@ -62,6 +69,13 @@ export function listProjects() { return apiFetch<CloudProject[]>('/api/projects'
 
 export function getProject(projectId: string) {
   return apiFetch<CloudProject>(projectPath(projectId));
+}
+
+export async function getClientInferenceState(projectId: string) {
+  const result = await apiFetch<{ state: ClientInferenceState | null }>(
+    `${projectPath(projectId)}/client-inference/vi`,
+  );
+  return result.state;
 }
 
 export function commitClientInference(projectId: string, payload: ClientInferenceCommitPayload) {
