@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as browserAsr from './browserAsr.worker';
+import * as browserTranslation from './browserTranslation.worker';
 
 type PipelineOptions = {
   revision: string;
@@ -126,5 +127,94 @@ describe('browser Whisper ASR runtime', () => {
     await runtime.transcribe(new Float32Array([0.1]), 16_000);
     await runtime.shutdown();
     expect(pipe.dispose).toHaveBeenCalledTimes(1);
+  });
+});
+
+type TranslationOutput = { translation_text?: string };
+type TranslationPipelineLike = ((text: string) => Promise<TranslationOutput | TranslationOutput[]>) & {
+  dispose?: () => Promise<void> | void;
+};
+type TranslationPipelineFactory = (
+  task: string,
+  model: string,
+  options: PipelineOptions,
+) => Promise<TranslationPipelineLike>;
+type BrowserTranslationRuntime = {
+  translate(text: string): Promise<string>;
+  shutdown(): Promise<void>;
+};
+type TranslationRuntimeFactory = (options: {
+  pipelineFactory: TranslationPipelineFactory;
+  onProgress?: (event: { status: string; progress?: number }) => void;
+}) => BrowserTranslationRuntime;
+
+function translationRuntimeFactory(): TranslationRuntimeFactory {
+  const candidate = (browserTranslation as Record<string, unknown>).createBrowserTranslationRuntime;
+  expect(typeof candidate).toBe('function');
+  return candidate as TranslationRuntimeFactory;
+}
+
+function translationPipelineReturning(output: TranslationOutput | TranslationOutput[]): TranslationPipelineLike {
+  return Object.assign(
+    vi.fn(async () => output),
+    { dispose: vi.fn(async () => undefined) },
+  ) as unknown as TranslationPipelineLike;
+}
+
+describe('browser Marian EN-to-VI runtime', () => {
+  it('initializes the exact pinned q8 Marian model on WebGPU and returns trimmed translation text', async () => {
+    const createBrowserTranslationRuntime = translationRuntimeFactory();
+    const pipe = translationPipelineReturning([{ translation_text: ' Xin chào ' }]);
+    const pipelineFactory = vi.fn(async () => pipe) as unknown as TranslationPipelineFactory;
+    const runtime = createBrowserTranslationRuntime({ pipelineFactory });
+
+    await expect(runtime.translate('Hello')).resolves.toBe('Xin chào');
+    expect(pipelineFactory).toHaveBeenCalledTimes(1);
+    expect(pipelineFactory).toHaveBeenCalledWith(
+      'translation',
+      'Xenova/opus-mt-en-vi',
+      expect.objectContaining({
+        revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
+        dtype: 'q8',
+        device: 'webgpu',
+      }),
+    );
+    expect(pipe).toHaveBeenCalledWith('Hello');
+  });
+
+  it('retries initialization exactly once on WASM before translation begins', async () => {
+    const createBrowserTranslationRuntime = translationRuntimeFactory();
+    const pipe = translationPipelineReturning({ translation_text: 'Được' });
+    const devices: string[] = [];
+    const pipelineFactory: TranslationPipelineFactory = async (_task, _model, options) => {
+      devices.push(options.device);
+      if (options.device === 'webgpu') throw new Error('webgpu unavailable');
+      return pipe;
+    };
+    const runtime = createBrowserTranslationRuntime({ pipelineFactory });
+
+    await expect(runtime.translate('Okay')).resolves.toBe('Được');
+    expect(devices).toEqual(['webgpu', 'wasm']);
+  });
+
+  it('rejects empty input/output, never switches device after inference failure, and disposes on shutdown', async () => {
+    const createBrowserTranslationRuntime = translationRuntimeFactory();
+    const failingPipe = Object.assign(
+      vi.fn(async () => { throw new Error('translation failed'); }),
+      { dispose: vi.fn(async () => undefined) },
+    ) as unknown as TranslationPipelineLike;
+    const pipelineFactory = vi.fn(async () => failingPipe) as unknown as TranslationPipelineFactory;
+    const runtime = createBrowserTranslationRuntime({ pipelineFactory });
+
+    await expect(runtime.translate('   ')).rejects.toThrow();
+    expect(pipelineFactory).not.toHaveBeenCalled();
+    await expect(runtime.translate('Hello')).rejects.toThrow();
+    expect(pipelineFactory).toHaveBeenCalledTimes(1);
+    await runtime.shutdown();
+    expect(failingPipe.dispose).toHaveBeenCalledTimes(1);
+
+    const emptyPipe = translationPipelineReturning([{ translation_text: '   ' }]);
+    const emptyRuntime = createBrowserTranslationRuntime({ pipelineFactory: async () => emptyPipe });
+    await expect(emptyRuntime.translate('Hello')).rejects.toThrow();
   });
 });
