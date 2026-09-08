@@ -111,6 +111,17 @@ test('server local-inference contract locks exact route, limits, provenance and 
   assert.doesNotMatch(domain, /browser-local-speaker-1/);
 });
 
+test('atomic durable commit records exact source-bound resumability provenance', async () => {
+  const persistence = await source('worker/src/db/client-inference.ts');
+  assert.match(persistence, /(?:INSERT|REPLACE).*browser_local_inference_state/is);
+  assert.match(persistence, /expectedSourceGeneration/);
+  assert.match(persistence, /expectedSourceObjectKey/);
+  assert.match(persistence, /LOCAL_INFERENCE_ASR\.model/);
+  assert.match(persistence, /LOCAL_INFERENCE_ASR\.revision/);
+  assert.match(persistence, /LOCAL_INFERENCE_TRANSLATION\.model/);
+  assert.match(persistence, /LOCAL_INFERENCE_TRANSLATION\.revision/);
+});
+
 test('browser-local translation provenance is admitted only by a new append-only migration', async () => {
   const migration = await source('migrations/0013_browser_local_translation_engine.sql');
 
@@ -119,6 +130,8 @@ test('browser-local translation provenance is admitted only by a new append-only
   assert.match(migration, /CREATE TABLE\s+segments/i);
   assert.match(migration, /idx_segments_project_start/);
   assert.match(migration, /idx_segments_project_split_parent/);
+  assert.match(migration, /CREATE TABLE\s+browser_local_inference_state/i);
+  assert.match(migration, /invalidate_browser_local_inference_state_on_source_change/);
   assert.doesNotMatch(migration, /ALTER\s+TABLE\s+.*0012|UPDATE\s+.*0012/i);
 });
 
