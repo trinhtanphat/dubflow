@@ -89,11 +89,16 @@ test('Studio exposes an explicit zero-cost local action and hands canonical vari
   assert.match(studio, /Translating locally|Translating locally/i);
 });
 
-test('server local-inference contract locks exact route, limits, provenance and project-unique speaker', async () => {
+test('server local-inference contract locks the single new PUT route, limits, provenance and project-unique speaker', async () => {
   const domain = await source('worker/src/domain/client-inference.ts');
   const routes = await source('worker/src/routes/projects.ts');
 
   assert.match(routes, /put\s*\(\s*['"]\/:id\/client-inference\/vi['"]/i);
+  assert.doesNotMatch(
+    routes,
+    /get\s*\(\s*['"]\/:id\/client-inference\/vi['"]/i,
+    'approved design adds exactly one client-inference route: PUT; resumability must reuse an existing authenticated read surface',
+  );
   assert.match(domain, /browser-whisper/);
   assert.match(domain, /onnx-community\/whisper-tiny\.en/);
   assert.match(domain, /2575352d61be1bf7225cf8f8b268a4678025fc58/);
