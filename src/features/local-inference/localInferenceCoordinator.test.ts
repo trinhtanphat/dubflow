@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as browserAsr from './browserAsr.worker';
 import * as browserTranslation from './browserTranslation.worker';
+import * as localCoordinator from './localInferenceCoordinator';
 
 type PipelineOptions = {
   revision: string;
@@ -216,5 +217,128 @@ describe('browser Marian EN-to-VI runtime', () => {
     const emptyPipe = translationPipelineReturning([{ translation_text: '   ' }]);
     const emptyRuntime = createBrowserTranslationRuntime({ pipelineFactory: async () => emptyPipe });
     await expect(emptyRuntime.translate('Hello')).rejects.toThrow();
+  });
+});
+
+type CoordinatorDependencies = {
+  getProject(projectId: string): Promise<any>;
+  getTranslationVariants(projectId: string, targetLanguage: 'vi'): Promise<any[]>;
+  fetchSourceMedia(projectId: string): Promise<File>;
+  decodeSourceAudio(file: File): Promise<{ pcm: Float32Array; durationMs: number; sampleRate: 16000 }>;
+  createAsrClient(): { transcribe(pcm: Float32Array, sampleRate: number): Promise<Array<{ text: string; startMs: number; endMs: number }>>; shutdown(): Promise<void> };
+  createTranslationClient(): { translate(text: string): Promise<string>; shutdown(): Promise<void> };
+  commitClientInference(projectId: string, payload: any): Promise<any>;
+  createId(): string;
+};
+
+type CoordinatorRun = (
+  projectId: string,
+  options: { dependencies: CoordinatorDependencies; onPhase?: (phase: string) => void },
+) => Promise<{ variants: any[]; resumed: boolean }>;
+
+function coordinatorRun(): CoordinatorRun {
+  const candidate = (localCoordinator as Record<string, unknown>).runBrowserLocalInference;
+  expect(typeof candidate).toBe('function');
+  return candidate as CoordinatorRun;
+}
+
+describe('browser-local inference coordinator', () => {
+  it('decodes source, disposes Whisper before Marian, commits exact provenance, and returns canonical vi variants', async () => {
+    const runBrowserLocalInference = coordinatorRun();
+    const events: string[] = [];
+    const canonical = [{
+      segmentId: 'seg-1', speakerId: 'browser-local:p1:speaker-1', startMs: 0, endMs: 1000, sourceText: 'Hello', sourceVersion: 1,
+      translation: { translationEngine: 'browser-opus-mt', translationStatus: 'completed', translatedText: 'Xin chào' },
+    }];
+    let variantReads = 0;
+    let committedPayload: any = null;
+    const deps: CoordinatorDependencies = {
+      getProject: async () => ({
+        id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
+        sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
+      }),
+      getTranslationVariants: async () => (++variantReads === 1 ? [] : canonical),
+      fetchSourceMedia: async () => new File([new Uint8Array([1, 2, 3])], 'source.mp4', { type: 'video/mp4' }),
+      decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1, -0.1]), durationMs: 1000, sampleRate: 16000 }),
+      createAsrClient: () => ({
+        transcribe: async () => { events.push('asr'); return [{ text: 'Hello', startMs: 0, endMs: 1000 }]; },
+        shutdown: async () => { events.push('asr-shutdown'); },
+      }),
+      createTranslationClient: () => ({
+        translate: async () => { events.push('translation'); return 'Xin chào'; },
+        shutdown: async () => { events.push('translation-shutdown'); },
+      }),
+      commitClientInference: async (_projectId, payload) => { events.push('commit'); committedPayload = payload; return { projectId: 'p1' }; },
+      createId: () => 'seg-1',
+    };
+
+    const result = await runBrowserLocalInference('p1', { dependencies: deps, onPhase: (phase) => events.push(`phase:${phase}`) });
+
+    expect(result).toEqual({ variants: canonical, resumed: false });
+    expect(events.indexOf('asr-shutdown')).toBeLessThan(events.indexOf('translation'));
+    expect(events.indexOf('translation-shutdown')).toBeLessThan(events.indexOf('commit'));
+    expect(committedPayload).toMatchObject({
+      expectedSourceGeneration: 3,
+      expectedSourceObjectKey: 'projects/p1/source/current.mp4',
+      durationMs: 1000,
+      asr: {
+        provider: 'browser-whisper',
+        model: 'onnx-community/whisper-tiny.en',
+        revision: '2575352d61be1bf7225cf8f8b268a4678025fc58',
+      },
+      translation: {
+        provider: 'browser-opus-mt',
+        model: 'Xenova/opus-mt-en-vi',
+        revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
+      },
+      segments: [{ id: 'seg-1', startMs: 0, endMs: 1000, sourceText: 'Hello' }],
+      translations: [{ segmentId: 'seg-1', translatedText: 'Xin chào' }],
+    });
+  });
+
+  it('resumes complete current browser-local artifacts without downloading media or starting model workers', async () => {
+    const runBrowserLocalInference = coordinatorRun();
+    const canonical = [{
+      segmentId: 'seg-1', speakerId: 'browser-local:p1:speaker-1', startMs: 0, endMs: 1000, sourceText: 'Hello', sourceVersion: 1,
+      translation: { translationEngine: 'browser-opus-mt', translationStatus: 'completed', translatedText: 'Xin chào' },
+    }];
+    const forbidden = vi.fn(async () => { throw new Error('should not run'); });
+    const deps: CoordinatorDependencies = {
+      getProject: async () => ({
+        id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
+        sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'needs_review',
+      }),
+      getTranslationVariants: async () => canonical,
+      fetchSourceMedia: forbidden,
+      decodeSourceAudio: forbidden,
+      createAsrClient: () => { throw new Error('should not start ASR'); },
+      createTranslationClient: () => { throw new Error('should not start translation'); },
+      commitClientInference: forbidden,
+      createId: () => 'unused',
+    };
+
+    await expect(runBrowserLocalInference('p1', { dependencies: deps })).resolves.toEqual({ variants: canonical, resumed: true });
+    expect(forbidden).not.toHaveBeenCalled();
+  });
+
+  it('fails LOCAL_ASR_EMPTY before translation or commit', async () => {
+    const runBrowserLocalInference = coordinatorRun();
+    const commit = vi.fn(async () => ({}));
+    const deps: CoordinatorDependencies = {
+      getProject: async () => ({
+        id: 'p1', sourceLanguage: 'en', targetLanguage: 'vi', sourceGeneration: 3,
+        sourceObjectKey: 'projects/p1/source/current.mp4', sizeBytes: 1024, durationMs: 1000, status: 'ready',
+      }),
+      getTranslationVariants: async () => [],
+      fetchSourceMedia: async () => new File([new Uint8Array([1])], 'source.mp4'),
+      decodeSourceAudio: async () => ({ pcm: new Float32Array([0.1]), durationMs: 1000, sampleRate: 16000 }),
+      createAsrClient: () => ({ transcribe: async () => [], shutdown: async () => undefined }),
+      createTranslationClient: () => { throw new Error('translation should not start'); },
+      commitClientInference: commit,
+      createId: () => 'unused',
+    };
+
+    await expect(runBrowserLocalInference('p1', { dependencies: deps })).rejects.toMatchObject({ code: 'LOCAL_ASR_EMPTY' });
+    expect(commit).not.toHaveBeenCalled();
   });
 });
