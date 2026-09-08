@@ -2,6 +2,25 @@ import { ApiError, apiFetch } from '../../lib/api/client';
 
 export type CloudProjectStatus = 'draft' | 'uploading' | 'ready' | 'processing' | 'needs_review' | 'failed' | 'completed' | 'cancelled';
 
+export const BROWSER_LOCAL_ASR = {
+  provider: 'browser-whisper',
+  model: 'onnx-community/whisper-tiny.en',
+  revision: '2575352d61be1bf7225cf8f8b268a4678025fc58',
+} as const;
+
+export const BROWSER_LOCAL_TRANSLATION = {
+  provider: 'browser-opus-mt',
+  model: 'Xenova/opus-mt-en-vi',
+  revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
+} as const;
+
+export type ClientInferenceState = {
+  sourceGeneration: number;
+  sourceObjectKey: string;
+  asr: typeof BROWSER_LOCAL_ASR;
+  translation: typeof BROWSER_LOCAL_TRANSLATION;
+};
+
 export type CloudProject = {
   id: string;
   userId: string;
@@ -14,21 +33,10 @@ export type CloudProject = {
   exportObjectKey?: string | null;
   durationMs?: number | null;
   sizeBytes?: number | null;
+  clientInferenceState?: ClientInferenceState | null;
   createdAt?: string;
   updatedAt?: string;
 };
-
-export const BROWSER_LOCAL_ASR = {
-  provider: 'browser-whisper',
-  model: 'onnx-community/whisper-tiny.en',
-  revision: '2575352d61be1bf7225cf8f8b268a4678025fc58',
-} as const;
-
-export const BROWSER_LOCAL_TRANSLATION = {
-  provider: 'browser-opus-mt',
-  model: 'Xenova/opus-mt-en-vi',
-  revision: '3f5f449333cbc7ecaa9eec16ee9e37682f036b8e',
-} as const;
 
 export type ClientInferenceCommitPayload = {
   expectedSourceGeneration: number;
@@ -45,13 +53,6 @@ export type ClientInferenceCommitResult = {
   sourceGeneration: number;
   sourceObjectKey: string;
   durationMs: number;
-};
-
-export type ClientInferenceState = {
-  sourceGeneration: number;
-  sourceObjectKey: string;
-  asr: typeof BROWSER_LOCAL_ASR;
-  translation: typeof BROWSER_LOCAL_TRANSLATION;
 };
 
 function projectPath(projectId: string) {
@@ -72,10 +73,8 @@ export function getProject(projectId: string) {
 }
 
 export async function getClientInferenceState(projectId: string) {
-  const result = await apiFetch<{ state: ClientInferenceState | null }>(
-    `${projectPath(projectId)}/client-inference/vi`,
-  );
-  return result.state;
+  const project = await getProject(projectId);
+  return project.clientInferenceState ?? null;
 }
 
 export function commitClientInference(projectId: string, payload: ClientInferenceCommitPayload) {
