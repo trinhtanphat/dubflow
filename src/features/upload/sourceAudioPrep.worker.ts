@@ -127,14 +127,15 @@ scope.addEventListener('message', (event: MessageEvent<DecodeWorkerRequest>) => 
   void (async () => {
     try {
       const { pcm, durationMs } = await decodeSource(request.file);
+      const transferBuffer = pcm.buffer as ArrayBuffer;
       const response = {
         type: 'decoded',
         requestId: request.requestId,
-        pcm: pcm.buffer,
+        pcm: transferBuffer,
         durationMs,
         sampleRate: LOCAL_SOURCE_SAMPLE_RATE,
       } satisfies DecodeWorkerResponse;
-      scope.postMessage(response, [pcm.buffer]);
+      scope.postMessage(response, [transferBuffer]);
     } catch {
       scope.postMessage({
         type: 'error',
