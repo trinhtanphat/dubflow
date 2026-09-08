@@ -147,6 +147,17 @@ test('browser-local translation provenance is admitted only by a new append-only
   assert.doesNotMatch(migration, /ALTER\s+TABLE\s+.*0012|UPDATE\s+.*0012/i);
 });
 
+test('production qualification fixture exercises browser-local inference instead of server or paid inference', async () => {
+  const fixture = await source('scripts/verify-production-browser-piper-fixture.mjs');
+
+  assert.match(fixture, /Process locally \(zero-cost\)/);
+  assert.match(fixture, /client-inference\/vi/);
+  assert.match(fixture, /browser-whisper/);
+  assert.match(fixture, /browser-opus-mt/);
+  assert.doesNotMatch(fixture, /workers-ai-whisper-large-v3-turbo/i);
+  assert.doesNotMatch(fixture, /\/process(?:['"`?\/]|\b)/i);
+});
+
 test('superseded backend-ASR chunk contract is absent from source verification', () => {
   assert.doesNotMatch(packageSource, /browser-asr-r2-chunks\.test\.mjs/);
 });
