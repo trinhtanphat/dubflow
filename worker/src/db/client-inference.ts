@@ -41,7 +41,7 @@ export type ClientInferenceState = {
 
 export class ClientInferenceCommitError extends Error {
   constructor(
-    public readonly code: 'PROJECT_NOT_FOUND' | 'LOCAL_INFERENCE_SOURCE_CONFLICT' | 'LOCAL_INFERENCE_UNAVAILABLE' | 'LOCAL_INFERENCE_COMMIT_FAILED',
+    public readonly code: 'PROJECT_NOT_FOUND' | 'LOCAL_INFERENCE_SOURCE_CONFLICT' | 'LOCAL_INFERENCE_UNAVAILABLE' | 'LOCAL_INFERENCE_BUSY' | 'LOCAL_INFERENCE_COMMIT_FAILED',
     message: string,
     public readonly source?: { sourceGeneration: number; sourceObjectKey: string | null },
   ) {
@@ -148,7 +148,7 @@ export class ClientInferenceRepository {
       }
     }
     if (project.status === 'processing') {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Project is currently processing.');
+      throw new ClientInferenceCommitError('LOCAL_INFERENCE_BUSY', 'Project is currently processing.');
     }
 
     const target = await this.db.prepare(
@@ -161,7 +161,7 @@ export class ClientInferenceRepository {
       throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Vietnamese is not enabled for this project.');
     }
     if (target.status === 'translating' || target.status === 'exporting') {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'Vietnamese target is currently busy.');
+      throw new ClientInferenceCommitError('LOCAL_INFERENCE_BUSY', 'Vietnamese target is currently busy.');
     }
 
     const busyExport = await this.db.prepare(
@@ -170,7 +170,7 @@ export class ClientInferenceRepository {
        WHERE project_id = ? AND status IN ('pending','exporting')`,
     ).bind(projectId).first<BusyExportRow>();
     if (Number(busyExport?.busy_count ?? 0) > 0) {
-      throw new ClientInferenceCommitError('LOCAL_INFERENCE_UNAVAILABLE', 'A project export is currently active.');
+      throw new ClientInferenceCommitError('LOCAL_INFERENCE_BUSY', 'A project export is currently active.');
     }
 
     if (!this.db.batch) {
