@@ -253,7 +253,7 @@ describe('browser-local client inference atomic persistence', () => {
     try {
       projectBusy.db.exec(`UPDATE projects SET status = 'processing' WHERE id = 'p1'`);
       await expect(projectBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
-        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+        code: 'LOCAL_INFERENCE_BUSY',
       });
       expect(projectBusy.d1.batchCalls).toBe(0);
     } finally {
@@ -264,7 +264,7 @@ describe('browser-local client inference atomic persistence', () => {
     try {
       targetBusy.db.exec(`UPDATE project_target_languages SET status = 'translating' WHERE project_id = 'p1' AND target_language = 'vi'`);
       await expect(targetBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
-        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+        code: 'LOCAL_INFERENCE_BUSY',
       });
       expect(targetBusy.d1.batchCalls).toBe(0);
     } finally {
@@ -279,7 +279,7 @@ describe('browser-local client inference atomic persistence', () => {
         ) VALUES ('export-busy', 'p1', 'vi', 'dubbed', 'pending', 4)
       `);
       await expect(exportBusy.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
-        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+        code: 'LOCAL_INFERENCE_BUSY',
       });
       expect(exportBusy.d1.batchCalls).toBe(0);
     } finally {
@@ -296,7 +296,7 @@ describe('browser-local client inference atomic persistence', () => {
         ) VALUES ('export-ja-busy', 'p1', 'ja', 'dubbed', 'pending', 4)
       `);
       await expect(h.repository.commit('p1', 'u1', input())).rejects.toMatchObject({
-        code: 'LOCAL_INFERENCE_UNAVAILABLE',
+        code: 'LOCAL_INFERENCE_BUSY',
       });
       expect(h.d1.batchCalls).toBe(0);
       expect(h.db.prepare(`SELECT id FROM segments WHERE project_id = 'p1'`).all())
