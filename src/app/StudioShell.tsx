@@ -146,6 +146,9 @@ export function isTerminalExportAttempt(result: ExportLaunchDto, attempt?: Expor
 export function StudioShell(props: Props) {
   const projectId = props.state.project.id;
   const isCloudProject = projectId !== 'demo';
+  const localInferenceEligible = isCloudProject
+    && props.state.project.sourceLanguage === 'en'
+    && props.state.project.targetLanguage === 'vi';
   const [config, setConfig] = useState<ProjectLanguageConfigDto>(FALLBACK_CONFIG);
   const [enabledDraft, setEnabledDraft] = useState<TargetLanguage[]>(['vi']);
   const [currentLanguage, setCurrentLanguage] = useState<StudioLanguage>('vi');
@@ -500,7 +503,7 @@ export function StudioShell(props: Props) {
   };
 
   const runLocalZeroCost = async () => {
-    if (localInferenceBusy || processingLanguage || exportBusy || clientVoiceState === 'preparing') return;
+    if (!localInferenceEligible || localInferenceBusy || processingLanguage || exportBusy || clientVoiceState === 'preparing') return;
     if (!browserPiperAvailable()) {
       setLanguageError('Trình duyệt này chưa hỗ trợ pipeline zero-cost cục bộ.');
       return;
@@ -508,6 +511,7 @@ export function StudioShell(props: Props) {
     setLocalInferenceBusy(true);
     setLocalInferenceStatus('Preparing source');
     setLanguageError('');
+    setExportError('');
     setTargetConflict('');
     setClientVoiceCached(false);
     try {
@@ -520,9 +524,17 @@ export function StudioShell(props: Props) {
         Object.entries(current).filter(([key]) => !key.startsWith('vi:')),
       ));
       await prepareVietnameseClientVoice();
+      setLocalInferenceStatus('Exporting');
+      const exportResult = await startLanguageExport(projectId, 'vi', 'dubbed', 'dubbed_only', 'standard');
+      const tagged = withRequestedTreatment(exportResult, 'dubbed', 'dubbed_only', 'standard');
+      setExportOutput('dubbed');
+      setAudioMode('dubbed_only');
+      setVisualMode('standard');
+      clearAttempt('vi');
+      setExportResults((current) => [...current.filter((item) => item.targetLanguage !== 'vi'), tagged]);
       setLocalInferenceStatus(result.resumed
-        ? 'Local transcript reused; Vietnamese voice ready'
-        : 'Local processing complete; Vietnamese voice ready');
+        ? 'Local transcript reused; export started'
+        : 'Local processing complete; export started');
     } catch (error) {
       setLocalInferenceStatus('');
       setLanguageError(message(error, 'Không thể xử lý cục bộ zero-cost.'));
@@ -601,16 +613,18 @@ export function StudioShell(props: Props) {
           <details className="phase4c-studio-dock">
             <summary>Ngôn ngữ & export</summary>
             <div className="phase4c-studio-dock__body">
-              <div className="phase4c-local-inference">
-                <button
-                  type="button"
-                  disabled={localInferenceBusy || Boolean(processingLanguage) || exportBusy || clientVoiceState === 'preparing'}
-                  onClick={() => { void runLocalZeroCost(); }}
-                >
-                  {localInferenceBusy ? 'Processing locally…' : 'Process locally (zero-cost)'}
-                </button>
-                {localInferenceStatus && <p role="status">{localInferenceStatus}</p>}
-              </div>
+              {localInferenceEligible && (
+                <div className="phase4c-local-inference">
+                  <button
+                    type="button"
+                    disabled={localInferenceBusy || Boolean(processingLanguage) || exportBusy || clientVoiceState === 'preparing'}
+                    onClick={() => { void runLocalZeroCost(); }}
+                  >
+                    {localInferenceBusy ? 'Processing locally…' : 'Process locally (zero-cost)'}
+                  </button>
+                  {localInferenceStatus && <p role="status">{localInferenceStatus}</p>}
+                </div>
+              )}
               <TargetLanguagesPanelView
                 config={displayConfig}
                 currentLanguage={currentLanguage}
