@@ -117,7 +117,7 @@ export function createProjectsRoutes(
       const clientInferenceState = await new ClientInferenceRepository(c.env.DB).getState(projectId, userId);
       return c.json({ ...project, clientInferenceState });
     } catch {
-      return c.json(errorBody('PROJECT_READ_FAILED', 'Unable to read project.'), 500);
+      return c.json({ ...project, clientInferenceState: null });
     }
   });
 
