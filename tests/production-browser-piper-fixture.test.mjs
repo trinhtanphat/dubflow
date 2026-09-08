@@ -40,6 +40,17 @@ test('browser fixture uses native CDP on the real production Studio path and wai
   assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|PAID_/i);
 });
 
+test('browser fixture qualifies the merged local action instead of dispatching server inference', () => {
+  assert.match(runner, /launchLocalZeroCostThroughStudio/);
+  assert.match(runner, /Process locally \\(zero-cost\\)/);
+  assert.match(runner, /client-inference\/vi/);
+  assert.match(runner, /forbiddenInferenceRequests/);
+  assert.doesNotMatch(runner, /ZERO_COST_ASR_PROVIDER/);
+  assert.doesNotMatch(runner, /async function waitForJob/);
+  assert.doesNotMatch(runner, /const processing\s*=\s*await request/);
+  assert.doesNotMatch(runner, /processJobId/);
+});
+
 test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dubflow-zero-charge-test-'));
   const fixturePath = path.join(dir, 'fixture.mp4');
