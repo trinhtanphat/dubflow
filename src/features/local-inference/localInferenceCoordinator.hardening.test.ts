@@ -44,11 +44,14 @@ function matchingState() {
   };
 }
 
+function projectWithState(state: ReturnType<typeof matchingState> | null): CloudProject {
+  return { ...project, clientInferenceState: state };
+}
+
 function dependencies(overrides: Record<string, unknown> = {}) {
   return {
-    getProject: vi.fn(async () => project),
+    getProject: vi.fn(async () => projectWithState(matchingState())),
     getTranslationVariants: vi.fn(async () => variants),
-    getClientInferenceState: vi.fn(async () => matchingState()),
     fetchSourceMedia: vi.fn(async () => new File([new Uint8Array([1])], 'source.mp4')),
     decodeSourceAudio: vi.fn(async () => ({
       pcm: new Float32Array(60_000 * 16),
@@ -77,7 +80,7 @@ describe('browser-local coordinator hardening', () => {
 
     const staleFetch = vi.fn(async () => { throw new Error('stale artifacts must not resume'); });
     const stale = dependencies({
-      getClientInferenceState: vi.fn(async () => ({ ...matchingState(), sourceGeneration: 2 })),
+      getProject: vi.fn(async () => projectWithState({ ...matchingState(), sourceGeneration: 2 })),
       fetchSourceMedia: staleFetch,
     });
     await expect(runBrowserLocalInference('p1', { dependencies: stale })).rejects.toThrow('stale artifacts must not resume');
@@ -85,7 +88,7 @@ describe('browser-local coordinator hardening', () => {
 
     const missingFetch = vi.fn(async () => { throw new Error('missing state must not resume'); });
     const missing = dependencies({
-      getClientInferenceState: vi.fn(async () => null),
+      getProject: vi.fn(async () => projectWithState(null)),
       fetchSourceMedia: missingFetch,
     });
     await expect(runBrowserLocalInference('p1', { dependencies: missing })).rejects.toThrow('missing state must not resume');
@@ -101,7 +104,6 @@ describe('browser-local coordinator hardening', () => {
     const commit = vi.fn(async () => ({}));
     const deps = dependencies({
       getTranslationVariants: vi.fn(async () => []),
-      getClientInferenceState: vi.fn(async () => null),
       createAsrClient: vi.fn(() => ({
         transcribe: vi.fn(async () => asrSegments),
         shutdown: vi.fn(async () => undefined),
@@ -119,7 +121,6 @@ describe('browser-local coordinator hardening', () => {
     const commit = vi.fn(async () => ({}));
     const deps = dependencies({
       getTranslationVariants: vi.fn(async () => []),
-      getClientInferenceState: vi.fn(async () => null),
       createAsrClient: vi.fn(() => ({
         transcribe: vi.fn(async () => [
           { text: 'one', startMs: 0, endMs: 500 },
