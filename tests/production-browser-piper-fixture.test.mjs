@@ -52,6 +52,11 @@ test('production fixture uses browser-local Whisper and Marian and never dispatc
   assert.doesNotMatch(runner, /workers-ai-whisper-large-v3-turbo|ZERO_COST_ASR_PROVIDER/);
 });
 
+test('browser fixture explicitly clicks Export current language after local inference completes', () => {
+  assert.match(runner, /data-testid=[\\"']export-current-language[\\"']/);
+  assert.match(runner, /Unable to trigger Export current language through deployed Studio/);
+});
+
 test('browser fixture rejects an unverified zero-charge run before any production request', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'dubflow-zero-charge-test-'));
   const fixturePath = path.join(dir, 'fixture.mp4');
