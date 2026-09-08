@@ -111,13 +111,15 @@ export function createProjectsRoutes(
   routes.get('/:id', async (c) => {
     const projectId = c.req.param('id');
     const userId = getCurrentUserId();
-    const project = await makeStore(c.env).getByIdForUser(projectId, userId);
+    const store = makeStore(c.env);
+    const project = await store.getByIdForUser(projectId, userId);
     if (!project) return c.json(errorBody('PROJECT_NOT_FOUND', 'Project not found.'), 404);
+    if (!(store instanceof ProjectRepository)) return c.json(project);
     try {
       const clientInferenceState = await new ClientInferenceRepository(c.env.DB).getState(projectId, userId);
       return c.json({ ...project, clientInferenceState });
     } catch {
-      return c.json({ ...project, clientInferenceState: null });
+      return c.json(errorBody('PROJECT_READ_FAILED', 'Unable to read project.'), 500);
     }
   });
 
