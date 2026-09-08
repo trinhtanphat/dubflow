@@ -23,6 +23,21 @@ type ProjectRow = {
 
 type TargetRow = { status: string };
 type BusyExportRow = { busy_count: number };
+type ClientInferenceStateRow = {
+  source_generation: number;
+  source_object_key: string;
+  asr_model: string;
+  asr_revision: string;
+  translation_model: string;
+  translation_revision: string;
+};
+
+export type ClientInferenceState = {
+  sourceGeneration: number;
+  sourceObjectKey: string;
+  asr: typeof LOCAL_INFERENCE_ASR;
+  translation: typeof LOCAL_INFERENCE_TRANSLATION;
+};
 
 export class ClientInferenceCommitError extends Error {
   constructor(
@@ -67,6 +82,35 @@ export class ClientInferenceRepository {
     ).bind(projectId, userId).first<ProjectRow>();
     if (!project) throw new ClientInferenceCommitError('PROJECT_NOT_FOUND', 'Project not found.');
     return project;
+  }
+
+  async getState(projectId: string, userId: string): Promise<ClientInferenceState | null> {
+    await this.requireProject(projectId, userId);
+    const row = await this.db.prepare(
+      `SELECT state.source_generation, state.source_object_key,
+              state.asr_model, state.asr_revision,
+              state.translation_model, state.translation_revision
+       FROM browser_local_inference_state AS state
+       INNER JOIN projects AS project ON project.id = state.project_id
+       WHERE state.project_id = ?
+         AND project.user_id = ?
+         AND state.source_generation = project.source_generation
+         AND state.source_object_key = project.source_object_key
+       LIMIT 1`,
+    ).bind(projectId, userId).first<ClientInferenceStateRow>();
+    if (!row) return null;
+    if (row.asr_model !== LOCAL_INFERENCE_ASR.model
+      || row.asr_revision !== LOCAL_INFERENCE_ASR.revision
+      || row.translation_model !== LOCAL_INFERENCE_TRANSLATION.model
+      || row.translation_revision !== LOCAL_INFERENCE_TRANSLATION.revision) {
+      return null;
+    }
+    return {
+      sourceGeneration: Number(row.source_generation),
+      sourceObjectKey: row.source_object_key,
+      asr: LOCAL_INFERENCE_ASR,
+      translation: LOCAL_INFERENCE_TRANSLATION,
+    };
   }
 
   async commit(projectId: string, userId: string, input: ClientInferenceInput) {
