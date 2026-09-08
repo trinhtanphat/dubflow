@@ -18,7 +18,7 @@ const [workflow, runner] = await Promise.all([
   source('../scripts/verify-production-browser-piper-fixture.mjs'),
 ]);
 
-test('manual production fixture drives the deployed browser Piper lane without paid or deploy coupling', () => {
+test('manual production fixture drives the deployed browser-local Piper lane without paid or deploy coupling', () => {
   assert.match(workflow, /workflow_dispatch/);
   assert.match(workflow, /zero_charge_verified/);
   assert.match(workflow, /PRODUCTION_ZERO_CHARGE_VERIFIED/);
@@ -26,24 +26,28 @@ test('manual production fixture drives the deployed browser Piper lane without p
   assert.doesNotMatch(workflow, /playwright|puppeteer|selenium|wrangler\s+deploy|PAID_[A-Z0-9_]*\s*=\s*true|CLOUDFLARE_STREAM|FFMPEG_CONTAINER/i);
 });
 
-test('browser fixture uses native CDP on the real production Studio path and waits for enabled export', () => {
+test('browser fixture uses native CDP on the real production Studio path and waits for the zero-cost local action', () => {
   assert.match(runner, /--remote-debugging-port=0/);
   assert.match(runner, /new WebSocket\s*\(/);
   assert.match(runner, /Runtime\.enable/);
   assert.match(runner, /Network\.enable/);
   assert.match(runner, /\/projects\/\$\{encodeURIComponent\(projectId\)\}/);
-  assert.match(runner, /data-testid=["']export-current-language["']/);
+  assert.match(runner, /Process locally \(zero-cost\)/);
   assert.match(runner, /if \(!button \|\| button\.disabled\) return null;/);
+  assert.match(runner, /client-inference\/vi/);
   assert.match(runner, /exports\/vi/);
   assert.match(runner, /Page\.reload/);
   assert.match(runner, /PRODUCTION_MEDIA_OUTPUT_PATH/);
   assert.doesNotMatch(runner, /\/api\/voice\/capabilities|xai\/grok-tts|ElevenLabs|Deepgram|PAID_/i);
 });
 
-test('production fixture uses the browser-local inference action and never dispatches server processing', () => {
+test('production fixture uses browser-local Whisper and Marian and never dispatches server processing', () => {
   assert.match(runner, /Process locally \(zero-cost\)/);
   assert.match(runner, /client-inference\/vi/);
+  assert.match(runner, /browser-whisper/);
   assert.match(runner, /browser-opus-mt/);
+  assert.match(runner, /onnx-community\/whisper-tiny\.en/);
+  assert.match(runner, /Xenova\/opus-mt-en-vi/);
   assert.doesNotMatch(runner, /\/api\/projects\/\$\{encodeURIComponent\(projectId\)\}\/process/);
   assert.doesNotMatch(runner, /workers-ai-whisper-large-v3-turbo|ZERO_COST_ASR_PROVIDER/);
 });
