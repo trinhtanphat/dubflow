@@ -1,43 +1,54 @@
-export const PREPARED_ASR_CHUNK_DURATION_MS = 300_000;
-export const DIRECT_ASR_MAX_BYTES = 24 * 1024 * 1024;
+export const LOCAL_SOURCE_MAX_BYTES = 24 * 1024 * 1024;
+export const LOCAL_SOURCE_MAX_DURATION_MS = 300_000;
+export const LOCAL_SOURCE_SAMPLE_RATE = 16_000 as const;
 
-export type PreparedAsrChunk = {
-  index: number;
-  offsetMs: number;
+export type DecodedSourceAudio = {
+  pcm: Float32Array;
   durationMs: number;
-  wav: ArrayBuffer;
+  sampleRate: typeof LOCAL_SOURCE_SAMPLE_RATE;
 };
 
-export type SourceAudioPreparation = {
-  required: boolean;
-  durationMs: number;
-  chunkCount: number;
+type DecodeWorkerRequest = {
+  type: 'decode';
+  requestId: string;
+  file: File;
 };
 
-type PrepWorkerRequest =
-  | { type: 'inspect'; requestId: string; file: File }
-  | { type: 'prepare-chunk'; requestId: string; file: File; startMs: number; endMs: number };
-
-type PrepWorkerResponse =
-  | { type: 'inspection'; requestId: string; durationMs: number }
-  | { type: 'chunk'; requestId: string; wav: ArrayBuffer; durationMs: number }
-  | { type: 'error'; requestId: string; code: string; message: string };
+type DecodeWorkerResponse =
+  | {
+      type: 'decoded';
+      requestId: string;
+      pcm: ArrayBuffer;
+      durationMs: number;
+      sampleRate: number;
+    }
+  | {
+      type: 'error';
+      requestId: string;
+      code: string;
+      message: string;
+    };
 
 export type SourceAudioPrepWorkerLike = {
-  postMessage(message: PrepWorkerRequest): void;
-  addEventListener(type: 'message', listener: (event: MessageEvent<PrepWorkerResponse>) => void): void;
-  removeEventListener(type: 'message', listener: (event: MessageEvent<PrepWorkerResponse>) => void): void;
+  postMessage(message: DecodeWorkerRequest): void;
+  addEventListener(type: 'message', listener: (event: MessageEvent<DecodeWorkerResponse>) => void): void;
+  removeEventListener(type: 'message', listener: (event: MessageEvent<DecodeWorkerResponse>) => void): void;
   terminate(): void;
 };
 
 type WorkerFactory = () => SourceAudioPrepWorkerLike;
-type ChunkConsumer = (chunk: PreparedAsrChunk) => Promise<void> | void;
 
 export class SourceAudioPreparationError extends Error {
-  constructor(public readonly code: string, message: string) {
+  readonly code = 'LOCAL_SOURCE_DECODE_FAILED' as const;
+
+  constructor(message = 'Browser source audio decode failed.') {
     super(message);
     this.name = 'SourceAudioPreparationError';
   }
+}
+
+function failDecode(message?: string): never {
+  throw new SourceAudioPreparationError(message);
 }
 
 function defaultWorkerFactory(): SourceAudioPrepWorkerLike {
@@ -47,80 +58,65 @@ function defaultWorkerFactory(): SourceAudioPrepWorkerLike {
   ) as unknown as SourceAudioPrepWorkerLike;
 }
 
-function requestWorker(
+function requestDecode(
   worker: SourceAudioPrepWorkerLike,
-  request: PrepWorkerRequest,
-): Promise<Exclude<PrepWorkerResponse, { type: 'error' }>> {
+  request: DecodeWorkerRequest,
+): Promise<Exclude<DecodeWorkerResponse, { type: 'error' }>> {
   return new Promise((resolve, reject) => {
-    const onMessage = (event: MessageEvent<PrepWorkerResponse>) => {
+    const onMessage = (event: MessageEvent<DecodeWorkerResponse>) => {
       const response = event.data;
       if (!response || response.requestId !== request.requestId) return;
       worker.removeEventListener('message', onMessage);
       if (response.type === 'error') {
-        reject(new SourceAudioPreparationError(response.code, response.message || response.code));
+        reject(new SourceAudioPreparationError(response.message || undefined));
         return;
       }
       resolve(response);
     };
+
     worker.addEventListener('message', onMessage);
     worker.postMessage(request);
   });
 }
 
-export async function prepareSourceAudioChunks(
+export async function decodeSourceAudio(
   file: File,
-  consumeChunk: ChunkConsumer,
   workerFactory: WorkerFactory = defaultWorkerFactory,
-): Promise<SourceAudioPreparation> {
-  if (!(file instanceof Blob) || file.size <= 0) {
-    throw new SourceAudioPreparationError('SOURCE_AUDIO_INVALID', 'Source media file is empty or invalid.');
+): Promise<DecodedSourceAudio> {
+  if (!(file instanceof Blob) || file.size <= 0 || file.size > LOCAL_SOURCE_MAX_BYTES) {
+    failDecode('Source media is unavailable or exceeds the browser-local size boundary.');
   }
 
   const worker = workerFactory();
-  let sequence = 0;
-  const requestId = () => `asr-prep-${++sequence}`;
-
   try {
-    const inspection = await requestWorker(worker, { type: 'inspect', requestId: requestId(), file });
-    if (inspection.type !== 'inspection') {
-      throw new SourceAudioPreparationError('SOURCE_AUDIO_INVALID', 'Unexpected source inspection response.');
-    }
-    const durationMs = Math.round(inspection.durationMs);
-    if (!Number.isFinite(durationMs) || durationMs <= 0) {
-      throw new SourceAudioPreparationError('SOURCE_AUDIO_INVALID', 'Source audio duration is unavailable.');
-    }
+    const response = await requestDecode(worker, {
+      type: 'decode',
+      requestId: 'local-source-decode-1',
+      file,
+    });
 
-    const required = durationMs > PREPARED_ASR_CHUNK_DURATION_MS || file.size > DIRECT_ASR_MAX_BYTES;
-    if (!required) return { required: false, durationMs, chunkCount: 0 };
-
-    let chunkCount = 0;
-    for (let offsetMs = 0; offsetMs < durationMs; offsetMs += PREPARED_ASR_CHUNK_DURATION_MS) {
-      const endMs = Math.min(durationMs, offsetMs + PREPARED_ASR_CHUNK_DURATION_MS);
-      const response = await requestWorker(worker, {
-        type: 'prepare-chunk',
-        requestId: requestId(),
-        file,
-        startMs: offsetMs,
-        endMs,
-      });
-      if (response.type !== 'chunk' || response.wav.byteLength <= 44) {
-        throw new SourceAudioPreparationError('SOURCE_AUDIO_CHUNK_INVALID', `Prepared audio chunk ${chunkCount} is empty.`);
-      }
-      const duration = endMs - offsetMs;
-      if (Math.abs(response.durationMs - duration) > 50) {
-        throw new SourceAudioPreparationError('SOURCE_AUDIO_CHUNK_INVALID', `Prepared audio chunk ${chunkCount} duration is invalid.`);
-      }
-
-      await consumeChunk({
-        index: chunkCount,
-        offsetMs,
-        durationMs: duration,
-        wav: response.wav,
-      });
-      chunkCount += 1;
+    const durationMs = Math.round(response.durationMs);
+    if (
+      response.type !== 'decoded'
+      || !Number.isFinite(durationMs)
+      || durationMs <= 0
+      || durationMs > LOCAL_SOURCE_MAX_DURATION_MS
+      || response.sampleRate !== LOCAL_SOURCE_SAMPLE_RATE
+      || !(response.pcm instanceof ArrayBuffer)
+      || response.pcm.byteLength === 0
+      || response.pcm.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0
+    ) {
+      failDecode('Decoded source audio does not satisfy the browser-local PCM contract.');
     }
 
-    return { required: true, durationMs, chunkCount };
+    return {
+      pcm: new Float32Array(response.pcm),
+      durationMs,
+      sampleRate: LOCAL_SOURCE_SAMPLE_RATE,
+    };
+  } catch (error) {
+    if (error instanceof SourceAudioPreparationError) throw error;
+    failDecode();
   } finally {
     worker.terminate();
   }
